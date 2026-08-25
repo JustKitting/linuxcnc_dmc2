@@ -88,21 +88,17 @@ impl DiagnosticReport {
         self.issues.push(issue);
     }
 
+    #[cfg(test)]
     pub(super) fn account(&mut self, source: impl Into<String>, policy: &'static str) {
-        #[cfg(test)]
-        {
-            let source = source.into();
-            assert!(
-                self.covered_fields.insert(source.clone(), policy).is_none(),
-                "snapshot field {source} was assigned more than one diagnostic policy"
-            );
-        }
-        #[cfg(not(test))]
-        {
-            let _ = source;
-            let _ = policy;
-        }
+        let source = source.into();
+        assert!(
+            self.covered_fields.insert(source.clone(), policy).is_none(),
+            "snapshot field {source} was assigned more than one diagnostic policy"
+        );
     }
+
+    #[cfg(not(test))]
+    pub(super) fn account(&mut self, _source: impl Into<String>, _policy: &'static str) {}
 
     #[cfg(test)]
     pub(super) fn covered_fields(&self) -> &BTreeMap<String, &'static str> {

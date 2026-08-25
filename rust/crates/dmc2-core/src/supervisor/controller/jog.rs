@@ -21,12 +21,12 @@ impl LinuxCncPendantSupervisor {
         true
     }
 
-    fn start_jog(&mut self, intent: JogIntent, inputs: &SupervisorInputs) -> bool {
+    fn start_jog(&mut self, intent: JogIntent, inputs: &SupervisorInputs) {
         if !inputs.machine.ready_for_pendant_jog()
             || any(inputs.raw_limits)
             || any(inputs.safety_limits)
         {
-            return false;
+            return;
         }
         let start_position_pulses = match stepgen_position_pulses(
             inputs.counts_by_motor[intent.motor],
@@ -35,11 +35,11 @@ impl LinuxCncPendantSupervisor {
             Ok(value) => value,
             Err(StepgenFeedbackError::Unavailable) => {
                 self.fail(FaultCode::JogFeedbackUnavailable);
-                return false;
+                return;
             }
             Err(StepgenFeedbackError::Incoherent) => {
                 self.fail(FaultCode::JogFeedbackIncoherent);
-                return false;
+                return;
             }
         };
         let joint_jog = !inputs.machine.all_homed();
@@ -51,7 +51,7 @@ impl LinuxCncPendantSupervisor {
         };
         if !self.emit_jog(command, inputs.command_channel_ready) {
             self.pending = Some(intent);
-            return false;
+            return;
         }
         let start_count = inputs.counts_by_motor[intent.motor];
         self.active = Some(ActiveJog {
@@ -64,7 +64,6 @@ impl LinuxCncPendantSupervisor {
         self.pending = None;
         self.transition(Phase::Idle);
         self.motion_not_before_ns = MOTION_SETTLE_NS;
-        true
     }
 
     pub(super) fn request_jog(&mut self, intent: JogIntent, inputs: &SupervisorInputs) {
@@ -72,7 +71,7 @@ impl LinuxCncPendantSupervisor {
             return;
         }
         let Some(active) = self.active else {
-            let _ = self.start_jog(intent, inputs);
+            self.start_jog(intent, inputs);
             return;
         };
 
@@ -261,7 +260,7 @@ impl LinuxCncPendantSupervisor {
         let Some(active) = self.active else {
             if self.phase == Phase::Idle && self.pending.is_some() && inputs.command_channel_ready {
                 if let Some(intent) = self.pending.take() {
-                    let _ = self.start_jog(intent, inputs);
+                    self.start_jog(intent, inputs);
                 }
             }
             return;
@@ -279,7 +278,7 @@ impl LinuxCncPendantSupervisor {
                 self.active = None;
                 self.transition(Phase::Idle);
                 if let Some(intent) = self.pending.take() {
-                    let _ = self.start_jog(intent, inputs);
+                    self.start_jog(intent, inputs);
                 }
             }
             Phase::Idle => {
@@ -308,7 +307,7 @@ impl LinuxCncPendantSupervisor {
                 self.active = None;
                 self.transition(Phase::Idle);
                 if let Some(intent) = self.pending.take() {
-                    let _ = self.start_jog(intent, inputs);
+                    self.start_jog(intent, inputs);
                 }
             }
             Phase::StoppingCancel => {
@@ -329,7 +328,7 @@ impl LinuxCncPendantSupervisor {
             if self.active.is_some() {
                 self.request_jog(intent, inputs);
             } else {
-                let _ = self.start_jog(intent, inputs);
+                self.start_jog(intent, inputs);
             }
         }
     }

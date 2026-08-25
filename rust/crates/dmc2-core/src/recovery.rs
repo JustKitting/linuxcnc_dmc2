@@ -68,10 +68,14 @@ impl EstopRecoverySequence {
         }
     }
 
-    pub fn restart(&mut self, sample: PendantSample) -> RecoveryUpdate {
+    pub fn restart(&mut self, sample: PendantSample) {
         self.stage = RecoveryStage::WaitX10;
         self.clicks = 0;
         self.quadrature_errors = Some(sample.quadrature_errors);
+    }
+
+    fn restart_update(&mut self, sample: PendantSample) -> RecoveryUpdate {
+        self.restart(sample);
         self.update(true, false)
     }
 
@@ -117,13 +121,13 @@ impl EstopRecoverySequence {
 
         match self.quadrature_errors {
             None => self.quadrature_errors = Some(sample.quadrature_errors),
-            Some(value) if value != sample.quadrature_errors => return self.restart(sample),
+            Some(value) if value != sample.quadrature_errors => return self.restart_update(sample),
             Some(_) => {}
         }
 
         let signal = sample.latest_detent;
         if signal < -1 || signal > 1 {
-            return self.restart(sample);
+            return self.restart_update(sample);
         }
 
         match self.stage {
@@ -151,7 +155,7 @@ impl EstopRecoverySequence {
                     self.stage = RecoveryStage::WaitOff;
                     return self.update(false, false);
                 }
-                self.restart(sample)
+                self.restart_update(sample)
             }
             RecoveryStage::WaitOff => {
                 if Self::released_x1(sample) && signal == 0 {
@@ -161,11 +165,11 @@ impl EstopRecoverySequence {
                     self.stage = RecoveryStage::WaitClockwise;
                     return self.update(false, false);
                 }
-                self.restart(sample)
+                self.restart_update(sample)
             }
             RecoveryStage::WaitClockwise => {
                 if !Self::released_off(sample) {
-                    return self.restart(sample);
+                    return self.restart_update(sample);
                 }
                 match signal {
                     0 => self.update(false, false),
@@ -173,12 +177,12 @@ impl EstopRecoverySequence {
                         self.stage = RecoveryStage::WaitCounterclockwise;
                         self.update(false, false)
                     }
-                    _ => self.restart(sample),
+                    _ => self.restart_update(sample),
                 }
             }
             RecoveryStage::WaitCounterclockwise => {
                 if !Self::released_off(sample) {
-                    return self.restart(sample);
+                    return self.restart_update(sample);
                 }
                 match signal {
                     0 | 1 => self.update(false, false),
@@ -186,7 +190,7 @@ impl EstopRecoverySequence {
                         self.stage = RecoveryStage::WaitButtonPress;
                         self.update(false, false)
                     }
-                    _ => self.restart(sample),
+                    _ => self.restart_update(sample),
                 }
             }
             RecoveryStage::WaitButtonPress => {
@@ -194,13 +198,13 @@ impl EstopRecoverySequence {
                     if signal == 0 || (signal == -1 && self.clicks == 0) {
                         return self.update(false, false);
                     }
-                    return self.restart(sample);
+                    return self.restart_update(sample);
                 }
                 if Self::off_x1_button_held(sample) && signal == 0 {
                     self.stage = RecoveryStage::WaitButtonRelease;
                     return self.update(false, false);
                 }
-                self.restart(sample)
+                self.restart_update(sample)
             }
             RecoveryStage::WaitButtonRelease => {
                 if Self::off_x1_button_held(sample) && signal == 0 {
@@ -215,7 +219,7 @@ impl EstopRecoverySequence {
                     self.stage = RecoveryStage::WaitButtonPress;
                     return self.update(false, false);
                 }
-                self.restart(sample)
+                self.restart_update(sample)
             }
             RecoveryStage::CompletePending => self.update(false, false),
         }

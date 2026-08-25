@@ -322,6 +322,8 @@ mod tests {
     #[test]
     fn controller_watchdog_retries_forever_before_commit_and_faults_after_commit() {
         let mut guard = ControllerWatchdogGuard::new();
+        assert!(!guard.commit_runtime());
+        assert!(!guard.runtime_committed);
         guard.update(1_000_000, false, true);
         assert_eq!(guard.phase(), ControllerWatchdogPhase::ArmLow);
         for _ in 0..10 {

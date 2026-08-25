@@ -22,7 +22,7 @@ impl LinuxCncPendantSupervisor {
     fn begin_recovery_unlock(&mut self, inputs: &SupervisorInputs) {
         if any(inputs.raw_limits) || any(inputs.safety_limits) || inputs.machine.any_homing() {
             if let Some(sample) = inputs.packet {
-                let _ = self.recovery.restart(sample);
+                self.recovery.restart(sample);
             }
             return;
         }

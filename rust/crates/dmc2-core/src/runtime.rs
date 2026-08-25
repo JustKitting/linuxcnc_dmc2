@@ -184,7 +184,9 @@ impl RuntimeController {
                 },
             );
             if self.supervisor.startup_reset_complete() && !self.watchdog_guard.runtime_committed {
-                let _ = self.watchdog_guard.commit_runtime();
+                if !self.watchdog_guard.commit_runtime() {
+                    self.supervisor.fail(FaultCode::ControllerWatchdogFailure);
+                }
             }
         }
 

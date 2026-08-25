@@ -1,6 +1,6 @@
 use core::ffi::{c_long, c_void};
 
-use dmc2_core::supervisor::{CommandEvent, FaultCode};
+use dmc2_core::supervisor::FaultCode;
 
 use super::hal::{publish, runtime_inputs};
 use super::state::ComponentState;
@@ -18,7 +18,7 @@ pub(super) unsafe extern "C" fn update_component(argument: *mut c_void, period: 
     if let Some(command) = outputs.supervisor.command {
         if !state.sequencer.accept(command) {
             state.runtime.fail(FaultCode::CommandSequencerFailure);
-            let _ = state.sequencer.accept(CommandEvent::JogStopImmediate);
+            state.sequencer.force_stop_immediate();
             outputs.supervisor = state.runtime.supervisor().outputs();
             outputs.limit_reset = outputs.supervisor.limit_reset;
         }

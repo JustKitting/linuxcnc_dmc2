@@ -148,7 +148,6 @@ fn main() {
                 "-Wall",
                 "-Wextra",
                 "-Werror",
-                "-Wno-error=ignored-qualifiers",
                 "-isystem",
                 INCLUDE_ROOT,
                 "-I",

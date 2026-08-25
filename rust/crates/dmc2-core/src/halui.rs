@@ -106,12 +106,16 @@ impl HaluiCommandSequencer {
                 true
             }
             CommandEvent::JogStopImmediate => {
-                self.cancel_increment();
-                self.jog_stop = true;
-                self.jog_stop_immediate = true;
+                self.force_stop_immediate();
                 true
             }
         }
+    }
+
+    pub fn force_stop_immediate(&mut self) {
+        self.cancel_increment();
+        self.jog_stop = true;
+        self.jog_stop_immediate = true;
     }
 
     fn cancel_increment(&mut self) {
@@ -214,6 +218,19 @@ mod tests {
         assert!(!cleared.jog_stop);
         assert!(!cleared.jog_stop_immediate);
         assert!(sequencer.ready());
+    }
+
+    #[test]
+    fn forced_immediate_stop_cannot_be_rejected_while_busy() {
+        let mut sequencer = HaluiCommandSequencer::new();
+        assert!(sequencer.accept(increment(false)));
+
+        sequencer.force_stop_immediate();
+
+        let stopped = sequencer.outputs(1_000);
+        assert!(stopped.jog_stop);
+        assert!(stopped.jog_stop_immediate);
+        assert_eq!(stopped.axis_increment_minus, [false; 3]);
     }
 
     #[test]
