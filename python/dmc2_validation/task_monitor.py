@@ -11,7 +11,20 @@ from types import MappingProxyType
 from .paths import PROJECT_ROOT as ROOT
 
 EXPECTED_VALIDATION_VALUES = MappingProxyType({
-    "schema_version": 1,
+    "schema_version": 2,
+    "linuxcnc_version": "2.9.10",
+    "linuxcnc_source_commit": "86cdca76fa2a36274c432caa21952b23c267989a",
+    "interface_domains": 91,
+    "interface_codes": 920,
+    "interface_handled_codes": 920,
+    "interface_enum_codes": 711,
+    "interface_non_enum_codes": 209,
+    "interface_enum_headers": 30,
+    "interface_enum_declarations": 79,
+    "interpreter_errors": 198,
+    "handled_interpreter_errors": 198,
+    "status_message_contracts": 12,
+    "error_message_contracts": 6,
     "snapshot_abi_version": 0x00020911,
     "snapshot_size": 11672,
     "snapshot_logical_fields": 1109,
@@ -20,6 +33,7 @@ EXPECTED_VALIDATION_VALUES = MappingProxyType({
     "snapshot_field_bytes": 11165,
     "snapshot_padding_bytes": 507,
     "snapshot_copy_signature_rounds": 21,
+    "interface_all_codes_accounted": True,
     "snapshot_copy_all_bytes": True,
 })
 EXPECTED_VALIDATION_KEYS = frozenset(
@@ -71,6 +85,15 @@ def compiled_task_monitor_validation() -> dict[str, object]:
             f"extra={sorted(set(report) - EXPECTED_VALIDATION_KEYS)}"
         )
     if (
+        report["interface_enum_codes"] + report["interface_non_enum_codes"]
+        != report["interface_codes"]
+    ):
+        raise AssertionError("task-monitor interface code totals do not add up")
+    if report["interface_handled_codes"] != report["interface_codes"]:
+        raise AssertionError("task-monitor omitted a LinuxCNC interface code")
+    if report["handled_interpreter_errors"] != report["interpreter_errors"]:
+        raise AssertionError("task-monitor omitted a LinuxCNC interpreter error")
+    if (
         report["snapshot_native_copy_fields"]
         + report["snapshot_rust_derived_fields"]
         != report["snapshot_logical_fields"]
@@ -105,7 +128,9 @@ def compiled_task_monitor_validation() -> dict[str, object]:
 def validate_task_monitor_contract() -> str:
     report = compiled_task_monitor_validation()
     return (
-        "compiled task monitor accounts for every byte of its "
+        "compiled task monitor dispatches all "
+        f"{report['interface_codes']} LinuxCNC codes and "
+        f"{report['interpreter_errors']} interpreter errors, and accounts for every byte of its "
         f"{report['snapshot_size']}-byte status snapshot across "
         f"{report['snapshot_copy_signature_rounds']} signature rounds and derives "
         f"{report['snapshot_rust_derived_fields']} runtime fields in Rust"

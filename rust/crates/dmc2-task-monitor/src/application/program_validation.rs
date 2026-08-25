@@ -1,4 +1,8 @@
+mod interface;
+
 use core::mem;
+
+use dmc2_linuxcnc_interface::{LINUXCNC_SOURCE_COMMIT, LINUXCNC_VERSION};
 
 use crate::snapshot::{
     dmc2_task_status_copy_self_test, dmc2_task_status_copy_signature_rounds,
@@ -9,6 +13,7 @@ use crate::snapshot::{
 };
 
 struct ValidationReport {
+    interface: interface::InterfaceCoverage,
     native_snapshot_size: usize,
     snapshot_field_bytes: usize,
     snapshot_padding_bytes: usize,
@@ -54,6 +59,7 @@ fn snapshot_byte_coverage() -> Result<(usize, usize), String> {
 
 impl ValidationReport {
     fn collect() -> Result<Self, String> {
+        let interface = interface::InterfaceCoverage::collect()?;
         let native_abi = unsafe { dmc2_task_status_snapshot_abi_version() };
         let native_snapshot_size = unsafe { dmc2_task_status_snapshot_size() };
         let rust_snapshot_size = mem::size_of::<NativeSnapshot>();
@@ -110,6 +116,7 @@ impl ValidationReport {
         }
 
         Ok(Self {
+            interface,
             native_snapshot_size,
             snapshot_field_bytes,
             snapshot_padding_bytes,
@@ -121,7 +128,17 @@ impl ValidationReport {
 
     fn print_human(&self) {
         println!(
-            "dmc2-task-monitor: program validation passed; snapshot_abi=0x{:08x} snapshot_size={} snapshot_fields={} native_copy_fields={} rust_derived_fields={} copy_rounds={} all_bytes_accounted=1",
+            "dmc2-task-monitor: program validation passed; linuxcnc_version={} source_commit={} interface_domains={} interface_codes={} handled_codes={} enum_declarations={} interpreter_errors={} handled_interpreter_errors={} status_contracts={} error_contracts={} snapshot_abi=0x{:08x} snapshot_size={} snapshot_fields={} native_copy_fields={} rust_derived_fields={} copy_rounds={} all_codes_accounted=1 all_bytes_accounted=1",
+            LINUXCNC_VERSION,
+            LINUXCNC_SOURCE_COMMIT,
+            self.interface.domain_count,
+            self.interface.code_count,
+            self.interface.handled_code_count,
+            self.interface.enum_declaration_count,
+            self.interface.interpreter_error_count,
+            self.interface.handled_interpreter_error_count,
+            self.interface.status_message_count,
+            self.interface.error_message_count,
             SNAPSHOT_ABI_VERSION,
             self.native_snapshot_size,
             self.snapshot_native_copy_fields + self.snapshot_rust_derived_fields,
@@ -135,7 +152,20 @@ impl ValidationReport {
         println!(
             concat!(
                 "{{",
-                "\"schema_version\":1,",
+                "\"schema_version\":2,",
+                "\"linuxcnc_version\":\"{}\",",
+                "\"linuxcnc_source_commit\":\"{}\",",
+                "\"interface_domains\":{},",
+                "\"interface_codes\":{},",
+                "\"interface_handled_codes\":{},",
+                "\"interface_enum_codes\":{},",
+                "\"interface_non_enum_codes\":{},",
+                "\"interface_enum_headers\":{},",
+                "\"interface_enum_declarations\":{},",
+                "\"interpreter_errors\":{},",
+                "\"handled_interpreter_errors\":{},",
+                "\"status_message_contracts\":{},",
+                "\"error_message_contracts\":{},",
                 "\"snapshot_abi_version\":{},",
                 "\"snapshot_schema_fnv64\":\"0x{:016x}\",",
                 "\"snapshot_size\":{},",
@@ -145,9 +175,23 @@ impl ValidationReport {
                 "\"snapshot_field_bytes\":{},",
                 "\"snapshot_padding_bytes\":{},",
                 "\"snapshot_copy_signature_rounds\":{},",
+                "\"interface_all_codes_accounted\":true,",
                 "\"snapshot_copy_all_bytes\":true",
                 "}}"
             ),
+            LINUXCNC_VERSION,
+            LINUXCNC_SOURCE_COMMIT,
+            self.interface.domain_count,
+            self.interface.code_count,
+            self.interface.handled_code_count,
+            self.interface.enum_code_count,
+            self.interface.non_enum_code_count,
+            self.interface.enum_header_count,
+            self.interface.enum_declaration_count,
+            self.interface.interpreter_error_count,
+            self.interface.handled_interpreter_error_count,
+            self.interface.status_message_count,
+            self.interface.error_message_count,
             SNAPSHOT_ABI_VERSION,
             SNAPSHOT_SCHEMA_FNV64,
             self.native_snapshot_size,
@@ -178,6 +222,17 @@ mod tests {
     #[test]
     fn validation_executes_the_native_copy_and_accounts_for_every_program_byte() {
         let report = ValidationReport::collect().unwrap();
+        assert_eq!(report.interface.domain_count, 91);
+        assert_eq!(report.interface.code_count, 920);
+        assert_eq!(report.interface.handled_code_count, 920);
+        assert_eq!(report.interface.enum_code_count, 711);
+        assert_eq!(report.interface.non_enum_code_count, 209);
+        assert_eq!(report.interface.enum_header_count, 30);
+        assert_eq!(report.interface.enum_declaration_count, 79);
+        assert_eq!(report.interface.interpreter_error_count, 198);
+        assert_eq!(report.interface.handled_interpreter_error_count, 198);
+        assert_eq!(report.interface.status_message_count, 12);
+        assert_eq!(report.interface.error_message_count, 6);
         assert_eq!(report.native_snapshot_size, 11_672);
         assert_eq!(report.snapshot_native_copy_fields, 1_100);
         assert_eq!(report.snapshot_rust_derived_fields, 9);

@@ -7,12 +7,13 @@ use crate::layout::Layout;
 use crate::platform::{CommandSpec, Platform, ProcessOutput};
 
 pub const EXPECTED_LINUXCNC_VERSION: &[u8] = b"2.9.10\n";
-pub const EXPECTED_TASK_MONITOR_VALIDATION: &[u8] = b"dmc2-task-monitor: program validation passed; snapshot_abi=0x00020911 snapshot_size=11672 snapshot_fields=1109 native_copy_fields=1100 rust_derived_fields=9 copy_rounds=21 all_bytes_accounted=1\n";
+pub const EXPECTED_TASK_MONITOR_VALIDATION: &[u8] = b"dmc2-task-monitor: program validation passed; linuxcnc_version=2.9.10 source_commit=86cdca76fa2a36274c432caa21952b23c267989a interface_domains=91 interface_codes=920 handled_codes=920 enum_declarations=79 interpreter_errors=198 handled_interpreter_errors=198 status_contracts=12 error_contracts=6 snapshot_abi=0x00020911 snapshot_size=11672 snapshot_fields=1109 native_copy_fields=1100 rust_derived_fields=9 copy_rounds=21 all_codes_accounted=1 all_bytes_accounted=1\n";
 
 pub const PASSES: &[&str] = &[
     "all live launch inputs byte-match the offline-tested build",
     "all realtime modules and userspace binaries byte-match verified releases",
     "LinuxCNC 2.9.10 is installed",
+    "the task monitor dispatches every audited LinuxCNC code and interpreter error",
     "the task monitor validates every byte copied through its native status boundary",
 ];
 
