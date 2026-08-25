@@ -158,3 +158,43 @@ fn reversal_storage_is_one_replaceable_slot() {
         }))
     );
 }
+
+#[test]
+fn one_hundred_thousand_detents_keep_only_active_and_one_replaceable_pending_target() {
+    let mut same_direction = LinuxCncPendantSupervisor::new();
+    arm(&mut same_direction);
+    same_direction.update(20_000_000, inputs(Some(sample(3, 1, true))));
+    for sequence in 4..100_004 {
+        let mut moving = inputs(Some(sample(sequence, 1, true)));
+        moving.machine.axis_stopped[Axis::X.index()] = false;
+        let output = same_direction.update(1_000_000, moving);
+        assert!(output.command.is_none());
+        assert!(output.fault.is_none());
+    }
+    assert!(same_direction.active.is_some());
+    assert!(same_direction.pending.is_none());
+    assert_eq!(same_direction.phase, Phase::Idle);
+
+    let mut reversals = LinuxCncPendantSupervisor::new();
+    arm(&mut reversals);
+    reversals.update(20_000_000, inputs(Some(sample(3, 1, true))));
+    let mut stop_commands = 0_u32;
+    let mut increment_commands = 0_u32;
+    for sequence in 4..100_004 {
+        let detent = if sequence & 1 == 0 { -1 } else { 1 };
+        let mut moving = inputs(Some(sample(sequence, detent, true)));
+        moving.machine.axis_stopped[Axis::X.index()] = false;
+        let output = reversals.update(1_000_000, moving);
+        match output.command {
+            Some(CommandEvent::JogStop) => stop_commands += 1,
+            Some(CommandEvent::JogIncrement(_)) => increment_commands += 1,
+            Some(CommandEvent::JogStopImmediate) | None => {}
+        }
+        assert!(output.fault.is_none());
+    }
+    assert_eq!(stop_commands, 1);
+    assert_eq!(increment_commands, 0);
+    assert!(reversals.active.is_some());
+    assert!(reversals.pending.is_some());
+    assert_eq!(reversals.phase, Phase::StoppingReplace);
+}
