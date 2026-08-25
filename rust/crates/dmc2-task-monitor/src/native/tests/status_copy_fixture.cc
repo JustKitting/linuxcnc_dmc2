@@ -1,6 +1,5 @@
 #include "status_fixture.hh"
 
-#include <array>
 #include <cstddef>
 #include <cstdint>
 #include <limits>
@@ -40,10 +39,8 @@ void fill_fixture(
         fill_joint(source.motion.joint[index], expected.joints[index], generator);
     }
 
-    std::array<std::uint32_t, DMC2_MAX_AXES> stopped_fields{};
     for (std::size_t index = 0; index < DMC2_MAX_AXES; ++index) {
-        stopped_fields[index] =
-            fill_axis(source.motion.axis[index], expected.axes[index], generator);
+        fill_axis(source.motion.axis[index], expected.axes[index], generator);
     }
     for (std::size_t index = 0; index < DMC2_MAX_SPINDLES; ++index) {
         fill_spindle(
@@ -96,31 +93,17 @@ void fill_fixture(
     source.motion.traj.axis_mask = axis_mask;
     expected.trajectory.axis_mask = axis_mask;
 
-    for (std::size_t index = 0; index < DMC2_MAX_AXES; ++index) {
-        const bool active = (axis_mask & (1 << index)) != 0;
-        const bool stopped = generator.bit(stopped_fields[index]);
-        const double axis_velocity = stopped ? 0.0 : 10.0 + index;
-        const double joint_velocity = stopped ? 0.0 : 20.0 + index;
-
-        source.motion.axis[index].velocity = axis_velocity;
-        expected.axes[index].velocity = axis_velocity;
-        source.motion.joint[index].inpos = stopped ? 1U : 0U;
-        expected.joints[index].in_position = stopped ? 1U : 0U;
-        source.motion.joint[index].velocity = joint_velocity;
-        expected.joints[index].velocity = joint_velocity;
-        expected.axes[index].stopped = (!active || stopped) ? 1U : 0U;
-    }
 }
 
 } // namespace dmc2::status_fixture
 
 extern "C" int dmc2_task_status_copy_self_test(
-    std::uint32_t *logical_fields,
+    std::uint32_t *native_copy_fields,
     std::size_t *failure_offset) noexcept {
-    if (logical_fields == nullptr || failure_offset == nullptr) {
+    if (native_copy_fields == nullptr || failure_offset == nullptr) {
         return -1;
     }
-    *logical_fields = 0;
+    *native_copy_fields = 0;
     *failure_offset = std::numeric_limits<std::size_t>::max();
 
     std::uint32_t reference_field_count = 0;
@@ -144,14 +127,14 @@ extern "C" int dmc2_task_status_copy_self_test(
             reinterpret_cast<const std::uint8_t *>(&actual);
         for (std::size_t offset = 0; offset < sizeof(actual); ++offset) {
             if (actual_bytes[offset] != expected_bytes[offset]) {
-                *logical_fields = generator.fields;
+                *native_copy_fields = generator.fields;
                 *failure_offset = offset;
                 return round + 1;
             }
         }
     }
 
-    *logical_fields = reference_field_count;
+    *native_copy_fields = reference_field_count;
     return 0;
 }
 

@@ -2,7 +2,8 @@ use core::ffi::{c_char, c_int, c_long, c_void};
 use core::mem::{align_of, size_of};
 
 use crate::{
-    hal_bit_t, hal_exit, hal_export_funct, hal_init, hal_malloc, hal_pin_bit_new,
+    hal_bit_t, hal_exit, hal_export_funct, hal_init, hal_malloc, hal_param_dir_t,
+    hal_param_dir_t_HAL_RW, hal_param_float_new, hal_param_u32_new, hal_pin_bit_new,
     hal_pin_dir_t_HAL_IN, hal_pin_dir_t_HAL_IO, hal_pin_dir_t_HAL_OUT, hal_pin_float_new,
     hal_pin_s32_new, hal_pin_u32_new, hal_ready, hal_s32_t, hal_u32_t, msg_level_t,
     msg_level_t_RTAPI_MSG_ERR, real_t, rtapi_print_msg,
@@ -20,6 +21,10 @@ const _: unsafe extern "C" fn(*const c_char, c_int, *mut *mut i32, c_int) -> c_i
     hal_pin_s32_new;
 const _: unsafe extern "C" fn(*const c_char, c_int, *mut *mut u32, c_int) -> c_int =
     hal_pin_u32_new;
+const _: unsafe extern "C" fn(*const c_char, hal_param_dir_t, *mut f64, c_int) -> c_int =
+    hal_param_float_new;
+const _: unsafe extern "C" fn(*const c_char, hal_param_dir_t, *mut u32, c_int) -> c_int =
+    hal_param_u32_new;
 const _: unsafe extern "C" fn(
     *const c_char,
     Option<unsafe extern "C" fn(*mut c_void, c_long)>,
@@ -42,6 +47,7 @@ const _: [(); align_of::<u32>()] = [(); align_of::<hal_u32_t>()];
 const _: [(); 16] = [(); hal_pin_dir_t_HAL_IN as usize];
 const _: [(); 32] = [(); hal_pin_dir_t_HAL_OUT as usize];
 const _: [(); 48] = [(); hal_pin_dir_t_HAL_IO as usize];
+const _: [(); 192] = [(); hal_param_dir_t_HAL_RW as usize];
 const _: [(); 1] = [(); msg_level_t_RTAPI_MSG_ERR as usize];
 
 #[cfg(test)]
@@ -53,6 +59,7 @@ mod tests {
         assert_eq!(hal_pin_dir_t_HAL_IN, 16);
         assert_eq!(hal_pin_dir_t_HAL_OUT, 32);
         assert_eq!(hal_pin_dir_t_HAL_IO, 48);
+        assert_eq!(hal_param_dir_t_HAL_RW, 192);
         assert_eq!(msg_level_t_RTAPI_MSG_ERR, 1);
         assert_eq!(size_of::<hal_bit_t>(), size_of::<bool>());
         assert_eq!(size_of::<real_t>(), size_of::<f64>());

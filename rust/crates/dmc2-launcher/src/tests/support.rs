@@ -8,7 +8,7 @@ use crate::embedded;
 use crate::integrity;
 use crate::layout::Layout;
 use crate::platform::{CommandSpec, Platform, ProcessOutput};
-use crate::validation::{EXPECTED_INTERFACE_AUDIT, EXPECTED_LINUXCNC_VERSION};
+use crate::validation::{EXPECTED_LINUXCNC_VERSION, EXPECTED_TASK_MONITOR_VALIDATION};
 
 #[derive(Debug, Clone)]
 pub enum FileEntry {
@@ -119,7 +119,7 @@ impl MockPlatform {
         self.push_run(
             layout.project.join("native/bin/dmc2-task-monitor"),
             &["--validate"],
-            Self::output(Some(0), EXPECTED_INTERFACE_AUDIT, b""),
+            Self::output(Some(0), EXPECTED_TASK_MONITOR_VALIDATION, b""),
         );
     }
 

@@ -1,3 +1,5 @@
+use dmc2_linuxcnc_interface::EMCMOT_MAX_AXIS;
+
 #[allow(
     dead_code,
     non_camel_case_types,
@@ -15,22 +17,27 @@ pub use abi::{
 
 pub(crate) use abi::{
     dmc2_task_status_channel as NativeTaskStatusChannel, dmc2_task_status_close,
-    dmc2_task_status_copy_self_test, dmc2_task_status_copy_signature_rounds, dmc2_task_status_open,
-    dmc2_task_status_poll, dmc2_task_status_snapshot_abi_version, dmc2_task_status_snapshot_size,
-    DMC2_TASK_STATUS_POLL_NOT_READY, DMC2_TASK_STATUS_POLL_OK,
+    dmc2_task_status_copy, dmc2_task_status_copy_self_test, dmc2_task_status_copy_signature_rounds,
+    dmc2_task_status_observe, dmc2_task_status_open, dmc2_task_status_snapshot_abi_version,
+    dmc2_task_status_snapshot_size, DMC2_TASK_STATUS_NATIVE_OK,
 };
 
 #[cfg(test)]
-pub(crate) use abi::{dmc2_task_status_snapshot_initialize, DMC2_TASK_STATUS_POLL_ERROR};
+pub(crate) use abi::{dmc2_task_status_snapshot_initialize, DMC2_TASK_STATUS_NATIVE_ERROR};
 
 pub const SNAPSHOT_ABI_VERSION: u32 = abi::DMC2_SNAPSHOT_ABI_VERSION;
+pub(crate) const RUST_DERIVED_FIELD_COUNT: usize = EMCMOT_MAX_AXIS;
+
+const STOPPED_VELOCITY_TOLERANCE: f64 = 0.000_001;
 
 const _: unsafe extern "C" fn() -> u32 = dmc2_task_status_snapshot_abi_version;
 const _: unsafe extern "C" fn() -> usize = dmc2_task_status_snapshot_size;
 const _: unsafe extern "C" fn(*const core::ffi::c_char, *mut i32) -> *mut NativeTaskStatusChannel =
     dmc2_task_status_open;
-const _: unsafe extern "C" fn(*mut NativeTaskStatusChannel, *mut NativeSnapshot, *mut i32) -> i32 =
-    dmc2_task_status_poll;
+const _: unsafe extern "C" fn(*mut NativeTaskStatusChannel, *mut i32, *mut i32) -> i32 =
+    dmc2_task_status_observe;
+const _: unsafe extern "C" fn(*mut NativeTaskStatusChannel, *mut NativeSnapshot) -> i32 =
+    dmc2_task_status_copy;
 const _: unsafe extern "C" fn(*mut NativeTaskStatusChannel) = dmc2_task_status_close;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -43,6 +50,29 @@ pub(crate) struct SnapshotFieldSpec {
 }
 
 include!(concat!(env!("OUT_DIR"), "/status_snapshot_fields.rs"));
+
+fn velocity_is_stopped(velocity: f64) -> bool {
+    (-STOPPED_VELOCITY_TOLERANCE..=STOPPED_VELOCITY_TOLERANCE).contains(&velocity)
+}
+
+pub(crate) fn derive_axis_stopped(snapshot: &mut NativeSnapshot) {
+    let axis_mask = snapshot.trajectory.axis_mask;
+    let joint_count = snapshot.trajectory.joints;
+
+    for index in 0..snapshot.axes.len() {
+        let axis_active = axis_mask & (1_i32 << index) != 0;
+        if !axis_active {
+            snapshot.axes[index].stopped = 1;
+            continue;
+        }
+
+        let joint_stopped = index as i32 >= joint_count
+            || (snapshot.joints[index].in_position != 0
+                && velocity_is_stopped(snapshot.joints[index].velocity));
+        snapshot.axes[index].stopped =
+            u32::from(joint_stopped && velocity_is_stopped(snapshot.axes[index].velocity));
+    }
+}
 
 fn extend_schema_fnv(mut hash: u64, bytes: &[u8]) -> u64 {
     for byte in bytes {
@@ -229,16 +259,112 @@ mod tests {
     }
 
     #[test]
-    fn native_copy_maps_every_logical_field_and_every_destination_byte() {
-        let mut logical_fields = 0_u32;
+    fn native_copy_and_rust_derivation_own_every_logical_field() {
+        let mut native_copy_fields = 0_u32;
         let mut failure_offset = usize::MAX;
-        let result =
-            unsafe { dmc2_task_status_copy_self_test(&mut logical_fields, &mut failure_offset) };
+        let result = unsafe {
+            dmc2_task_status_copy_self_test(&mut native_copy_fields, &mut failure_offset)
+        };
         assert_eq!(
             result, 0,
             "native status copy failed in signature round {result} at destination byte {failure_offset}"
         );
-        assert_eq!(logical_fields as usize, SNAPSHOT_LOGICAL_FIELD_COUNT);
+        assert_eq!(native_copy_fields, 1_100);
+        assert_eq!(RUST_DERIVED_FIELD_COUNT, 9);
+        assert_eq!(
+            native_copy_fields as usize + RUST_DERIVED_FIELD_COUNT,
+            SNAPSHOT_LOGICAL_FIELD_COUNT
+        );
         assert_eq!(unsafe { dmc2_task_status_copy_signature_rounds() }, 21);
+    }
+
+    #[test]
+    fn inactive_axes_are_stopped_independent_of_velocity_and_joint_state() {
+        let mut snapshot = NativeSnapshot::safe();
+        snapshot.trajectory.axis_mask = 0;
+        snapshot.trajectory.joints = snapshot.joints.len() as i32;
+        for index in 0..snapshot.axes.len() {
+            snapshot.axes[index].stopped = 0;
+            snapshot.axes[index].velocity = f64::NAN;
+            snapshot.joints[index].in_position = 0;
+            snapshot.joints[index].velocity = f64::NAN;
+        }
+
+        derive_axis_stopped(&mut snapshot);
+
+        assert!(snapshot.axes.iter().all(|axis| axis.stopped == 1));
+    }
+
+    #[test]
+    fn active_axis_rule_preserves_every_velocity_and_in_position_boundary() {
+        let velocities = [
+            -STOPPED_VELOCITY_TOLERANCE,
+            STOPPED_VELOCITY_TOLERANCE,
+            -STOPPED_VELOCITY_TOLERANCE - f64::EPSILON,
+            STOPPED_VELOCITY_TOLERANCE + f64::EPSILON,
+            f64::NAN,
+        ];
+        for in_position in [0_u32, 1_u32] {
+            for joint_velocity in velocities {
+                for axis_velocity in velocities {
+                    let mut snapshot = NativeSnapshot::safe();
+                    snapshot.trajectory.axis_mask = 1;
+                    snapshot.trajectory.joints = 1;
+                    snapshot.joints[0].in_position = in_position;
+                    snapshot.joints[0].velocity = joint_velocity;
+                    snapshot.axes[0].velocity = axis_velocity;
+
+                    derive_axis_stopped(&mut snapshot);
+
+                    let expected = in_position != 0
+                        && velocity_is_stopped(joint_velocity)
+                        && velocity_is_stopped(axis_velocity);
+                    assert_eq!(
+                        snapshot.axes[0].stopped,
+                        u32::from(expected),
+                        "in_position={in_position} joint_velocity={joint_velocity:?} axis_velocity={axis_velocity:?}"
+                    );
+                }
+            }
+        }
+    }
+
+    #[test]
+    fn active_axis_without_a_reported_joint_uses_axis_velocity_only() {
+        for joint_count in [i32::MIN, -1, 0] {
+            let mut snapshot = NativeSnapshot::safe();
+            snapshot.trajectory.axis_mask = 1;
+            snapshot.trajectory.joints = joint_count;
+            snapshot.axes[0].velocity = STOPPED_VELOCITY_TOLERANCE;
+            derive_axis_stopped(&mut snapshot);
+            assert_eq!(snapshot.axes[0].stopped, 1);
+
+            snapshot.axes[0].velocity = STOPPED_VELOCITY_TOLERANCE + f64::EPSILON;
+            derive_axis_stopped(&mut snapshot);
+            assert_eq!(snapshot.axes[0].stopped, 0);
+        }
+    }
+
+    #[test]
+    fn derivation_overwrites_every_axis_slot() {
+        let mut snapshot = NativeSnapshot::safe();
+        snapshot.trajectory.axis_mask = (1_i32 << snapshot.axes.len()) - 1;
+        snapshot.trajectory.joints = snapshot.axes.len() as i32;
+        for index in 0..snapshot.axes.len() {
+            snapshot.axes[index].stopped = u32::MAX;
+            snapshot.axes[index].velocity = if index % 2 == 0 {
+                0.0
+            } else {
+                STOPPED_VELOCITY_TOLERANCE * 2.0
+            };
+            snapshot.joints[index].in_position = 1;
+            snapshot.joints[index].velocity = 0.0;
+        }
+
+        derive_axis_stopped(&mut snapshot);
+
+        for (index, axis) in snapshot.axes.iter().enumerate() {
+            assert_eq!(axis.stopped, u32::from(index % 2 == 0));
+        }
     }
 }

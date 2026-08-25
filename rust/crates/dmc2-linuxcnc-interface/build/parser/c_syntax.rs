@@ -13,11 +13,7 @@ fn strip_comments(input: &str) -> String {
                 output.extend_from_slice(b"  ");
                 index += 2;
             } else {
-                if bytes[index] == b'\n' {
-                    output.push(b'\n');
-                } else {
-                    output.push(b' ');
-                }
+                output.push(if bytes[index] == b'\n' { b'\n' } else { b' ' });
                 index += 1;
             }
             continue;
@@ -66,165 +62,9 @@ fn strip_comments(input: &str) -> String {
         output.push(bytes[index]);
         index += 1;
     }
-    assert!(
-        !in_block,
-        "unterminated block comment while parsing LinuxCNC headers"
-    );
-    assert!(
-        quote.is_none(),
-        "unterminated literal while parsing LinuxCNC headers"
-    );
+    assert!(!in_block, "unterminated LinuxCNC header comment");
+    assert!(quote.is_none(), "unterminated LinuxCNC header literal");
     String::from_utf8(output).expect("LinuxCNC header is not valid UTF-8")
-}
-
-#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub(crate) enum EnumKind {
-    Anonymous,
-    Named,
-    Typedef,
-}
-
-impl EnumKind {
-    pub(crate) const fn name(self) -> &'static str {
-        match self {
-            Self::Anonymous => "anonymous",
-            Self::Named => "named",
-            Self::Typedef => "typedef",
-        }
-    }
-}
-
-#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
-pub(crate) struct EnumDeclaration {
-    pub(crate) kind: EnumKind,
-    pub(crate) name: String,
-    pub(crate) symbols: Vec<String>,
-    pub(crate) body: String,
-}
-
-struct Token {
-    text: String,
-    start: usize,
-    end: usize,
-}
-
-fn c_tokens(cleaned: &str) -> Vec<Token> {
-    let bytes = cleaned.as_bytes();
-    let mut tokens = Vec::new();
-    let mut index = 0;
-    while index < bytes.len() {
-        let byte = bytes[index];
-        if byte == b'\'' || byte == b'"' {
-            let quote = byte;
-            index += 1;
-            let mut escaped = false;
-            let mut closed = false;
-            while index < bytes.len() {
-                let current = bytes[index];
-                index += 1;
-                if escaped {
-                    escaped = false;
-                } else if current == b'\\' {
-                    escaped = true;
-                } else if current == quote {
-                    closed = true;
-                    break;
-                }
-            }
-            assert!(
-                closed,
-                "unterminated string or character literal in LinuxCNC header"
-            );
-            continue;
-        }
-        if byte.is_ascii_alphabetic() || byte == b'_' {
-            let start = index;
-            index += 1;
-            while index < bytes.len()
-                && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
-            {
-                index += 1;
-            }
-            tokens.push(Token {
-                text: cleaned[start..index].to_owned(),
-                start,
-                end: index,
-            });
-            continue;
-        }
-        if matches!(byte, b'{' | b'}' | b';') {
-            tokens.push(Token {
-                text: (byte as char).to_string(),
-                start: index,
-                end: index + 1,
-            });
-        }
-        index += 1;
-    }
-    tokens
-}
-
-pub(crate) fn enum_declarations(source: &str) -> Vec<EnumDeclaration> {
-    let cleaned = strip_comments(source);
-    let tokens = c_tokens(&cleaned);
-    let mut declarations = Vec::new();
-    let mut anonymous_count = 0_usize;
-    let mut index = 0;
-    while index < tokens.len() {
-        if tokens[index].text != "enum" {
-            index += 1;
-            continue;
-        }
-        let is_typedef = index > 0 && tokens[index - 1].text == "typedef";
-        let mut cursor = index + 1;
-        let tag = if tokens.get(cursor).is_some_and(|token| token.text != "{") {
-            let value = tokens[cursor].text.clone();
-            cursor += 1;
-            Some(value)
-        } else {
-            None
-        };
-        if tokens.get(cursor).map(|token| token.text.as_str()) != Some("{") {
-            index += 1;
-            continue;
-        }
-        let body_start = tokens[cursor].end;
-        let mut depth = 1_u32;
-        cursor += 1;
-        while cursor < tokens.len() && depth > 0 {
-            match tokens[cursor].text.as_str() {
-                "{" => depth += 1,
-                "}" => depth -= 1,
-                _ => {}
-            }
-            cursor += 1;
-        }
-        assert_eq!(depth, 0, "unterminated enum declaration in LinuxCNC header");
-        let body_end = tokens[cursor - 1].start;
-        let body = cleaned[body_start..body_end].to_owned();
-        let (kind, name) = if is_typedef {
-            let alias = tokens
-                .get(cursor)
-                .filter(|token| token.text != ";")
-                .unwrap_or_else(|| panic!("typedef enum has no alias in LinuxCNC header"));
-            (EnumKind::Typedef, alias.text.clone())
-        } else if let Some(tag) = tag {
-            (EnumKind::Named, tag)
-        } else {
-            let name = format!("anonymous_{anonymous_count}");
-            anonymous_count += 1;
-            (EnumKind::Anonymous, name)
-        };
-        let symbols = parse_enum_names(&body);
-        declarations.push(EnumDeclaration {
-            kind,
-            name,
-            symbols,
-            body,
-        });
-        index = cursor;
-    }
-    declarations
 }
 
 fn enum_body_after(source: &str, marker: &str) -> String {
@@ -250,18 +90,6 @@ fn enum_body_after(source: &str, marker: &str) -> String {
         }
     }
     panic!("enum marker {marker:?} has no closing brace");
-}
-
-fn typedef_enum_body(source: &str, alias: &str) -> String {
-    let cleaned = strip_comments(source);
-    let end_marker = format!("}} {alias}");
-    let end = cleaned
-        .find(&end_marker)
-        .unwrap_or_else(|| panic!("LinuxCNC header omitted typedef enum alias {alias:?}"));
-    let start = cleaned[..end]
-        .rfind("typedef enum")
-        .unwrap_or_else(|| panic!("typedef enum alias {alias:?} has no declaration"));
-    enum_body_after(&cleaned[start..], "typedef enum")
 }
 
 fn parse_enum_names(body: &str) -> Vec<String> {
@@ -299,7 +127,15 @@ pub(crate) fn named_enum(source: &str, marker: &str) -> Vec<String> {
 }
 
 pub(crate) fn typedef_enum(source: &str, alias: &str) -> Vec<String> {
-    parse_enum_names(&typedef_enum_body(source, alias))
+    let cleaned = strip_comments(source);
+    let end_marker = format!("}} {alias}");
+    let end = cleaned
+        .find(&end_marker)
+        .unwrap_or_else(|| panic!("LinuxCNC header omitted typedef enum alias {alias:?}"));
+    let start = cleaned[..end]
+        .rfind("typedef enum")
+        .unwrap_or_else(|| panic!("typedef enum alias {alias:?} has no declaration"));
+    parse_enum_names(&enum_body_after(&cleaned[start..], "typedef enum"))
 }
 
 pub(crate) fn macro_names<F>(source: &str, mut accept: F) -> Vec<String>

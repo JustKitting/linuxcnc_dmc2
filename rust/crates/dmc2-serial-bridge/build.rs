@@ -16,57 +16,51 @@ fn run(program: &str, arguments: &[&str]) {
 }
 
 fn main() {
-    println!("cargo:rerun-if-changed=src/serial_shim.c");
-    println!("cargo:rerun-if-changed=src/serial_shim.h");
+    println!("cargo:rerun-if-changed=src/application/serial/posix_ffi.h");
     println!("cargo:rerun-if-changed=build.rs");
     let output_directory =
         PathBuf::from(env::var_os("OUT_DIR").expect("Cargo did not provide OUT_DIR"));
-    let object = output_directory.join("serial_shim.o");
-    let archive = output_directory.join("libdmc2_serial_shim.a");
-    let bindings = output_directory.join("serial_shim_bindings.rs");
-    let object_text = object
-        .to_str()
-        .expect("Cargo output path is not valid UTF-8");
-    let archive_text = archive
-        .to_str()
-        .expect("Cargo output path is not valid UTF-8");
+    let bindings = output_directory.join("serial_posix_bindings.rs");
     let bindings_text = bindings
         .to_str()
         .expect("Cargo output path is not valid UTF-8");
     run(
-        "cc",
-        &[
-            "-std=c11",
-            "-O2",
-            "-fPIC",
-            "-Wall",
-            "-Wextra",
-            "-Werror",
-            "-c",
-            "src/serial_shim.c",
-            "-o",
-            object_text,
-        ],
-    );
-    run("ar", &["crus", archive_text, object_text]);
-    run(
         "bindgen",
         &[
-            "src/serial_shim.h",
+            "src/application/serial/posix_ffi.h",
             "--allowlist-function",
-            "dmc2_serial_(open|read|close)",
+            "(__errno_location|open|close|read|tcgetattr|cfmakeraw|cfsetispeed|cfsetospeed|tcsetattr|tcflush)",
+            "--allowlist-type",
+            "(termios|speed_t|tcflag_t|cc_t|ssize_t)",
+            "--allowlist-var",
+            "(EAGAIN|EWOULDBLOCK|EINTR|EIO|EINVAL|O_RDWR|O_NOCTTY|O_NONBLOCK|O_CLOEXEC|B115200|CLOCAL|CREAD|CSTOPB|CRTSCTS|CSIZE|CS8|VMIN|VTIME|TCSANOW|TCIFLUSH)",
             "--use-core",
             "--no-layout-tests",
             "--output",
             bindings_text,
         ],
     );
-    println!(
-        "cargo:rustc-link-search=native={}",
-        output_directory.display()
+    let inspection_bindings = output_directory.join("serial_posix_inspection_bindings.rs");
+    let inspection_bindings_text = inspection_bindings
+        .to_str()
+        .expect("Cargo inspection output path is not valid UTF-8");
+    run(
+        "bindgen",
+        &[
+            "src/application/serial/posix_ffi.h",
+            "--allowlist-function",
+            "(fcntl|tcgetattr|cfgetispeed|cfgetospeed)",
+            "--allowlist-type",
+            "(termios|speed_t|tcflag_t)",
+            "--allowlist-var",
+            "(F_GETFL|F_GETFD|FD_CLOEXEC|O_NONBLOCK|B115200|CLOCAL|CREAD|CSTOPB|CRTSCTS|CSIZE|CS8|VMIN|VTIME)",
+            "--use-core",
+            "--no-layout-tests",
+            "--output",
+            inspection_bindings_text,
+        ],
     );
     println!("cargo:rustc-link-search=native=/usr/lib");
-    println!("cargo:rustc-link-lib=static=dmc2_serial_shim");
     println!("cargo:rustc-link-lib=util");
     println!("cargo:rustc-link-lib=linuxcnchal");
 }

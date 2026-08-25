@@ -100,8 +100,8 @@ Raw reads use fixed 256-byte chunks. The separate framing state retains at most
 128 payload bytes plus one possible terminal CR, faults closed as soon as a
 frame is provably overlong, and discards through the next LF. Every 8-bit input
 value, CR/LF boundary, and 127/128/129-byte boundary is covered by the compiled
-serial tests, including a native pseudo-terminal pass through the C/termios
-adapter. The native serial boundary preserves Linux errno values for open,
+serial tests, including a pseudo-terminal pass through the direct Rust/POSIX
+termios adapter. The Rust serial boundary preserves Linux errno values for open,
 read, configuration-cleanup, and close failures; the bridge reports each
 failure instead of collapsing or discarding it.
 
@@ -365,9 +365,10 @@ scripts/verify.sh
 ```
 
 That command also runs the sibling H100 project's complete hardware-free gate:
-100% of the realtime sequencer's 215 compiler-observed branch outcomes, 100%
-of the pure Modbus protocol's executable lines, exact recompilation of every
-Mesa Modbus map, and two byte-identical normalized realtime-module builds.
+the Rust HAL lifecycle/interface tests and 122,880-case sequencer invariant
+matrix, 100% of the pure Modbus protocol's executable lines, exact
+recompilation of every Mesa Modbus map, and two byte-identical normalized
+realtime-module builds.
 The compiled launcher has its own LLVM 19 instrumentation gate requiring zero
 missed production regions, functions, or lines, including its real
 filesystem/process adapter and standard executable entry point.

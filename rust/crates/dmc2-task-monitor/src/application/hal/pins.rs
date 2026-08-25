@@ -12,7 +12,7 @@ pub(super) const DIAGNOSTIC_BIT_OUTPUT_PINS: [&str; 4] = [
     "linuxcnc-warning-active",
     "unknown-code-active",
 ];
-pub(super) const DIAGNOSTIC_U32_OUTPUT_PINS: [&str; 20] = [
+pub(super) const DIAGNOSTIC_U32_OUTPUT_PINS: [&str; 17] = [
     "active-error-mask-low",
     "active-error-mask-high",
     "active-warning-mask-low",
@@ -28,9 +28,6 @@ pub(super) const DIAGNOSTIC_U32_OUTPUT_PINS: [&str; 20] = [
     "diagnostic-transitions",
     "latest-code-low",
     "latest-code-high",
-    "catalog-code-count",
-    "catalog-fingerprint-low",
-    "catalog-fingerprint-high",
     "snapshot-abi-version",
     "snapshot-struct-size",
 ];
@@ -81,9 +78,6 @@ pub(super) struct HalPins {
     pub(super) latest_severity: *mut hal::hal_s32_t,
     pub(super) latest_action: *mut hal::hal_s32_t,
     pub(super) clear_latched: *mut hal::hal_bit_t,
-    pub(super) catalog_code_count: *mut hal::hal_u32_t,
-    pub(super) catalog_fingerprint_low: *mut hal::hal_u32_t,
-    pub(super) catalog_fingerprint_high: *mut hal::hal_u32_t,
     pub(super) snapshot_abi_version: *mut hal::hal_u32_t,
     pub(super) snapshot_struct_size: *mut hal::hal_u32_t,
     pub(super) machine_on: *mut hal::hal_bit_t,
@@ -130,9 +124,6 @@ impl HalPins {
             latest_severity: ptr::null_mut(),
             latest_action: ptr::null_mut(),
             clear_latched: ptr::null_mut(),
-            catalog_code_count: ptr::null_mut(),
-            catalog_fingerprint_low: ptr::null_mut(),
-            catalog_fingerprint_high: ptr::null_mut(),
             snapshot_abi_version: ptr::null_mut(),
             snapshot_struct_size: ptr::null_mut(),
             machine_on: ptr::null_mut(),
@@ -221,9 +212,6 @@ mod tests {
             ("diagnostic-transitions", Kind::U32, "out"),
             ("latest-code-low", Kind::U32, "out"),
             ("latest-code-high", Kind::U32, "out"),
-            ("catalog-code-count", Kind::U32, "out"),
-            ("catalog-fingerprint-low", Kind::U32, "out"),
-            ("catalog-fingerprint-high", Kind::U32, "out"),
             ("snapshot-abi-version", Kind::U32, "out"),
             ("snapshot-struct-size", Kind::U32, "out"),
             ("nml-error-code", Kind::S32, "out"),
@@ -250,7 +238,7 @@ mod tests {
         .map(|(name, kind, direction)| spec(name, kind, direction));
         let actual = schema();
         assert_eq!(actual, expected);
-        assert_eq!(actual.len(), 50);
+        assert_eq!(actual.len(), 47);
         assert_eq!(
             actual
                 .iter()

@@ -49,9 +49,9 @@ fn every_error_variant_has_operator_visible_context() {
             stdout: b"2.9.9".to_vec(),
             stderr: b"version warning".to_vec(),
         },
-        Error::InterfaceAudit {
-            stdout: b"audit".to_vec(),
-            stderr: b"audit warning".to_vec(),
+        Error::ProgramValidation {
+            stdout: b"validation".to_vec(),
+            stderr: b"validation warning".to_vec(),
         },
         Error::OwnerConflict(vec![OwnerMatch {
             pattern: "owner",

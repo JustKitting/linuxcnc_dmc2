@@ -1,76 +1,22 @@
 use std::ffi::{c_int, CString};
-use std::fmt;
 
-use super::native;
+use super::posix;
 
 pub(in crate::application) struct SerialPort(c_int);
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub(in crate::application) enum SerialError {
-    OperatingSystem(c_int),
-    NativeContract {
-        operation: &'static str,
-        result: c_int,
-    },
-}
-
-impl SerialError {
-    fn from_failure(operation: &'static str, result: c_int) -> Self {
-        match result.checked_neg().filter(|errno| *errno > 0) {
-            Some(errno) => Self::OperatingSystem(errno),
-            None => Self::NativeContract { operation, result },
-        }
-    }
-}
-
-impl fmt::Display for SerialError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::OperatingSystem(errno) => write!(
-                formatter,
-                "{} (errno {errno})",
-                std::io::Error::from_raw_os_error(*errno)
-            ),
-            Self::NativeContract { operation, result } => {
-                write!(
-                    formatter,
-                    "native {operation} returned invalid result {result}"
-                )
-            }
-        }
-    }
-}
-
 impl SerialPort {
-    pub(in crate::application) fn open(path: &CString, baud: u32) -> Result<Self, SerialError> {
-        let descriptor = unsafe { native::dmc2_serial_open(path.as_ptr(), baud) };
-        if descriptor < 0 {
-            Err(SerialError::from_failure("open", descriptor))
-        } else {
-            Ok(Self(descriptor))
-        }
+    pub(in crate::application) fn open(path: &CString, baud: u32) -> Result<Self, posix::Error> {
+        posix::open(path.as_c_str(), baud).map(Self)
     }
 
-    pub(in crate::application) fn read(&self, buffer: &mut [u8]) -> Result<usize, SerialError> {
-        let count = unsafe { native::dmc2_serial_read(self.0, buffer.as_mut_ptr(), buffer.len()) };
-        if count < 0 {
-            Err(SerialError::from_failure("read", count))
-        } else if count as usize > buffer.len() {
-            Err(SerialError::NativeContract {
-                operation: "read",
-                result: count,
-            })
-        } else {
-            Ok(count as usize)
-        }
+    pub(in crate::application) fn read(&self, buffer: &mut [u8]) -> Result<usize, posix::Error> {
+        posix::read(self.0, buffer)
     }
 }
 
 impl Drop for SerialPort {
     fn drop(&mut self) {
-        let result = unsafe { native::dmc2_serial_close(self.0) };
-        if result != 0 {
-            let error = SerialError::from_failure("close", result);
+        if let Err(error) = posix::close(self.0) {
             eprintln!("dmc2-serial-bridge: serial close failed: {error}");
         }
     }
@@ -85,6 +31,7 @@ mod tests {
     use std::os::fd::FromRawFd;
     use std::ptr;
 
+    use super::super::ffi::inspection as ffi;
     use super::*;
 
     #[repr(C)]
@@ -132,56 +79,75 @@ mod tests {
         let missing = CString::new("/definitely/not/a/dmc2/serial/device").unwrap();
         assert_eq!(
             SerialPort::open(&missing, 115_200).err(),
-            Some(SerialError::OperatingSystem(2))
+            Some(posix::Error::OperatingSystem(2))
         );
         let not_a_terminal = CString::new("/dev/null").unwrap();
         assert_eq!(
             SerialPort::open(&not_a_terminal, 115_200).err(),
-            Some(SerialError::OperatingSystem(25))
+            Some(posix::Error::OperatingSystem(25))
         );
 
         let (_master, terminal) = pseudo_terminal();
         assert_eq!(
             SerialPort::open(&terminal, 9_600).err(),
-            Some(SerialError::OperatingSystem(22))
+            Some(posix::Error::OperatingSystem(22))
         );
         let empty = CString::new("").unwrap();
         assert_eq!(
-            unsafe { native::dmc2_serial_open(ptr::null(), 115_200) },
-            -22
-        );
-        assert_eq!(
-            unsafe { native::dmc2_serial_open(empty.as_ptr(), 115_200) },
-            -22
+            posix::open(empty.as_c_str(), 115_200),
+            Err(posix::Error::OperatingSystem(22))
         );
 
         let invalid = ManuallyDrop::new(SerialPort(-1));
         let mut byte = [0_u8; 1];
         assert_eq!(
             invalid.read(&mut byte),
-            Err(SerialError::OperatingSystem(22))
+            Err(posix::Error::OperatingSystem(22))
         );
-        assert_eq!(invalid.read(&mut []), Err(SerialError::OperatingSystem(22)));
         assert_eq!(
-            unsafe { native::dmc2_serial_read(0, ptr::null_mut(), 1) },
-            -22
+            invalid.read(&mut []),
+            Err(posix::Error::OperatingSystem(22))
         );
-        assert_eq!(unsafe { native::dmc2_serial_close(-1) }, -22);
+        assert_eq!(posix::close(-1), Err(posix::Error::OperatingSystem(22)));
     }
 
     #[test]
-    fn native_close_reports_success_and_the_exact_repeat_close_failure() {
+    fn posix_close_reports_success_and_the_exact_repeat_close_failure() {
         let (_master, terminal) = pseudo_terminal();
-        let descriptor = unsafe { native::dmc2_serial_open(terminal.as_ptr(), 115_200) };
-        assert!(descriptor >= 0);
-        assert_eq!(unsafe { native::dmc2_serial_close(descriptor) }, 0);
-        assert_eq!(unsafe { native::dmc2_serial_close(descriptor) }, -9);
+        let descriptor = posix::open(terminal.as_c_str(), 115_200).unwrap();
+        assert_eq!(posix::close(descriptor), Ok(()));
+        assert_eq!(
+            posix::close(descriptor),
+            Err(posix::Error::OperatingSystem(9))
+        );
     }
 
     #[test]
-    fn native_raw_serial_path_preserves_every_byte_value_exactly() {
+    fn rust_posix_configuration_and_raw_serial_path_are_exact() {
         let (mut master, terminal) = pseudo_terminal();
         let serial = SerialPort::open(&terminal, 115_200).expect("pseudo-terminal opened");
+
+        let mut options = unsafe { std::mem::zeroed::<ffi::termios>() };
+        assert_eq!(unsafe { ffi::tcgetattr(serial.0, &mut options) }, 0);
+        assert_ne!(options.c_cflag & ffi::CLOCAL as ffi::tcflag_t, 0);
+        assert_ne!(options.c_cflag & ffi::CREAD as ffi::tcflag_t, 0);
+        assert_eq!(options.c_cflag & ffi::CSTOPB as ffi::tcflag_t, 0);
+        assert_eq!(options.c_cflag & ffi::CRTSCTS as ffi::tcflag_t, 0);
+        assert_eq!(
+            options.c_cflag & ffi::CSIZE as ffi::tcflag_t,
+            ffi::CS8 as ffi::tcflag_t
+        );
+        assert_eq!(options.c_cc[ffi::VMIN as usize], 0);
+        assert_eq!(options.c_cc[ffi::VTIME as usize], 0);
+        assert_eq!(unsafe { ffi::cfgetispeed(&options) }, ffi::B115200);
+        assert_eq!(unsafe { ffi::cfgetospeed(&options) }, ffi::B115200);
+        let status_flags = unsafe { ffi::fcntl(serial.0, ffi::F_GETFL as c_int) };
+        assert!(status_flags >= 0);
+        assert_ne!(status_flags & ffi::O_NONBLOCK as c_int, 0);
+        let descriptor_flags = unsafe { ffi::fcntl(serial.0, ffi::F_GETFD as c_int) };
+        assert!(descriptor_flags >= 0);
+        assert_ne!(descriptor_flags & ffi::FD_CLOEXEC as c_int, 0);
+
         let mut empty = [0_u8; 1];
         assert_eq!(serial.read(&mut empty), Ok(0));
 
@@ -200,7 +166,7 @@ mod tests {
         let mut actual = Vec::with_capacity(expected.len());
         while actual.len() < expected.len() {
             let mut buffer = [0_u8; 256];
-            let count = serial.read(&mut buffer).expect("native serial read");
+            let count = serial.read(&mut buffer).expect("Rust POSIX serial read");
             assert!(
                 count > 0,
                 "poll reported readable but read returned no bytes"

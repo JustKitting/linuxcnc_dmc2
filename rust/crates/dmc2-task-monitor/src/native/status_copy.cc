@@ -313,17 +313,6 @@ void dmc2_copy_status(
     }
     for (int index = 0; index < EMCMOT_MAX_AXIS; ++index) {
         copy_axis(source.motion.axis[index], destination.axes[index]);
-        if ((source.motion.traj.axis_mask & (1 << index)) == 0) {
-            destination.axes[index].stopped = 1U;
-            continue;
-        }
-        const bool joint_stopped = index >= source.motion.traj.joints ||
-            (source.motion.joint[index].inpos != 0 &&
-             source.motion.joint[index].velocity >= -0.000001 &&
-             source.motion.joint[index].velocity <= 0.000001);
-        destination.axes[index].stopped = flag(
-            joint_stopped && source.motion.axis[index].velocity >= -0.000001 &&
-            source.motion.axis[index].velocity <= 0.000001);
     }
     for (int index = 0; index < EMCMOT_MAX_SPINDLES; ++index) {
         copy_spindle(source.motion.spindle[index], destination.spindles[index]);

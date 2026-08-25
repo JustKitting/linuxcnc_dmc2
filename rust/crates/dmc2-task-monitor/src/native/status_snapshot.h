@@ -250,11 +250,10 @@ typedef struct dmc2_task_status_snapshot {
 
 typedef struct dmc2_task_status_channel dmc2_task_status_channel;
 
-typedef enum dmc2_task_status_poll_result {
-    DMC2_TASK_STATUS_POLL_ERROR = -1,
-    DMC2_TASK_STATUS_POLL_OK = 0,
-    DMC2_TASK_STATUS_POLL_NOT_READY = 1
-} dmc2_task_status_poll_result;
+typedef enum dmc2_task_status_native_result {
+    DMC2_TASK_STATUS_NATIVE_ERROR = -1,
+    DMC2_TASK_STATUS_NATIVE_OK = 0
+} dmc2_task_status_native_result;
 
 #ifdef __cplusplus
 extern "C" {
@@ -268,16 +267,19 @@ size_t dmc2_task_status_snapshot_size(void) DMC2_NOEXCEPT;
 void dmc2_task_status_snapshot_initialize(
     dmc2_task_status_snapshot *snapshot) DMC2_NOEXCEPT;
 int dmc2_task_status_copy_self_test(
-    uint32_t *logical_fields,
+    uint32_t *native_copy_fields,
     size_t *failure_offset) DMC2_NOEXCEPT;
 uint32_t dmc2_task_status_copy_signature_rounds(void) DMC2_NOEXCEPT;
 dmc2_task_status_channel *dmc2_task_status_open(
     const char *nml_file,
     int32_t *nml_error) DMC2_NOEXCEPT;
-dmc2_task_status_poll_result dmc2_task_status_poll(
+dmc2_task_status_native_result dmc2_task_status_observe(
     dmc2_task_status_channel *channel,
-    dmc2_task_status_snapshot *snapshot,
+    int32_t *message_type,
     int32_t *nml_error) DMC2_NOEXCEPT;
+dmc2_task_status_native_result dmc2_task_status_copy(
+    dmc2_task_status_channel *channel,
+    dmc2_task_status_snapshot *snapshot) DMC2_NOEXCEPT;
 void dmc2_task_status_close(
     dmc2_task_status_channel *channel) DMC2_NOEXCEPT;
 

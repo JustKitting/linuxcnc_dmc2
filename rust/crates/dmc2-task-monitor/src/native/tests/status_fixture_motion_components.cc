@@ -75,7 +75,7 @@ void fill_joint(
     fill_flag(source.overrideLimits, expected.override_limits, generator);
 }
 
-std::uint32_t fill_axis(
+void fill_axis(
     EMC_AXIS_STAT &source,
     dmc2_axis_snapshot &expected,
     Generator &generator) noexcept {
@@ -91,9 +91,7 @@ std::uint32_t fill_axis(
         generator);
     fill_double(source.velocity, expected.velocity, generator);
 
-    const std::uint32_t stopped = generator.claim();
     expected.stopped = 0;
-    return stopped;
 }
 
 void fill_spindle(

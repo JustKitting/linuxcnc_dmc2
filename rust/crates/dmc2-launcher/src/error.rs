@@ -37,7 +37,7 @@ pub enum Error {
         stdout: Vec<u8>,
         stderr: Vec<u8>,
     },
-    InterfaceAudit {
+    ProgramValidation {
         stdout: Vec<u8>,
         stderr: Vec<u8>,
     },
@@ -142,9 +142,9 @@ impl fmt::Display for Error {
                 render_bytes(stdout),
                 render_bytes(stderr)
             ),
-            Self::InterfaceAudit { stdout, stderr } => write!(
+            Self::ProgramValidation { stdout, stderr } => write!(
                 formatter,
-                "compiled LinuxCNC interface audit output changed (stdout={}, stderr={})",
+                "compiled task-monitor validation output changed (stdout={}, stderr={})",
                 render_bytes(stdout),
                 render_bytes(stderr)
             ),

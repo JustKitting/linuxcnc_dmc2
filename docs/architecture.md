@@ -29,8 +29,9 @@ limit, E-stop, watchdog, or spindle-command loop.
   coherent read-only pendant HAL publication.
 - `rust/crates/dmc2-task-monitor`: native NML lifecycle, source-backed status
   classification, transition diagnostics, and coherent status HAL publication.
-- `rust/crates/dmc2-linuxcnc-interface`: generated, version-locked LinuxCNC
-  2.9.10 numeric catalogs. It is the only source of numeric interface codes.
+- `rust/crates/dmc2-linuxcnc-interface`: generated, version-locked values and
+  status sizes consumed by the task monitor. It does not inventory unrelated
+  LinuxCNC headers or codes.
 - `rust/crates/dmc2-launcher`: the standard compiled live-launch boundary;
   byte-exact profile/deployment checks, process-owner exclusion, persistent
   service creation, and direct LinuxCNC process replacement.
@@ -68,9 +69,10 @@ limit, E-stop, watchdog, or spindle-command loop.
 ## Verification boundary
 
 The offline build must format and compile every Rust target, execute the full
-workspace tests, validate the LinuxCNC source/header fingerprint and status
-ABI, validate every live HAL/INI/UI connection, and enforce the source-layout
-limits. The launcher is additionally instrumented with the matching LLVM 19
-tools and must have zero missed production regions, functions, or lines.
-Hardware motion or a LinuxCNC restart is a separate explicitly ordered
-operation and is never part of an offline verification command.
+workspace tests, validate the values, object sizes, and snapshot ABI actually
+consumed by the controller, validate every live HAL/INI/UI connection, and
+enforce the source-layout limits. The launcher is additionally instrumented
+with the matching LLVM 19 tools and must have zero missed production regions,
+functions, or lines. Hardware motion or a LinuxCNC restart is a separate
+explicitly ordered operation and is never part of an offline verification
+command.

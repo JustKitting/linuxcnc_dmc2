@@ -9,7 +9,6 @@ from .common import (
     read_ini,
     source_tree_text,
 )
-from .linuxcnc_interface import validate_linuxcnc_interface_coverage
 from .paths import LIVE_DIR, PROJECT_ROOT as ROOT, SIM_DIR
 from .probing import (
     validate_first_tool_height_test,
@@ -23,6 +22,7 @@ from .readiness import (
     unresolved_requirements,
 )
 from .spindle import validate_h100_spindle_integration, validate_spindle_test_operation
+from .task_monitor import validate_task_monitor_contract
 
 
 def validate() -> list[str]:
@@ -105,7 +105,7 @@ def validate() -> list[str]:
     checks.append(
         "compiled Rust owns servo-thread policy, exact count verification, and the real milltask heartbeat"
     )
-    checks.append(validate_linuxcnc_interface_coverage())
+    checks.append(validate_task_monitor_contract())
 
     sim_config = read_ini(SIM_DIR / "monitor.ini")
     required_sim_sections = {

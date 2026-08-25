@@ -1,6 +1,7 @@
+mod ffi;
 mod framing;
-mod native;
 mod port;
+mod posix;
 
 pub(super) use framing::LineAssembler;
 pub(super) use port::SerialPort;

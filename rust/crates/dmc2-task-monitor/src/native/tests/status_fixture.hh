@@ -125,7 +125,7 @@ void fill_joint(
     EMC_JOINT_STAT &source,
     dmc2_joint_snapshot &expected,
     Generator &generator) noexcept;
-std::uint32_t fill_axis(
+void fill_axis(
     EMC_AXIS_STAT &source,
     dmc2_axis_snapshot &expected,
     Generator &generator) noexcept;

@@ -1,24 +1,19 @@
 use core::mem;
 
-use dmc2_linuxcnc_interface::{
-    DOMAINS, ENUM_CODE_COUNT, ENUM_DECLARATION_COUNT, ERROR_MESSAGE_CONTRACT_COUNT,
-    GENERATED_CODE_COUNT, INTERPRETER_ERROR_TEMPLATES, LINUXCNC_SOURCE_COMMIT, LINUXCNC_VERSION,
-    NON_ENUM_CODE_COUNT, PUBLIC_ENUM_HEADER_COUNT, STATUS_MESSAGE_CONTRACT_COUNT,
-};
-
 use crate::snapshot::{
     dmc2_task_status_copy_self_test, dmc2_task_status_copy_signature_rounds,
     dmc2_task_status_snapshot_abi_version, dmc2_task_status_snapshot_size,
-    snapshot_schema_fingerprint, NativeSnapshot, SNAPSHOT_ABI_VERSION, SNAPSHOT_FIELDS,
-    SNAPSHOT_LOGICAL_FIELD_COUNT, SNAPSHOT_SCHEMA_FNV64, SNAPSHOT_SCHEMA_STRUCT_ALIGNMENT,
-    SNAPSHOT_SCHEMA_STRUCT_SIZE,
+    snapshot_schema_fingerprint, NativeSnapshot, RUST_DERIVED_FIELD_COUNT, SNAPSHOT_ABI_VERSION,
+    SNAPSHOT_FIELDS, SNAPSHOT_LOGICAL_FIELD_COUNT, SNAPSHOT_SCHEMA_FNV64,
+    SNAPSHOT_SCHEMA_STRUCT_ALIGNMENT, SNAPSHOT_SCHEMA_STRUCT_SIZE,
 };
 
-struct AuditReport {
+struct ValidationReport {
     native_snapshot_size: usize,
     snapshot_field_bytes: usize,
     snapshot_padding_bytes: usize,
-    snapshot_copy_fields: usize,
+    snapshot_native_copy_fields: usize,
+    snapshot_rust_derived_fields: usize,
     snapshot_copy_signature_rounds: u32,
 }
 
@@ -57,7 +52,7 @@ fn snapshot_byte_coverage() -> Result<(usize, usize), String> {
     Ok((field_bytes, snapshot_size - field_bytes))
 }
 
-impl AuditReport {
+impl ValidationReport {
     fn collect() -> Result<Self, String> {
         let native_abi = unsafe { dmc2_task_status_snapshot_abi_version() };
         let native_snapshot_size = unsafe { dmc2_task_status_snapshot_size() };
@@ -86,22 +81,27 @@ impl AuditReport {
         }
         let (snapshot_field_bytes, snapshot_padding_bytes) = snapshot_byte_coverage()?;
         if snapshot_field_bytes + snapshot_padding_bytes != native_snapshot_size {
-            return Err("snapshot byte inventory does not cover the complete ABI".to_owned());
+            return Err(
+                "snapshot byte inventory does not cover the complete program ABI".to_owned(),
+            );
         }
 
-        let mut snapshot_copy_fields = 0_u32;
+        let mut snapshot_native_copy_fields = 0_u32;
         let mut failure_offset = usize::MAX;
         let copy_result = unsafe {
-            dmc2_task_status_copy_self_test(&mut snapshot_copy_fields, &mut failure_offset)
+            dmc2_task_status_copy_self_test(&mut snapshot_native_copy_fields, &mut failure_offset)
         };
         if copy_result != 0 {
             return Err(format!(
                 "native status copy failed in signature round {copy_result} at destination byte {failure_offset}"
             ));
         }
-        if snapshot_copy_fields as usize != SNAPSHOT_LOGICAL_FIELD_COUNT {
+        if snapshot_native_copy_fields as usize + RUST_DERIVED_FIELD_COUNT
+            != SNAPSHOT_LOGICAL_FIELD_COUNT
+        {
             return Err(format!(
-                "native status copy mapped {snapshot_copy_fields} fields, expected {SNAPSHOT_LOGICAL_FIELD_COUNT}"
+                "program status mapping owns {} native-copy fields and {RUST_DERIVED_FIELD_COUNT} Rust-derived fields, expected {SNAPSHOT_LOGICAL_FIELD_COUNT} total fields",
+                snapshot_native_copy_fields
             ));
         }
         let snapshot_copy_signature_rounds = unsafe { dmc2_task_status_copy_signature_rounds() };
@@ -113,26 +113,20 @@ impl AuditReport {
             native_snapshot_size,
             snapshot_field_bytes,
             snapshot_padding_bytes,
-            snapshot_copy_fields: snapshot_copy_fields as usize,
+            snapshot_native_copy_fields: snapshot_native_copy_fields as usize,
+            snapshot_rust_derived_fields: RUST_DERIVED_FIELD_COUNT,
             snapshot_copy_signature_rounds,
         })
     }
 
     fn print_human(&self) {
         println!(
-            "dmc2-task-monitor: offline validation passed; LinuxCNC={} source={} catalog_domains={} catalog_codes={} enum_headers={} enum_declarations={} interpreter_errors={} status_messages={} error_messages={} snapshot_abi=0x{:08x} snapshot_size={} snapshot_fields={} copy_rounds={} all_bytes_accounted=1",
-            LINUXCNC_VERSION,
-            LINUXCNC_SOURCE_COMMIT,
-            DOMAINS.len(),
-            GENERATED_CODE_COUNT,
-            PUBLIC_ENUM_HEADER_COUNT,
-            ENUM_DECLARATION_COUNT,
-            INTERPRETER_ERROR_TEMPLATES.len(),
-            STATUS_MESSAGE_CONTRACT_COUNT,
-            ERROR_MESSAGE_CONTRACT_COUNT,
+            "dmc2-task-monitor: program validation passed; snapshot_abi=0x{:08x} snapshot_size={} snapshot_fields={} native_copy_fields={} rust_derived_fields={} copy_rounds={} all_bytes_accounted=1",
             SNAPSHOT_ABI_VERSION,
             self.native_snapshot_size,
-            self.snapshot_copy_fields,
+            self.snapshot_native_copy_fields + self.snapshot_rust_derived_fields,
+            self.snapshot_native_copy_fields,
+            self.snapshot_rust_derived_fields,
             self.snapshot_copy_signature_rounds,
         );
     }
@@ -142,42 +136,24 @@ impl AuditReport {
             concat!(
                 "{{",
                 "\"schema_version\":1,",
-                "\"linuxcnc_version\":\"{}\",",
-                "\"linuxcnc_source_commit\":\"{}\",",
-                "\"catalog_domains\":{},",
-                "\"catalog_codes\":{},",
-                "\"enum_codes\":{},",
-                "\"non_enum_codes\":{},",
-                "\"public_enum_headers\":{},",
-                "\"enum_declarations\":{},",
-                "\"interpreter_error_templates\":{},",
-                "\"status_message_contracts\":{},",
-                "\"error_message_contracts\":{},",
                 "\"snapshot_abi_version\":{},",
                 "\"snapshot_schema_fnv64\":\"0x{:016x}\",",
                 "\"snapshot_size\":{},",
                 "\"snapshot_logical_fields\":{},",
+                "\"snapshot_native_copy_fields\":{},",
+                "\"snapshot_rust_derived_fields\":{},",
                 "\"snapshot_field_bytes\":{},",
                 "\"snapshot_padding_bytes\":{},",
                 "\"snapshot_copy_signature_rounds\":{},",
                 "\"snapshot_copy_all_bytes\":true",
                 "}}"
             ),
-            LINUXCNC_VERSION,
-            LINUXCNC_SOURCE_COMMIT,
-            DOMAINS.len(),
-            GENERATED_CODE_COUNT,
-            ENUM_CODE_COUNT,
-            NON_ENUM_CODE_COUNT,
-            PUBLIC_ENUM_HEADER_COUNT,
-            ENUM_DECLARATION_COUNT,
-            INTERPRETER_ERROR_TEMPLATES.len(),
-            STATUS_MESSAGE_CONTRACT_COUNT,
-            ERROR_MESSAGE_CONTRACT_COUNT,
             SNAPSHOT_ABI_VERSION,
             SNAPSHOT_SCHEMA_FNV64,
             self.native_snapshot_size,
-            self.snapshot_copy_fields,
+            self.snapshot_native_copy_fields + self.snapshot_rust_derived_fields,
+            self.snapshot_native_copy_fields,
+            self.snapshot_rust_derived_fields,
             self.snapshot_field_bytes,
             self.snapshot_padding_bytes,
             self.snapshot_copy_signature_rounds,
@@ -186,7 +162,7 @@ impl AuditReport {
 }
 
 pub(super) fn run(json: bool) -> Result<(), String> {
-    let report = AuditReport::collect()?;
+    let report = ValidationReport::collect()?;
     if json {
         report.print_json();
     } else {
@@ -200,10 +176,15 @@ mod tests {
     use super::*;
 
     #[test]
-    fn compiled_audit_executes_the_native_copy_and_accounts_for_every_byte() {
-        let report = AuditReport::collect().unwrap();
+    fn validation_executes_the_native_copy_and_accounts_for_every_program_byte() {
+        let report = ValidationReport::collect().unwrap();
         assert_eq!(report.native_snapshot_size, 11_672);
-        assert_eq!(report.snapshot_copy_fields, 1_109);
+        assert_eq!(report.snapshot_native_copy_fields, 1_100);
+        assert_eq!(report.snapshot_rust_derived_fields, 9);
+        assert_eq!(
+            report.snapshot_native_copy_fields + report.snapshot_rust_derived_fields,
+            SNAPSHOT_LOGICAL_FIELD_COUNT
+        );
         assert_eq!(report.snapshot_copy_signature_rounds, 21);
         assert_eq!(report.snapshot_field_bytes, 11_165);
         assert_eq!(report.snapshot_padding_bytes, 507);

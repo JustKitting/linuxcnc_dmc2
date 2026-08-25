@@ -1,11 +1,9 @@
 use std::ffi::{c_int, CString};
 use std::{mem, ptr};
 
-use dmc2_hal_sys as hal;
-use dmc2_linuxcnc_interface::{GENERATED_CODE_COUNT, HEADER_SOURCE_FNV64};
-
 use crate::application::nml::required_nml_error;
 use crate::snapshot::{NativeSnapshot, SNAPSHOT_ABI_VERSION};
+use dmc2_hal_sys as hal;
 
 use super::pins::{
     HalPins, CLEAR_LATCHED_INPUT_PIN, CONNECTION_BIT_OUTPUT_PINS, DIAGNOSTIC_BIT_OUTPUT_PINS,
@@ -126,9 +124,6 @@ unsafe fn register_pins(
             &mut pins.diagnostic_transitions,
             &mut pins.latest_code_low,
             &mut pins.latest_code_high,
-            &mut pins.catalog_code_count,
-            &mut pins.catalog_fingerprint_low,
-            &mut pins.catalog_fingerprint_high,
             &mut pins.snapshot_abi_version,
             &mut pins.snapshot_struct_size,
         ]) {
@@ -219,12 +214,6 @@ unsafe fn publish_initial_safe(pins: &HalPins) {
         ptr::write_volatile(pins.latest_severity, 0);
         ptr::write_volatile(pins.latest_action, 0);
         ptr::write_volatile(pins.clear_latched, false);
-        ptr::write_volatile(pins.catalog_code_count, GENERATED_CODE_COUNT as u32);
-        ptr::write_volatile(pins.catalog_fingerprint_low, HEADER_SOURCE_FNV64 as u32);
-        ptr::write_volatile(
-            pins.catalog_fingerprint_high,
-            (HEADER_SOURCE_FNV64 >> 32) as u32,
-        );
         ptr::write_volatile(pins.snapshot_abi_version, SNAPSHOT_ABI_VERSION);
         ptr::write_volatile(
             pins.snapshot_struct_size,

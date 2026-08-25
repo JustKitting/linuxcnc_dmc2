@@ -5,9 +5,7 @@ use std::sync::Mutex;
 use std::vec::Vec;
 
 use dmc2_hal_sys as hal;
-use dmc2_linuxcnc_interface::{
-    GENERATED_CODE_COUNT, HEADER_SOURCE_FNV64, TASK_INTERP, TASK_MODE, TRAJ_MODE,
-};
+use dmc2_linuxcnc_interface::{TASK_INTERP, TASK_MODE, TRAJ_MODE};
 
 use crate::application::diagnostic_state::DiagnosticState;
 use crate::application::nml::required_nml_error;
@@ -18,7 +16,7 @@ use super::publisher::HalPublisher;
 use super::registration::create_hal;
 
 const COMPONENT_ID: c_int = 61;
-const PIN_COUNT: usize = 50;
+const PIN_COUNT: usize = 47;
 
 #[repr(align(16))]
 struct Arena([u8; 32_768]);
@@ -450,15 +448,6 @@ fn every_hal_output_has_the_exact_status_and_diagnostic_value() {
         );
         assert_eq!(value(pins.latest_action), diagnostic_state.latest_action);
         assert!(!value(pins.clear_latched));
-        assert_eq!(value(pins.catalog_code_count), GENERATED_CODE_COUNT as u32);
-        assert_eq!(
-            value(pins.catalog_fingerprint_low),
-            HEADER_SOURCE_FNV64 as u32
-        );
-        assert_eq!(
-            value(pins.catalog_fingerprint_high),
-            (HEADER_SOURCE_FNV64 >> 32) as u32
-        );
         assert_eq!(value(pins.snapshot_abi_version), SNAPSHOT_ABI_VERSION);
         assert_eq!(
             value(pins.snapshot_struct_size),

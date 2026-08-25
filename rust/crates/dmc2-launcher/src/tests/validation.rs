@@ -2,7 +2,7 @@ use std::io;
 
 use crate::error::Error;
 use crate::integrity::deployments;
-use crate::validation::{validate, EXPECTED_INTERFACE_AUDIT, EXPECTED_LINUXCNC_VERSION};
+use crate::validation::{validate, EXPECTED_LINUXCNC_VERSION, EXPECTED_TASK_MONITOR_VALIDATION};
 
 use super::support::{FileEntry, MockPlatform, RunOutcome};
 
@@ -11,7 +11,7 @@ fn reset_runs(platform: &MockPlatform) {
 }
 
 #[test]
-fn nominal_validation_consumes_the_exact_version_and_interface_audit() {
+fn nominal_validation_consumes_the_exact_version_and_program_validation() {
     let (platform, layout) = MockPlatform::nominal();
     validate(&platform, &layout).unwrap();
     platform.assert_runs_consumed();
@@ -64,7 +64,7 @@ fn every_required_executable_is_mandatory() {
 }
 
 #[test]
-fn every_process_completion_category_is_handled_for_version_and_audit() {
+fn every_process_completion_category_is_handled_for_version_and_program_validation() {
     for status in [Some(1), Some(2), Some(126), Some(127), Some(255), None] {
         let (platform, layout) = MockPlatform::nominal();
         reset_runs(&platform);
@@ -122,27 +122,27 @@ fn version_requires_exact_stdout_and_empty_stderr() {
 }
 
 #[test]
-fn interface_audit_requires_every_exact_byte_and_empty_stderr() {
-    let mut changed = EXPECTED_INTERFACE_AUDIT.to_vec();
+fn task_monitor_validation_requires_every_exact_byte_and_empty_stderr() {
+    let mut changed = EXPECTED_TASK_MONITOR_VALIDATION.to_vec();
     changed[0] ^= 1;
     for (stdout, stderr) in [
         (changed.as_slice(), &b""[..]),
         (
-            &EXPECTED_INTERFACE_AUDIT[..EXPECTED_INTERFACE_AUDIT.len() - 1],
+            &EXPECTED_TASK_MONITOR_VALIDATION[..EXPECTED_TASK_MONITOR_VALIDATION.len() - 1],
             &b""[..],
         ),
-        (EXPECTED_INTERFACE_AUDIT, &b"warning"[..]),
+        (EXPECTED_TASK_MONITOR_VALIDATION, &b"warning"[..]),
     ] {
         let (platform, layout) = MockPlatform::nominal();
         reset_runs(&platform);
         platform.push_nominal_validation(&layout);
         let mut runs = platform.runs.borrow_mut();
-        let audit = runs.back_mut().unwrap();
-        audit.outcome = MockPlatform::output(Some(0), stdout, stderr);
+        let validation = runs.back_mut().unwrap();
+        validation.outcome = MockPlatform::output(Some(0), stdout, stderr);
         drop(runs);
         assert!(matches!(
             validate(&platform, &layout),
-            Err(Error::InterfaceAudit { .. })
+            Err(Error::ProgramValidation { .. })
         ));
     }
 }

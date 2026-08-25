@@ -1,8 +1,8 @@
-mod audit;
 mod cli;
 mod diagnostic_state;
 mod hal;
 mod nml;
+mod program_validation;
 
 use std::ffi::CString;
 use std::mem;
@@ -15,7 +15,7 @@ use crate::snapshot::{NativeSnapshot, SNAPSHOT_ABI_VERSION};
 use self::cli::arguments;
 use self::diagnostic_state::DiagnosticState;
 use self::hal::HalPublisher;
-use self::nml::{required_nml_error, PollDisposition, StatusChannel};
+use self::nml::{PollCodes, PollDisposition, StatusChannel};
 
 const POLL_PERIOD: Duration = Duration::from_millis(10);
 const RECONNECT_PERIOD: Duration = Duration::from_secs(1);
@@ -31,7 +31,7 @@ pub(super) fn run() -> Result<(), String> {
         ));
     }
     if args.validate {
-        return audit::run(args.validation_json);
+        return program_validation::run(args.validation_json);
     }
 
     let nml_file = CString::new(args.nml_file.as_str())
@@ -39,14 +39,13 @@ pub(super) fn run() -> Result<(), String> {
     let hal = HalPublisher::new(&args.component)?;
     let mut channel = None;
     let mut diagnostic_state = DiagnosticState::new();
-    let no_nml_error = required_nml_error("NML_NO_ERROR");
-    let invalid_nml_configuration = required_nml_error("NML_INVALID_CONFIGURATION");
+    let poll_codes = PollCodes::required();
 
     loop {
         if channel.is_none() {
-            let (opened, nml_error) = StatusChannel::open(&nml_file, invalid_nml_configuration);
+            let (opened, nml_error) = StatusChannel::open(&nml_file, poll_codes);
             channel = opened;
-            if channel.is_none() || nml_error != no_nml_error {
+            if channel.is_none() || nml_error != poll_codes.no_error() {
                 channel = None;
                 hal.increment_poll_errors();
                 hal.publish(
@@ -66,7 +65,7 @@ pub(super) fn run() -> Result<(), String> {
         let (disposition, nml_error) = channel
             .as_mut()
             .expect("NML channel was checked above")
-            .poll(&mut snapshot, invalid_nml_configuration, no_nml_error);
+            .poll(&mut snapshot, poll_codes);
         if disposition == PollDisposition::WaitingForFirstStatus {
             thread::sleep(POLL_PERIOD);
             continue;

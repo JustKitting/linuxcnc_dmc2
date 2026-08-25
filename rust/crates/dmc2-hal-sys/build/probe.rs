@@ -22,6 +22,10 @@ typedef int (*expected_hal_pin_s32_new)(
     const char *, hal_pin_dir_t, volatile int32_t **, int);
 typedef int (*expected_hal_pin_u32_new)(
     const char *, hal_pin_dir_t, volatile uint32_t **, int);
+typedef int (*expected_hal_param_float_new)(
+    const char *, hal_param_dir_t, volatile double *, int);
+typedef int (*expected_hal_param_u32_new)(
+    const char *, hal_param_dir_t, volatile uint32_t *, int);
 typedef void (*expected_hal_realtime_function)(void *, long);
 typedef int (*expected_hal_export_funct)(
     const char *, expected_hal_realtime_function, void *, int, int, int);
@@ -46,6 +50,10 @@ ABI_COMPATIBLE(__typeof__(&hal_pin_s32_new), expected_hal_pin_s32_new,
                "hal_pin_s32_new signature changed");
 ABI_COMPATIBLE(__typeof__(&hal_pin_u32_new), expected_hal_pin_u32_new,
                "hal_pin_u32_new signature changed");
+ABI_COMPATIBLE(__typeof__(&hal_param_float_new), expected_hal_param_float_new,
+               "hal_param_float_new signature changed");
+ABI_COMPATIBLE(__typeof__(&hal_param_u32_new), expected_hal_param_u32_new,
+               "hal_param_u32_new signature changed");
 ABI_COMPATIBLE(__typeof__(&hal_export_funct), expected_hal_export_funct,
                "hal_export_funct signature changed");
 ABI_COMPATIBLE(__typeof__(&rtapi_print_msg), expected_rtapi_print_msg,
@@ -61,6 +69,7 @@ _Static_assert(sizeof(hal_pin_dir_t) == sizeof(int),
 _Static_assert(HAL_IN == 16, "HAL_IN value changed");
 _Static_assert(HAL_OUT == 32, "HAL_OUT value changed");
 _Static_assert(HAL_IO == 48, "HAL_IO value changed");
+_Static_assert(HAL_RW == 192, "HAL_RW value changed");
 _Static_assert(RTAPI_MSG_ERR == 1, "RTAPI_MSG_ERR value changed");
 "#;
 
