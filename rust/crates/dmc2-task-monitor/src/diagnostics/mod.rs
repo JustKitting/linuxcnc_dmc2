@@ -39,5 +39,15 @@ pub fn evaluate(snapshot: &NativeSnapshot) -> DiagnosticReport {
     report
 }
 
+pub fn evaluate_with_transport(
+    snapshot: &NativeSnapshot,
+    nml_error: i32,
+    cms_status: i32,
+) -> DiagnosticReport {
+    let mut report = evaluate(snapshot);
+    transport::evaluate(&mut report, nml_error, cms_status);
+    report
+}
+
 #[cfg(test)]
 mod tests;

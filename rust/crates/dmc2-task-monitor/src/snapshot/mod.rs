@@ -32,9 +32,12 @@ const STOPPED_VELOCITY_TOLERANCE: f64 = 0.000_001;
 
 const _: unsafe extern "C" fn() -> u32 = dmc2_task_status_snapshot_abi_version;
 const _: unsafe extern "C" fn() -> usize = dmc2_task_status_snapshot_size;
-const _: unsafe extern "C" fn(*const core::ffi::c_char, *mut i32) -> *mut NativeTaskStatusChannel =
-    dmc2_task_status_open;
-const _: unsafe extern "C" fn(*mut NativeTaskStatusChannel, *mut i32, *mut i32) -> i32 =
+const _: unsafe extern "C" fn(
+    *const core::ffi::c_char,
+    *mut i32,
+    *mut i32,
+) -> *mut NativeTaskStatusChannel = dmc2_task_status_open;
+const _: unsafe extern "C" fn(*mut NativeTaskStatusChannel, *mut i32, *mut i32, *mut i32) -> i32 =
     dmc2_task_status_observe;
 const _: unsafe extern "C" fn(*mut NativeTaskStatusChannel, *mut NativeSnapshot) -> i32 =
     dmc2_task_status_copy;

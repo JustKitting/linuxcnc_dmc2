@@ -6,9 +6,9 @@ use crate::snapshot::{
     SNAPSHOT_LOGICAL_FIELD_COUNT,
 };
 use dmc2_linuxcnc_interface::{
-    status_message_contract, CodeDomain, CANON_UNITS, EMC_NML_MESSAGE_TYPE, INTERPRETER_RETURN,
-    JOINT_TYPE, KINEMATICS_TYPE, MOTION_COMMAND, NML_ERROR, RCS_STATE, RCS_STATUS,
-    SPINDLE_ORIENT_STATE, TASK_EXEC, TASK_INTERP, TASK_MODE, TASK_STATE, TRAJ_MODE,
+    status_message_contract, CodeDomain, CANON_UNITS, CMS_STATUS, EMC_NML_MESSAGE_TYPE,
+    INTERPRETER_RETURN, JOINT_TYPE, KINEMATICS_TYPE, MOTION_COMMAND, NML_ERROR, RCS_STATE,
+    RCS_STATUS, SPINDLE_ORIENT_STATE, TASK_EXEC, TASK_INTERP, TASK_MODE, TASK_STATE, TRAJ_MODE,
 };
 
 fn code(domain: CodeDomain, name: &str) -> i32 {
@@ -270,7 +270,10 @@ fn unknown_nml_and_motion_command_echoes_are_both_reported() {
 
 #[test]
 fn disconnected_status_is_an_explicit_transport_error() {
-    let report = disconnected(code(NML_ERROR, "NML_TIMED_OUT"));
+    let report = disconnected(
+        code(NML_ERROR, "NML_TIMED_OUT"),
+        code(CMS_STATUS, "CMS_STATUS_NOT_SET"),
+    );
     assert!(report.error_active());
     assert_ne!(report.active_error_mask & category::TRANSPORT, 0);
     assert!(!report.unknown_code_active());
@@ -279,7 +282,10 @@ fn disconnected_status_is_an_explicit_transport_error() {
 #[test]
 fn transition_logger_reports_assertions_and_clears_once() {
     let mut logger = TransitionLogger::default();
-    let fault = disconnected(code(NML_ERROR, "NML_TIMED_OUT"));
+    let fault = disconnected(
+        code(NML_ERROR, "NML_TIMED_OUT"),
+        code(CMS_STATUS, "CMS_STATUS_NOT_SET"),
+    );
     let first = logger.update(&fault);
     assert_eq!(first.count, 1);
     assert_eq!(first.latest_action, 1);
@@ -293,11 +299,11 @@ fn transition_logger_reports_assertions_and_clears_once() {
 #[test]
 fn every_nml_transport_error_code_has_its_exact_source_name() {
     for entry in NML_ERROR.codes {
-        let report = disconnected(entry.code as i32);
+        let report = disconnected(entry.code as i32, code(CMS_STATUS, "CMS_STATUS_NOT_SET"));
         let transport = report
             .issues
             .iter()
-            .find(|issue| issue.category == category::TRANSPORT)
+            .find(|issue| issue.category == category::TRANSPORT && issue.domain == NML_ERROR.name)
             .expect("transport issue was omitted");
         assert_eq!(transport.name, Some(entry.name));
         assert_eq!(transport.value, entry.code);
@@ -306,10 +312,48 @@ fn every_nml_transport_error_code_has_its_exact_source_name() {
 
 #[test]
 fn unknown_nml_transport_code_is_never_mislabeled() {
-    let report = disconnected(i32::MAX);
+    let report = disconnected(i32::MAX, code(CMS_STATUS, "CMS_STATUS_NOT_SET"));
     assert!(report.unknown_code_active());
     assert!(report
         .issues
         .iter()
         .any(|issue| issue.category == category::UNKNOWN_CODE && issue.name.is_none()));
+}
+
+#[test]
+fn every_cms_status_code_has_its_exact_source_backed_policy() {
+    let snapshot = normal_snapshot();
+    let nml_no_error = code(NML_ERROR, "NML_NO_ERROR");
+    for entry in CMS_STATUS.codes {
+        let report = evaluate_with_transport(&snapshot, nml_no_error, entry.code as i32);
+        let cms_issues = report
+            .issues
+            .iter()
+            .filter(|issue| issue.domain == CMS_STATUS.name)
+            .collect::<Vec<_>>();
+        if entry.code < 0 {
+            assert_eq!(cms_issues.len(), 1, "{}", entry.name);
+            assert_eq!(cms_issues[0].category, category::TRANSPORT);
+            assert_eq!(cms_issues[0].name, Some(entry.name));
+            assert_eq!(cms_issues[0].value, entry.code);
+        } else {
+            assert!(cms_issues.is_empty(), "{}", entry.name);
+        }
+    }
+}
+
+#[test]
+fn unknown_cms_transport_code_is_never_mislabeled() {
+    let report = evaluate_with_transport(
+        &normal_snapshot(),
+        code(NML_ERROR, "NML_NO_ERROR"),
+        i32::MAX,
+    );
+    let unknown = report
+        .issues
+        .iter()
+        .find(|issue| issue.category == category::UNKNOWN_CODE && issue.domain == CMS_STATUS.name)
+        .expect("unknown CMS status was omitted");
+    assert_eq!(unknown.name, None);
+    assert_eq!(unknown.value, i64::from(i32::MAX));
 }

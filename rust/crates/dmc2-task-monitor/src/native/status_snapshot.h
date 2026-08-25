@@ -272,11 +272,13 @@ int dmc2_task_status_copy_self_test(
 uint32_t dmc2_task_status_copy_signature_rounds(void) DMC2_NOEXCEPT;
 dmc2_task_status_channel *dmc2_task_status_open(
     const char *nml_file,
-    int32_t *nml_error) DMC2_NOEXCEPT;
+    int32_t *nml_error,
+    int32_t *cms_status) DMC2_NOEXCEPT;
 dmc2_task_status_native_result dmc2_task_status_observe(
     dmc2_task_status_channel *channel,
     int32_t *message_type,
-    int32_t *nml_error) DMC2_NOEXCEPT;
+    int32_t *nml_error,
+    int32_t *cms_status) DMC2_NOEXCEPT;
 dmc2_task_status_native_result dmc2_task_status_copy(
     dmc2_task_status_channel *channel,
     dmc2_task_status_snapshot *snapshot) DMC2_NOEXCEPT;

@@ -95,6 +95,8 @@ fn main() {
     );
 
     for (installed, source) in [
+        ("cms.hh", "src/libnml/cms/cms.hh"),
+        ("cms_user.hh", "src/libnml/cms/cms_user.hh"),
         ("emc_nml.hh", "src/emc/nml_intf/emc_nml.hh"),
         ("emcpos.h", "src/emc/nml_intf/emcpos.h"),
         ("emctool.h", "src/emc/nml_intf/emctool.h"),
@@ -104,6 +106,7 @@ fn main() {
         ("state_tag.h", "src/emc/motion/state_tag.h"),
         ("stat_msg.hh", "src/libnml/nml/stat_msg.hh"),
         ("nmlmsg.hh", "src/libnml/nml/nmlmsg.hh"),
+        ("nml.hh", "src/libnml/nml/nml.hh"),
         ("nml_type.hh", "src/libnml/nml/nml_type.hh"),
     ] {
         exact_header(&manifest, installed, source);

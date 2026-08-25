@@ -3,9 +3,10 @@ use std::ptr;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use dmc2_hal_sys as hal;
-use dmc2_linuxcnc_interface::{NML_ERROR, TASK_INTERP, TASK_MODE, TRAJ_MODE};
+use dmc2_linuxcnc_interface::{CMS_STATUS, NML_ERROR, TASK_INTERP, TASK_MODE, TRAJ_MODE};
 
 use crate::application::diagnostic_state::DiagnosticState;
+use crate::application::nml::TransportStatus;
 use crate::diagnostics::DiagnosticReport;
 use crate::snapshot::NativeSnapshot;
 
@@ -41,7 +42,7 @@ impl HalPublisher {
         snapshot: NativeSnapshot,
         connected: bool,
         fault: bool,
-        nml_error: i32,
+        transport: TransportStatus,
         diagnostics: &DiagnosticReport,
         diagnostic_state: &mut DiagnosticState,
     ) {
@@ -84,10 +85,15 @@ impl HalPublisher {
             }
             ptr::write_volatile(pins.connected, connected);
             ptr::write_volatile(pins.fault, fault);
-            ptr::write_volatile(pins.nml_error_code, nml_error);
+            ptr::write_volatile(pins.nml_error_code, transport.nml_error);
             ptr::write_volatile(
                 pins.nml_error_known,
-                NML_ERROR.lookup(i64::from(nml_error)).is_some(),
+                NML_ERROR.lookup(i64::from(transport.nml_error)).is_some(),
+            );
+            ptr::write_volatile(pins.cms_status_code, transport.cms_status);
+            ptr::write_volatile(
+                pins.cms_status_known,
+                CMS_STATUS.lookup(i64::from(transport.cms_status)).is_some(),
             );
             ptr::write_volatile(pins.linuxcnc_error_active, diagnostics.error_active());
             ptr::write_volatile(pins.linuxcnc_warning_active, diagnostics.warning_active());

@@ -1,7 +1,7 @@
 use std::ffi::{c_int, CString};
 use std::{mem, ptr};
 
-use crate::application::nml::required_nml_error;
+use crate::application::nml::{required_cms_status, required_nml_error};
 use crate::snapshot::{NativeSnapshot, SNAPSHOT_ABI_VERSION};
 use dmc2_hal_sys as hal;
 
@@ -102,6 +102,7 @@ unsafe fn register_pins(
         }
         for (suffix, pointer) in DIAGNOSTIC_BIT_OUTPUT_PINS.into_iter().zip([
             &mut pins.nml_error_known,
+            &mut pins.cms_status_known,
             &mut pins.linuxcnc_error_active,
             &mut pins.linuxcnc_warning_active,
             &mut pins.unknown_code_active,
@@ -131,6 +132,7 @@ unsafe fn register_pins(
         }
         for (suffix, pointer) in DIAGNOSTIC_S32_OUTPUT_PINS.into_iter().zip([
             &mut pins.nml_error_code,
+            &mut pins.cms_status_code,
             &mut pins.latest_code_domain,
             &mut pins.latest_severity,
             &mut pins.latest_action,
@@ -192,6 +194,11 @@ unsafe fn publish_initial_safe(pins: &HalPins) {
         let initial_nml_error = required_nml_error("NML_INVALID_CONFIGURATION");
         ptr::write_volatile(pins.nml_error_code, initial_nml_error);
         ptr::write_volatile(pins.nml_error_known, true);
+        ptr::write_volatile(
+            pins.cms_status_code,
+            required_cms_status("CMS_STATUS_NOT_SET"),
+        );
+        ptr::write_volatile(pins.cms_status_known, true);
         ptr::write_volatile(pins.linuxcnc_error_active, true);
         ptr::write_volatile(pins.linuxcnc_warning_active, false);
         ptr::write_volatile(pins.unknown_code_active, false);

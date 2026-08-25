@@ -43,17 +43,17 @@ pub(super) fn run() -> Result<(), String> {
 
     loop {
         if channel.is_none() {
-            let (opened, nml_error) = StatusChannel::open(&nml_file, poll_codes);
+            let (opened, transport) = StatusChannel::open(&nml_file, poll_codes);
             channel = opened;
-            if channel.is_none() || nml_error != poll_codes.no_error() {
+            if channel.is_none() || !transport.healthy(poll_codes) {
                 channel = None;
                 hal.increment_poll_errors();
                 hal.publish(
                     NativeSnapshot::safe(),
                     false,
                     true,
-                    nml_error,
-                    &diagnostics::disconnected(nml_error),
+                    transport,
+                    &diagnostics::disconnected(transport.nml_error, transport.cms_status),
                     &mut diagnostic_state,
                 );
                 thread::sleep(RECONNECT_PERIOD);
@@ -62,38 +62,46 @@ pub(super) fn run() -> Result<(), String> {
         }
 
         let mut snapshot = NativeSnapshot::safe();
-        let (disposition, nml_error) = channel
+        let outcome = channel
             .as_mut()
             .expect("NML channel was checked above")
             .poll(&mut snapshot, poll_codes);
-        if disposition == PollDisposition::WaitingForFirstStatus {
+        if outcome.disposition == PollDisposition::WaitingForFirstStatus {
             thread::sleep(POLL_PERIOD);
             continue;
         }
-        let transport_ok = disposition == PollDisposition::Snapshot;
+        let transport_ok = outcome.disposition == PollDisposition::Snapshot;
         let snapshot_ok = snapshot.valid_abi();
         if transport_ok && snapshot_ok {
-            let report = diagnostics::evaluate(&snapshot);
+            let report = diagnostics::evaluate_with_transport(
+                &snapshot,
+                outcome.transport.nml_error,
+                outcome.transport.cms_status,
+            );
             hal.publish(
                 snapshot,
                 true,
                 false,
-                nml_error,
+                outcome.transport,
                 &report,
                 &mut diagnostic_state,
             );
         } else {
             hal.increment_poll_errors();
             let report = if transport_ok {
-                diagnostics::evaluate(&snapshot)
+                diagnostics::evaluate_with_transport(
+                    &snapshot,
+                    outcome.transport.nml_error,
+                    outcome.transport.cms_status,
+                )
             } else {
-                diagnostics::disconnected(nml_error)
+                diagnostics::disconnected(outcome.transport.nml_error, outcome.transport.cms_status)
             };
             hal.publish(
                 NativeSnapshot::safe(),
                 false,
                 true,
-                nml_error,
+                outcome.transport,
                 &report,
                 &mut diagnostic_state,
             );

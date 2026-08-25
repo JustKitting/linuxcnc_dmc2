@@ -8,7 +8,7 @@ use dmc2_hal_sys as hal;
 use dmc2_linuxcnc_interface::{TASK_INTERP, TASK_MODE, TRAJ_MODE};
 
 use crate::application::diagnostic_state::DiagnosticState;
-use crate::application::nml::required_nml_error;
+use crate::application::nml::{required_cms_status, required_nml_error, TransportStatus};
 use crate::diagnostics;
 use crate::snapshot::{NativeSnapshot, SNAPSHOT_ABI_VERSION};
 
@@ -16,7 +16,7 @@ use super::publisher::HalPublisher;
 use super::registration::create_hal;
 
 const COMPONENT_ID: c_int = 61;
-const PIN_COUNT: usize = 47;
+const PIN_COUNT: usize = 49;
 
 #[repr(align(16))]
 struct Arena([u8; 32_768]);
@@ -344,6 +344,18 @@ fn every_hal_output_has_the_exact_status_and_diagnostic_value() {
     reset();
     let publisher = HalPublisher::new("task-test").unwrap();
     let pins = publisher.test_pins();
+    unsafe {
+        assert_eq!(
+            value(pins.nml_error_code),
+            required_nml_error("NML_INVALID_CONFIGURATION")
+        );
+        assert!(value(pins.nml_error_known));
+        assert_eq!(
+            value(pins.cms_status_code),
+            required_cms_status("CMS_STATUS_NOT_SET")
+        );
+        assert!(value(pins.cms_status_known));
+    }
     let mut snapshot = NativeSnapshot::safe();
     snapshot.task.heartbeat = 123_456;
     snapshot.task.mode = code(TASK_MODE, "EMC_TASK_MODE_MANUAL");
@@ -357,14 +369,19 @@ fn every_hal_output_has_the_exact_status_and_diagnostic_value() {
         snapshot.axes[index].stopped = u32::from(index != 2);
     }
     let nml_error = i32::MAX;
-    let report = diagnostics::disconnected(nml_error);
+    let cms_status = i32::MAX;
+    let transport = TransportStatus {
+        nml_error,
+        cms_status,
+    };
+    let report = diagnostics::disconnected(nml_error, cms_status);
     let mut diagnostic_state = DiagnosticState::new();
 
     publisher.publish(
         snapshot,
         true,
         false,
-        nml_error,
+        transport,
         &report,
         &mut diagnostic_state,
     );
@@ -378,6 +395,8 @@ fn every_hal_output_has_the_exact_status_and_diagnostic_value() {
         assert_eq!(value(pins.poll_errors), 0);
         assert_eq!(value(pins.nml_error_code), nml_error);
         assert!(!value(pins.nml_error_known));
+        assert_eq!(value(pins.cms_status_code), cms_status);
+        assert!(!value(pins.cms_status_known));
         assert_eq!(value(pins.linuxcnc_error_active), report.error_active());
         assert_eq!(value(pins.linuxcnc_warning_active), report.warning_active());
         assert_eq!(
@@ -477,7 +496,10 @@ fn every_hal_output_has_the_exact_status_and_diagnostic_value() {
         snapshot,
         true,
         false,
-        required_nml_error("NML_NO_ERROR"),
+        TransportStatus {
+            nml_error: required_nml_error("NML_NO_ERROR"),
+            cms_status: required_cms_status("CMS_READ_OK"),
+        },
         &diagnostics::DiagnosticReport::default(),
         &mut diagnostic_state,
     );
@@ -489,7 +511,10 @@ fn every_hal_output_has_the_exact_status_and_diagnostic_value() {
         snapshot,
         true,
         false,
-        required_nml_error("NML_NO_ERROR"),
+        TransportStatus {
+            nml_error: required_nml_error("NML_NO_ERROR"),
+            cms_status: required_cms_status("CMS_READ_OK"),
+        },
         &diagnostics::DiagnosticReport::default(),
         &mut diagnostic_state,
     );

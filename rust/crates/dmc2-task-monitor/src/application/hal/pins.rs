@@ -6,8 +6,9 @@ pub(super) const SNAPSHOT_GENERATION_PIN: &str = "snapshot-generation";
 pub(super) const CONNECTION_BIT_OUTPUT_PINS: [&str; 2] = ["connected", "fault"];
 pub(super) const RUNTIME_U32_OUTPUT_PINS: [&str; 3] =
     ["task-heartbeat", "publications", "poll-errors"];
-pub(super) const DIAGNOSTIC_BIT_OUTPUT_PINS: [&str; 4] = [
+pub(super) const DIAGNOSTIC_BIT_OUTPUT_PINS: [&str; 5] = [
     "nml-error-known",
+    "cms-status-known",
     "linuxcnc-error-active",
     "linuxcnc-warning-active",
     "unknown-code-active",
@@ -31,8 +32,9 @@ pub(super) const DIAGNOSTIC_U32_OUTPUT_PINS: [&str; 17] = [
     "snapshot-abi-version",
     "snapshot-struct-size",
 ];
-pub(super) const DIAGNOSTIC_S32_OUTPUT_PINS: [&str; 4] = [
+pub(super) const DIAGNOSTIC_S32_OUTPUT_PINS: [&str; 5] = [
     "nml-error-code",
+    "cms-status-code",
     "latest-code-domain",
     "latest-severity",
     "latest-action",
@@ -56,6 +58,8 @@ pub(super) struct HalPins {
     pub(super) poll_errors: *mut hal::hal_u32_t,
     pub(super) nml_error_code: *mut hal::hal_s32_t,
     pub(super) nml_error_known: *mut hal::hal_bit_t,
+    pub(super) cms_status_code: *mut hal::hal_s32_t,
+    pub(super) cms_status_known: *mut hal::hal_bit_t,
     pub(super) linuxcnc_error_active: *mut hal::hal_bit_t,
     pub(super) linuxcnc_warning_active: *mut hal::hal_bit_t,
     pub(super) unknown_code_active: *mut hal::hal_bit_t,
@@ -102,6 +106,8 @@ impl HalPins {
             poll_errors: ptr::null_mut(),
             nml_error_code: ptr::null_mut(),
             nml_error_known: ptr::null_mut(),
+            cms_status_code: ptr::null_mut(),
+            cms_status_known: ptr::null_mut(),
             linuxcnc_error_active: ptr::null_mut(),
             linuxcnc_warning_active: ptr::null_mut(),
             unknown_code_active: ptr::null_mut(),
@@ -194,6 +200,7 @@ mod tests {
             ("publications", Kind::U32, "out"),
             ("poll-errors", Kind::U32, "out"),
             ("nml-error-known", Kind::Bit, "out"),
+            ("cms-status-known", Kind::Bit, "out"),
             ("linuxcnc-error-active", Kind::Bit, "out"),
             ("linuxcnc-warning-active", Kind::Bit, "out"),
             ("unknown-code-active", Kind::Bit, "out"),
@@ -215,6 +222,7 @@ mod tests {
             ("snapshot-abi-version", Kind::U32, "out"),
             ("snapshot-struct-size", Kind::U32, "out"),
             ("nml-error-code", Kind::S32, "out"),
+            ("cms-status-code", Kind::S32, "out"),
             ("latest-code-domain", Kind::S32, "out"),
             ("latest-severity", Kind::S32, "out"),
             ("latest-action", Kind::S32, "out"),
@@ -238,7 +246,7 @@ mod tests {
         .map(|(name, kind, direction)| spec(name, kind, direction));
         let actual = schema();
         assert_eq!(actual, expected);
-        assert_eq!(actual.len(), 47);
+        assert_eq!(actual.len(), 49);
         assert_eq!(
             actual
                 .iter()
