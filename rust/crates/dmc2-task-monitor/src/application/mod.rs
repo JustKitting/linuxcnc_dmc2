@@ -45,7 +45,7 @@ pub(super) fn run() -> Result<(), String> {
         if channel.is_none() {
             let (opened, transport) = StatusChannel::open(&nml_file, poll_codes);
             channel = opened;
-            if channel.is_none() || !transport.healthy(poll_codes) {
+            if channel.is_none() || !transport.healthy_after_open(poll_codes) {
                 channel = None;
                 hal.increment_poll_errors();
                 hal.publish(

@@ -25,6 +25,8 @@ pub(super) struct PollCodes {
     invalid_message: i32,
     status_message_type: i32,
     cms_status_not_set: i32,
+    cms_read_old: i32,
+    cms_read_ok: i32,
 }
 
 impl PollCodes {
@@ -35,6 +37,8 @@ impl PollCodes {
             invalid_message: required_nml_error("NML_INVALID_MESSAGE_ERROR"),
             status_message_type: required_code(EMC_NML_MESSAGE_TYPE, "EMC_STAT_TYPE"),
             cms_status_not_set: required_code(CMS_STATUS, "CMS_STATUS_NOT_SET"),
+            cms_read_old: required_code(CMS_STATUS, "CMS_READ_OLD"),
+            cms_read_ok: required_code(CMS_STATUS, "CMS_READ_OK"),
         }
     }
 }
@@ -46,10 +50,12 @@ pub(super) struct TransportStatus {
 }
 
 impl TransportStatus {
-    pub(super) fn healthy(self, codes: PollCodes) -> bool {
-        self.nml_error == codes.no_error
-            && self.cms_status >= 0
-            && CMS_STATUS.lookup(i64::from(self.cms_status)).is_some()
+    pub(super) fn healthy_after_open(self, codes: PollCodes) -> bool {
+        // CMS::open() explicitly initializes status to CMS_STATUS_NOT_SET.
+        // A read, write, clear, closed, unknown, or error state here is not a
+        // successful untouched NML channel, even when its numeric value is
+        // nonnegative.
+        self.nml_error == codes.no_error && self.cms_status == codes.cms_status_not_set
     }
 }
 
@@ -100,10 +106,12 @@ fn classify_observation(
     if nml_error != codes.no_error {
         return fault(transport, received_status);
     }
-    if CMS_STATUS.lookup(i64::from(cms_status)).is_none() || cms_status < 0 {
-        return fault(transport, received_status);
-    }
     if message_type == codes.status_message_type {
+        // LinuxCNC 2.9.10 NML::peek() returns a message type only from the
+        // CMS_READ_OK branch. Every other pairing is internally inconsistent.
+        if cms_status != codes.cms_read_ok {
+            return fault(transport, received_status);
+        }
         return PollDecision {
             disposition: PollDisposition::Snapshot,
             transport,
@@ -111,29 +119,33 @@ fn classify_observation(
             copy_snapshot: true,
         };
     }
-    if message_type == 0 && !received_status {
+    if message_type == 0 {
+        // LinuxCNC 2.9.10 NML::peek() returns zero only from CMS_READ_OLD.
+        if cms_status != codes.cms_read_old {
+            return fault(transport, received_status);
+        }
+        if !received_status {
+            return PollDecision {
+                disposition: PollDisposition::WaitingForFirstStatus,
+                transport,
+                received_status: false,
+                copy_snapshot: false,
+            };
+        }
         return PollDecision {
-            disposition: PollDisposition::WaitingForFirstStatus,
+            disposition: PollDisposition::Snapshot,
             transport,
-            received_status: false,
-            copy_snapshot: false,
+            received_status: true,
+            copy_snapshot: true,
         };
     }
-    if message_type != 0 {
-        return fault(
-            TransportStatus {
-                nml_error: codes.invalid_message,
-                cms_status,
-            },
-            received_status,
-        );
-    }
-    PollDecision {
-        disposition: PollDisposition::Snapshot,
-        transport,
-        received_status: true,
-        copy_snapshot: true,
-    }
+    fault(
+        TransportStatus {
+            nml_error: codes.invalid_message,
+            cms_status,
+        },
+        received_status,
+    )
 }
 
 fn required_code(domain: CodeDomain, name: &str) -> i32 {
@@ -247,7 +259,8 @@ mod tests {
     #[test]
     fn every_poll_observation_state_transition_is_exact() {
         let codes = PollCodes::required();
-        let cms_read_ok = required_cms_status("CMS_READ_OK");
+        let cms_read_ok = codes.cms_read_ok;
+        let cms_read_old = codes.cms_read_old;
         let healthy_transport = TransportStatus {
             nml_error: codes.no_error,
             cms_status: cms_read_ok,
@@ -274,13 +287,16 @@ mod tests {
                 DMC2_TASK_STATUS_NATIVE_OK,
                 0,
                 codes.no_error,
-                cms_read_ok,
+                cms_read_old,
                 false,
                 codes,
             ),
             PollDecision {
                 disposition: PollDisposition::WaitingForFirstStatus,
-                transport: healthy_transport,
+                transport: TransportStatus {
+                    nml_error: codes.no_error,
+                    cms_status: cms_read_old,
+                },
                 received_status: false,
                 copy_snapshot: false,
             }
@@ -290,11 +306,19 @@ mod tests {
                 DMC2_TASK_STATUS_NATIVE_OK,
                 0,
                 codes.no_error,
-                cms_read_ok,
+                cms_read_old,
                 true,
                 codes,
             ),
-            snapshot
+            PollDecision {
+                disposition: PollDisposition::Snapshot,
+                transport: TransportStatus {
+                    nml_error: codes.no_error,
+                    cms_status: cms_read_old,
+                },
+                received_status: true,
+                copy_snapshot: true,
+            }
         );
         for received_status in [false, true] {
             for message_type in [i32::MIN, -1, 1, i32::MAX] {
@@ -379,9 +403,7 @@ mod tests {
                 false,
                 codes,
             );
-            if cms_status < 0 {
-                assert_eq!(decision, fault(transport, false), "{}", entry.name);
-            } else {
+            if cms_status == codes.cms_read_ok {
                 assert_eq!(
                     decision,
                     PollDecision {
@@ -393,7 +415,40 @@ mod tests {
                     "{}",
                     entry.name
                 );
+            } else {
+                assert_eq!(decision, fault(transport, false), "{}", entry.name);
             }
+
+            let no_message = classify_observation(
+                DMC2_TASK_STATUS_NATIVE_OK,
+                0,
+                codes.no_error,
+                cms_status,
+                false,
+                codes,
+            );
+            if cms_status == codes.cms_read_old {
+                assert_eq!(
+                    no_message,
+                    PollDecision {
+                        disposition: PollDisposition::WaitingForFirstStatus,
+                        transport,
+                        received_status: false,
+                        copy_snapshot: false,
+                    },
+                    "{}",
+                    entry.name
+                );
+            } else {
+                assert_eq!(no_message, fault(transport, false), "{}", entry.name);
+            }
+
+            assert_eq!(
+                transport.healthy_after_open(codes),
+                cms_status == codes.cms_status_not_set,
+                "{}",
+                entry.name
+            );
         }
 
         for cms_status in [i32::MIN, 7, i32::MAX] {
@@ -412,7 +467,7 @@ mod tests {
                 ),
                 fault(transport, false)
             );
-            assert!(!transport.healthy(codes));
+            assert!(!transport.healthy_after_open(codes));
         }
     }
 

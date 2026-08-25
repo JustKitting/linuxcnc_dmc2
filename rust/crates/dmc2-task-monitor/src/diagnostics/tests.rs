@@ -331,15 +331,38 @@ fn every_cms_status_code_has_its_exact_source_backed_policy() {
             .iter()
             .filter(|issue| issue.domain == CMS_STATUS.name)
             .collect::<Vec<_>>();
-        if entry.code < 0 {
+        if matches!(entry.name, "CMS_READ_OLD" | "CMS_READ_OK") {
+            assert!(cms_issues.is_empty(), "{}", entry.name);
+        } else {
             assert_eq!(cms_issues.len(), 1, "{}", entry.name);
             assert_eq!(cms_issues[0].category, category::TRANSPORT);
             assert_eq!(cms_issues[0].name, Some(entry.name));
             assert_eq!(cms_issues[0].value, entry.code);
-        } else {
-            assert!(cms_issues.is_empty(), "{}", entry.name);
         }
     }
+}
+
+#[test]
+fn unopened_cms_status_is_only_accepted_while_disconnected() {
+    let status_not_set = code(CMS_STATUS, "CMS_STATUS_NOT_SET");
+    let nml_no_error = code(NML_ERROR, "NML_NO_ERROR");
+
+    let live = evaluate_with_transport(&normal_snapshot(), nml_no_error, status_not_set);
+    assert!(live.issues.iter().any(|issue| {
+        issue.category == category::TRANSPORT
+            && issue.domain == CMS_STATUS.name
+            && issue.name == Some("CMS_STATUS_NOT_SET")
+    }));
+
+    let opening = disconnected(nml_no_error, status_not_set);
+    assert!(!opening
+        .issues
+        .iter()
+        .any(|issue| issue.domain == CMS_STATUS.name));
+    assert!(opening
+        .issues
+        .iter()
+        .any(|issue| { issue.category == category::TRANSPORT && issue.domain == NML_ERROR.name }));
 }
 
 #[test]

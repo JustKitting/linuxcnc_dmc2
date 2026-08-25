@@ -35,7 +35,7 @@ fn evaluate_nml(report: &mut DiagnosticReport, nml_error: i32, disconnected: boo
     }
 }
 
-fn evaluate_cms(report: &mut DiagnosticReport, cms_status: i32) {
+fn evaluate_cms(report: &mut DiagnosticReport, cms_status: i32, disconnected: bool) {
     let name = CMS_STATUS.lookup(i64::from(cms_status));
     if name.is_none() {
         unknown_code(
@@ -56,17 +56,31 @@ fn evaluate_cms(report: &mut DiagnosticReport, cms_status: i32) {
             name,
             "native LinuxCNC CMS transport reported an error",
         );
+    } else if !matches!(name, Some("CMS_READ_OLD" | "CMS_READ_OK"))
+        && !(disconnected && name == Some("CMS_STATUS_NOT_SET"))
+    {
+        issue(
+            report,
+            Severity::Error,
+            category::TRANSPORT,
+            "emcStatus.cms.status",
+            CMS_STATUS.name,
+            domain_id(CMS_STATUS),
+            i64::from(cms_status),
+            name,
+            "CMS state is impossible after the LinuxCNC emcStatus NML::peek operation",
+        );
     }
 }
 
 pub(super) fn evaluate(report: &mut DiagnosticReport, nml_error: i32, cms_status: i32) {
     evaluate_nml(report, nml_error, false);
-    evaluate_cms(report, cms_status);
+    evaluate_cms(report, cms_status, false);
 }
 
 pub fn disconnected(nml_error: i32, cms_status: i32) -> DiagnosticReport {
     let mut report = DiagnosticReport::default();
     evaluate_nml(&mut report, nml_error, true);
-    evaluate_cms(&mut report, cms_status);
+    evaluate_cms(&mut report, cms_status, true);
     report
 }
