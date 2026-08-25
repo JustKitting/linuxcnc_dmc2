@@ -3,3 +3,7 @@
 Raw Mesa, sensor, probe, and spindle captures belong here. Captures are kept
 outside the source history because they can be large; tests must use explicit,
 small fixtures under `tests/fixtures` instead.
+
+The `spindle-modbus/` directory contains the preserved passive and read-only
+H100 diagnostic sessions originally produced by the standalone spindle
+development repository. They are evidence, not runtime inputs.

@@ -24,6 +24,8 @@ linuxcnc.report
 !/artifacts/firmware-builds/README.md
 /artifacts/firmware-backups/*
 !/artifacts/firmware-backups/README.md
+/artifacts/legacy-binaries/*
+!/artifacts/legacy-binaries/README.md
 /archive/local/*
 !/archive/local/README.md
 
