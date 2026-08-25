@@ -75,13 +75,28 @@ def install_axis_ui_policy(namespace: Mapping[str, object]) -> None:
 
     def filtered_error_task():
         try:
-            error = error_channel.poll()
-            while error:
+            while True:
+                try:
+                    error = error_channel.poll()
+                except Exception as polling_error:
+                    print(
+                        "DMC2_LINUXCNC_ERROR_CHANNEL "
+                        "kind=poll_failure name=UNKNOWN severity=error suppressed=0 "
+                        f"exception={polling_error!r}",
+                        flush=True,
+                    )
+                    notifications.add(
+                        "error",
+                        f"LinuxCNC error-channel polling failed: {polling_error}",
+                    )
+                    break
+                if error is None:
+                    break
                 try:
                     kind, raw_message = error
                     kind = int(kind)
                     message = str(raw_message)
-                except (TypeError, ValueError) as malformed:
+                except Exception as malformed:
                     print(
                         "DMC2_LINUXCNC_ERROR_CHANNEL "
                         "kind=malformed name=UNKNOWN severity=error suppressed=0 "
@@ -106,17 +121,6 @@ def install_axis_ui_policy(namespace: Mapping[str, object]) -> None:
                     )
                     if not suppressed:
                         notifications.add(severity, message)
-                error = error_channel.poll()
-        except Exception as error:
-            print(
-                "DMC2_LINUXCNC_ERROR_CHANNEL "
-                "kind=poll_failure name=UNKNOWN severity=error suppressed=0 "
-                f"exception={error!r}",
-                flush=True,
-            )
-            notifications.add(
-                "error", f"LinuxCNC error-channel polling failed: {error}"
-            )
         finally:
             live_plotter.error_after = live_plotter.win.after(
                 200,

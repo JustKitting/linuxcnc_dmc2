@@ -4,8 +4,11 @@ import types
 import unittest
 from contextlib import redirect_stdout
 from io import StringIO
+from unittest.mock import patch
 
 from tests.python._support import AXIS_COMMAND_FILE
+
+import dmc2_axis.notifications as notification_policy
 
 from dmc2_axis import (
     CONTROLLER_AVAILABLE_PIN,
@@ -25,7 +28,12 @@ class FakeErrorChannel:
         self.errors = list(errors)
 
     def poll(self):
-        return self.errors.pop(0) if self.errors else None
+        if not self.errors:
+            return None
+        result = self.errors.pop(0)
+        if isinstance(result, BaseException):
+            raise result
+        return result
 
 
 class FakeNotifications:
@@ -72,6 +80,14 @@ class FakeComponent(dict):
 
 class FakeTclError(Exception):
     pass
+
+
+class UnstringableMessage:
+    def __str__(self):
+        raise RuntimeError("message conversion failed")
+
+    def __repr__(self):
+        return "UnstringableMessage()"
 
 
 class FakeTk:
@@ -215,6 +231,33 @@ class AxisUiPolicyTests(unittest.TestCase):
         with self.assertRaisesRegex(RuntimeError, "must equal 13, found 99"):
             error_channel_kind_catalog(namespace["linuxcnc"])
 
+    def test_error_channel_catalog_rejects_a_missing_code(self):
+        namespace, _notifications, _live_plotter = self.make_namespace([])
+        del namespace["linuxcnc"].NML_DISPLAY
+        with self.assertRaisesRegex(RuntimeError, "omitted error-channel type NML_DISPLAY"):
+            error_channel_kind_catalog(namespace["linuxcnc"])
+
+    def test_error_channel_catalog_rejects_a_non_numeric_code(self):
+        namespace, _notifications, _live_plotter = self.make_namespace([])
+        namespace["linuxcnc"].NML_TEXT = "not-a-number"
+        with self.assertRaisesRegex(RuntimeError, "omitted error-channel type NML_TEXT"):
+            error_channel_kind_catalog(namespace["linuxcnc"])
+
+    def test_error_channel_catalog_rejects_duplicate_source_definitions(self):
+        namespace, _notifications, _live_plotter = self.make_namespace([])
+        namespace["linuxcnc"].NML_TEXT = 1
+        definitions = (
+            ("NML_ERROR", 1, "error"),
+            ("NML_TEXT", 1, "info"),
+        )
+        with patch.object(
+            notification_policy,
+            "ERROR_CHANNEL_KIND_DEFINITIONS",
+            definitions,
+        ):
+            with self.assertRaisesRegex(RuntimeError, "both equal 1"):
+                error_channel_kind_catalog(namespace["linuxcnc"])
+
     def test_malformed_record_is_reported_and_polling_survives(self):
         namespace, notifications, live_plotter = self.make_namespace(
             [(1, "valid error"), (1,), (2, "still draining")]
@@ -233,6 +276,92 @@ class AxisUiPolicyTests(unittest.TestCase):
         )
         self.assertIn("kind=malformed", output.getvalue())
         self.assertEqual(len(live_plotter.win.scheduled), 1)
+
+    def test_falsey_non_none_records_are_reported_not_silently_discarded(self):
+        namespace, notifications, live_plotter = self.make_namespace(
+            [(), False, 0, "", (2, "drain completed")]
+        )
+        output = StringIO()
+        with redirect_stdout(output):
+            install_axis_ui_policy(namespace)
+            live_plotter.error_task()
+        self.assertEqual(
+            notifications.shown,
+            [
+                ("error", "Malformed LinuxCNC error record: ()"),
+                ("error", "Malformed LinuxCNC error record: False"),
+                ("error", "Malformed LinuxCNC error record: 0"),
+                ("error", "Malformed LinuxCNC error record: ''"),
+                ("info", "drain completed"),
+            ],
+        )
+        self.assertEqual(output.getvalue().count("kind=malformed"), 4)
+        self.assertEqual(len(live_plotter.win.scheduled), 1)
+
+    def test_poll_failure_is_visible_and_the_next_poll_is_scheduled(self):
+        namespace, notifications, live_plotter = self.make_namespace(
+            [(2, "record before failure"), OSError("NML read failed")]
+        )
+        output = StringIO()
+        with redirect_stdout(output):
+            install_axis_ui_policy(namespace)
+            live_plotter.error_task()
+        self.assertEqual(
+            notifications.shown,
+            [
+                ("info", "record before failure"),
+                ("error", "LinuxCNC error-channel polling failed: NML read failed"),
+            ],
+        )
+        self.assertIn("kind=poll_failure", output.getvalue())
+        self.assertIn("OSError('NML read failed')", output.getvalue())
+        self.assertEqual(live_plotter.error_after, "scheduled-id")
+        self.assertEqual(len(live_plotter.win.scheduled), 1)
+
+    def test_bad_kind_conversion_is_malformed_and_drain_continues(self):
+        namespace, notifications, live_plotter = self.make_namespace(
+            [("not-an-integer", "bad kind"), (3, "record after malformed kind")]
+        )
+        install_axis_ui_policy(namespace)
+        live_plotter.error_task()
+        self.assertEqual(
+            notifications.shown,
+            [
+                (
+                    "error",
+                    "Malformed LinuxCNC error record: ('not-an-integer', 'bad kind')",
+                ),
+                ("info", "record after malformed kind"),
+            ],
+        )
+
+    def test_bad_message_conversion_is_malformed_and_drain_continues(self):
+        namespace, notifications, live_plotter = self.make_namespace(
+            [(1, UnstringableMessage()), (2, "record after malformed message")]
+        )
+        install_axis_ui_policy(namespace)
+        live_plotter.error_task()
+        self.assertEqual(
+            notifications.shown,
+            [
+                (
+                    "error",
+                    "Malformed LinuxCNC error record: (1, UnstringableMessage())",
+                ),
+                ("info", "record after malformed message"),
+            ],
+        )
+
+    def test_installation_is_idempotent(self):
+        namespace, notifications, live_plotter = self.make_namespace([(1, "one fault")])
+        install_axis_ui_policy(namespace)
+        installed_task = live_plotter.error_task
+        installed_add = notifications.add
+        install_axis_ui_policy(namespace)
+        self.assertIs(live_plotter.error_task, installed_task)
+        self.assertIs(notifications.add, installed_add)
+        live_plotter.error_task()
+        self.assertEqual(notifications.shown, [("error", "one fault")])
 
     def test_visible_notifications_are_moved_away_from_status_panel(self):
         namespace, notifications, live_plotter = self.make_namespace(
