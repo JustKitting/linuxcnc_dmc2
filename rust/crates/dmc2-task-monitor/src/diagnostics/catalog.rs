@@ -63,6 +63,28 @@ pub(super) fn check_code(
     value: i64,
 ) -> Option<&'static str> {
     let source = source.into();
+    report.account(source.clone(), "source_enum");
+    match domain.lookup(value) {
+        Some(name) => Some(name),
+        None => {
+            unknown_code(report, source, domain, value);
+            None
+        }
+    }
+}
+
+pub(super) fn check_code_with_sentinels(
+    report: &mut DiagnosticReport,
+    source: impl Into<String>,
+    domain: CodeDomain,
+    value: i64,
+    sentinels: &[i64],
+) -> Option<&'static str> {
+    let source = source.into();
+    report.account(source.clone(), "source_enum_with_sentinel");
+    if sentinels.contains(&value) {
+        return None;
+    }
     match domain.lookup(value) {
         Some(name) => Some(name),
         None => {
@@ -79,6 +101,8 @@ pub(super) fn check_i32_set(
     allowed: &[i32],
     detail: &'static str,
 ) {
+    let source = source.into();
+    report.account(source.clone(), "constrained_integer");
     if !allowed.contains(&value) {
         issue(
             report,
@@ -95,6 +119,7 @@ pub(super) fn check_i32_set(
 }
 
 pub(super) fn check_debug_mask(report: &mut DiagnosticReport, source: &str, raw: i32) {
+    report.account(source, "source_bitmask");
     let allowed = DEBUG_FLAG
         .codes
         .iter()

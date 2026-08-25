@@ -3,6 +3,9 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
+#[path = "build/status_schema.rs"]
+mod status_schema;
+
 const EXPECTED_LINUXCNC_VERSION: &str = "2.9.10";
 const INCLUDE_ROOT: &str = "/usr/include/linuxcnc";
 const SOURCE_ROOT_RELATIVE: &str = "../../../vendor/linuxcnc-2.9.10";
@@ -50,14 +53,31 @@ fn main() {
     let output_directory =
         PathBuf::from(env::var_os("OUT_DIR").expect("Cargo did not provide OUT_DIR"));
 
+    const NATIVE_SOURCES: &[&str] = &[
+        "status_copy.cc",
+        "status_channel.cc",
+        "tests/status_fixture_common.cc",
+        "tests/status_fixture_task.cc",
+        "tests/status_fixture_trajectory.cc",
+        "tests/status_fixture_motion_components.cc",
+        "tests/status_fixture_io.cc",
+        "tests/status_copy_fixture.cc",
+    ];
+
     for path in [
         manifest.join("build.rs"),
+        manifest.join("build/status_schema.rs"),
         snapshot_header.clone(),
         native.join("status_copy.hh"),
-        native.join("status_copy.cc"),
-        native.join("status_channel.cc"),
+        native.join("tests/status_fixture.hh"),
     ] {
         println!("cargo:rerun-if-changed={}", path.display());
+    }
+    for source_name in NATIVE_SOURCES {
+        println!(
+            "cargo:rerun-if-changed={}",
+            native.join(source_name).display()
+        );
     }
 
     let version = output("linuxcnc_var", &["LINUXCNCVERSION"]);
@@ -113,11 +133,12 @@ fn main() {
             "-std=c11",
         ],
     );
+    status_schema::generate(&snapshot_header, &output_directory);
 
     let mut objects = Vec::new();
-    for source_name in ["status_copy.cc", "status_channel.cc"] {
+    for source_name in NATIVE_SOURCES {
         let source = native.join(source_name);
-        let object = output_directory.join(format!("{source_name}.o"));
+        let object = output_directory.join(format!("{}.o", source_name.replace('/', "_")));
         run(
             "g++",
             &[
@@ -161,6 +182,7 @@ fn main() {
     println!("cargo:rustc-link-search=native=/usr/lib");
     println!("cargo:rustc-link-lib=static=dmc2_task_status_native");
     println!("cargo:rustc-link-lib=static=linuxcnc");
+    println!("cargo:rustc-link-lib=tooldata");
     println!("cargo:rustc-link-lib=nml");
     println!("cargo:rustc-link-lib=linuxcnchal");
     println!("cargo:rustc-link-lib=stdc++");

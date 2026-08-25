@@ -9,7 +9,8 @@ mod abi {
 }
 
 pub use abi::{
-    dmc2_rcs_status_snapshot as RcsStatusSnapshot, dmc2_task_status_snapshot as NativeSnapshot,
+    dmc2_pose_snapshot as PoseSnapshot, dmc2_rcs_status_snapshot as RcsStatusSnapshot,
+    dmc2_task_status_snapshot as NativeSnapshot,
 };
 
 pub(crate) use abi::{
@@ -19,9 +20,20 @@ pub(crate) use abi::{
 };
 
 #[cfg(test)]
-pub(crate) use abi::dmc2_task_status_snapshot_initialize;
+pub(crate) use abi::{dmc2_task_status_copy_self_test, dmc2_task_status_snapshot_initialize};
 
 pub const SNAPSHOT_ABI_VERSION: u32 = abi::DMC2_SNAPSHOT_ABI_VERSION;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) struct SnapshotFieldSpec {
+    pub path: &'static str,
+    pub c_type: &'static str,
+    pub element_count: usize,
+    pub byte_offset: usize,
+    pub byte_size: usize,
+}
+
+include!(concat!(env!("OUT_DIR"), "/status_snapshot_fields.rs"));
 
 impl NativeSnapshot {
     pub fn safe() -> Self {
@@ -122,5 +134,55 @@ mod tests {
             NativeSnapshot::default().misc_error.len(),
             EMCMOT_MAX_MISC_ERROR
         );
+    }
+
+    #[test]
+    fn generated_field_inventory_accounts_for_every_data_and_padding_byte() {
+        assert_eq!(SNAPSHOT_FIELDS.len(), SNAPSHOT_LOGICAL_FIELD_COUNT);
+        assert_ne!(SNAPSHOT_SCHEMA_FNV64, 0);
+        let mut owners = vec![None; mem::size_of::<NativeSnapshot>()];
+        for field in SNAPSHOT_FIELDS {
+            assert!(!field.path.is_empty());
+            assert!(!field.c_type.is_empty());
+            assert!(field.element_count > 0);
+            assert!(field.byte_size > 0);
+            let end = field
+                .byte_offset
+                .checked_add(field.byte_size)
+                .expect("snapshot field range overflowed");
+            assert!(
+                end <= owners.len(),
+                "field outside snapshot: {}",
+                field.path
+            );
+            for owner in &mut owners[field.byte_offset..end] {
+                assert!(
+                    owner.is_none(),
+                    "overlapping snapshot field: {}",
+                    field.path
+                );
+                *owner = Some(field.path);
+            }
+        }
+        let field_bytes = owners.iter().filter(|owner| owner.is_some()).count();
+        let padding_bytes = owners.len() - field_bytes;
+        assert!(field_bytes > 0);
+        assert_eq!(
+            field_bytes + padding_bytes,
+            mem::size_of::<NativeSnapshot>()
+        );
+    }
+
+    #[test]
+    fn native_copy_maps_every_logical_field_and_every_destination_byte() {
+        let mut logical_fields = 0_u32;
+        let mut failure_offset = usize::MAX;
+        let result =
+            unsafe { dmc2_task_status_copy_self_test(&mut logical_fields, &mut failure_offset) };
+        assert_eq!(
+            result, 0,
+            "native status copy failed in signature round {result} at destination byte {failure_offset}"
+        );
+        assert_eq!(logical_fields as usize, SNAPSHOT_LOGICAL_FIELD_COUNT);
     }
 }

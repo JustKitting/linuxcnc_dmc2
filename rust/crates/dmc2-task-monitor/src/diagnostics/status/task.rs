@@ -6,11 +6,16 @@ use dmc2_linuxcnc_interface::{
 
 use crate::snapshot::NativeSnapshot;
 
-use super::super::catalog::{check_code, domain_id, issue};
+use super::super::catalog::{check_code, check_i32_set, domain_id, issue};
 use super::super::category;
 use super::super::report::{DiagnosticReport, Severity};
+use super::super::validation::{
+    account_open, check_bounded_c_bytes, check_finite, check_finite_f64_array, check_i32_range,
+    check_pose, check_u32_flag,
+};
 
 pub(super) fn evaluate(snapshot: &NativeSnapshot, report: &mut DiagnosticReport) {
+    account_open(report, "task.heartbeat", "monotonic_heartbeat");
     check_code(
         report,
         "task.mode",
@@ -48,6 +53,55 @@ pub(super) fn evaluate(snapshot: &NativeSnapshot, report: &mut DiagnosticReport)
         TASK_INTERP,
         i64::from(snapshot.task.interp_state),
     );
+    check_i32_range(
+        report,
+        "task.call_level",
+        snapshot.task.call_level,
+        0,
+        i32::MAX,
+        "nonnegative_count",
+        "task interpreter call depth is negative",
+    );
+    for (source, _) in [
+        ("task.motion_line", snapshot.task.motion_line),
+        ("task.current_line", snapshot.task.current_line),
+        ("task.read_line", snapshot.task.read_line),
+    ] {
+        account_open(report, source, "open_line_number");
+    }
+    check_u32_flag(
+        report,
+        "task.optional_stop_state",
+        snapshot.task.optional_stop_state,
+        "optional-stop state is neither false nor true",
+    );
+    check_u32_flag(
+        report,
+        "task.block_delete_state",
+        snapshot.task.block_delete_state,
+        "block-delete state is neither false nor true",
+    );
+    check_u32_flag(
+        report,
+        "task.input_timeout",
+        snapshot.task.input_timeout,
+        "input-timeout state is neither false nor true",
+    );
+    check_bounded_c_bytes(report, "task.file", &snapshot.task.file);
+    check_bounded_c_bytes(report, "task.command", &snapshot.task.command);
+    check_bounded_c_bytes(report, "task.ini_filename", &snapshot.task.ini_filename);
+    check_pose(report, "task.g5x_offset", snapshot.task.g5x_offset);
+    account_open(report, "task.g5x_index", "open_coordinate_system_index");
+    check_pose(report, "task.g92_offset", snapshot.task.g92_offset);
+    check_finite(report, "task.rotation_xy", snapshot.task.rotation_xy);
+    check_pose(report, "task.tool_offset", snapshot.task.tool_offset);
+    account_open(report, "task.active_g_codes", "open_interpreter_code_array");
+    account_open(report, "task.active_m_codes", "open_interpreter_code_array");
+    check_finite_f64_array(
+        report,
+        "task.active_settings",
+        &snapshot.task.active_settings,
+    );
     check_code(
         report,
         "task.program_units",
@@ -78,7 +132,25 @@ pub(super) fn evaluate(snapshot: &NativeSnapshot, report: &mut DiagnosticReport)
             "LinuxCNC interpreter reported an error return",
         );
     }
-    if snapshot.task.input_timeout != 0 {
+    check_i32_set(
+        report,
+        "task.task_paused",
+        snapshot.task.task_paused,
+        &[0, 1],
+        "task-paused state is neither false nor true",
+    );
+    check_finite(report, "task.delay_left", snapshot.task.delay_left);
+    check_i32_range(
+        report,
+        "task.queued_mdi_commands",
+        snapshot.task.queued_mdi_commands,
+        0,
+        i32::MAX,
+        "nonnegative_count",
+        "queued MDI command count is negative",
+    );
+
+    if snapshot.task.input_timeout == 1 {
         issue(
             report,
             Severity::Warning,

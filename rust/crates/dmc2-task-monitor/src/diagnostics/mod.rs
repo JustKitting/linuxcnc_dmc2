@@ -5,6 +5,7 @@ pub mod category;
 mod report;
 mod status;
 mod transport;
+mod validation;
 
 use crate::snapshot::NativeSnapshot;
 
@@ -14,6 +15,8 @@ pub use transport::disconnected;
 
 pub fn evaluate(snapshot: &NativeSnapshot) -> DiagnosticReport {
     let mut report = DiagnosticReport::default();
+    report.account("abi_version", "exact_snapshot_abi");
+    report.account("struct_size", "exact_snapshot_size");
     if !snapshot.valid_abi() {
         issue(
             &mut report,
@@ -30,8 +33,8 @@ pub fn evaluate(snapshot: &NativeSnapshot) -> DiagnosticReport {
     }
 
     status::evaluate(snapshot, &mut report);
-    check_debug_mask(&mut report, "top.debug", snapshot.top_debug);
-    check_debug_mask(&mut report, "motion.debug", snapshot.motion_debug);
+    check_debug_mask(&mut report, "top_debug", snapshot.top_debug);
+    check_debug_mask(&mut report, "motion_debug", snapshot.motion_debug);
     check_debug_mask(&mut report, "io.debug", snapshot.io.debug);
     report
 }

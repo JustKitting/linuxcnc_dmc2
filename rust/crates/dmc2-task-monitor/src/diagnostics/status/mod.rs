@@ -14,28 +14,32 @@ use rcs::{check_rcs, CommandDomain};
 pub(super) fn evaluate(snapshot: &NativeSnapshot, report: &mut DiagnosticReport) {
     check_rcs(
         report,
-        "top",
+        "top_rcs",
+        "EMC_STAT",
         snapshot.top_rcs,
         CommandDomain::EmcNml,
         category::TOP_RCS,
     );
     check_rcs(
         report,
-        "task",
+        "task.rcs",
+        "EMC_TASK_STAT",
         snapshot.task.rcs,
         CommandDomain::EmcNml,
         category::TASK_RCS,
     );
     check_rcs(
         report,
-        "motion",
+        "motion_rcs",
+        "EMC_MOTION_STAT",
         snapshot.motion_rcs,
         CommandDomain::Motion,
         category::MOTION_RCS,
     );
     check_rcs(
         report,
-        "trajectory",
+        "trajectory.rcs",
+        "EMC_TRAJ_STAT",
         snapshot.trajectory.rcs,
         CommandDomain::Motion,
         category::TRAJECTORY_RCS,

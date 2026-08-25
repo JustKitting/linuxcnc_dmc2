@@ -21,3 +21,4 @@ pub const SOFT_LIMIT: u64 = 1 << 17;
 pub const INVALID_VALUE: u64 = 1 << 18;
 pub const UNKNOWN_CODE: u64 = 1 << 19;
 pub const TRANSPORT: u64 = 1 << 20;
+pub const STATUS_MESSAGE: u64 = 1 << 21;

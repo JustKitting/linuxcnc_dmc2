@@ -454,6 +454,20 @@ fn main() {
     let nce_source = fs::read_to_string(&nce_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", nce_path.display()));
     let nce_templates = interpreter_error_templates(&nce_source);
+    let status_message_contracts = [
+        ("EMC_STAT", "EMC_STAT_TYPE"),
+        ("EMC_TASK_STAT", "EMC_TASK_STAT_TYPE"),
+        ("EMC_MOTION_STAT", "EMC_MOTION_STAT_TYPE"),
+        ("EMC_TRAJ_STAT", "EMC_TRAJ_STAT_TYPE"),
+        ("EMC_JOINT_STAT", "EMC_JOINT_STAT_TYPE"),
+        ("EMC_AXIS_STAT", "EMC_AXIS_STAT_TYPE"),
+        ("EMC_SPINDLE_STAT", "EMC_SPINDLE_STAT_TYPE"),
+        ("EMC_IO_STAT", "EMC_IO_STAT_TYPE"),
+        ("EMC_TOOL_STAT", "EMC_TOOL_STAT_TYPE"),
+        ("EMC_AUX_STAT", "EMC_AUX_STAT_TYPE"),
+        ("EMC_COOLANT_STAT", "EMC_COOLANT_STAT_TYPE"),
+        ("EMC_LUBE_STAT", "EMC_LUBE_STAT_TYPE"),
+    ];
     let emcmot_max_joints = integer_macro(&emcmotcfg, "EMCMOT_MAX_JOINTS");
     let emcmot_max_axis = integer_macro(&emcmotcfg, "EMCMOT_MAX_AXIS");
     let emcmot_max_spindles = integer_macro(&emcmotcfg, "EMCMOT_MAX_SPINDLES");
@@ -651,7 +665,7 @@ fn main() {
     let probe_source = output_directory.join("linuxcnc_code_probe.cc");
     let probe_binary = output_directory.join("linuxcnc_code_probe");
     let mut probe = String::from(
-        "#include <cstdio>\n#include \"emc.hh\"\n#include \"motion.h\"\n#include \"interp_return.hh\"\n#include \"nml.hh\"\n#include \"nml_oi.hh\"\n#include \"rcs.hh\"\n#include \"stat_msg.hh\"\n#include \"cmd_msg.hh\"\n#include \"cms.hh\"\n#include \"canon.hh\"\n#include \"kinematics.h\"\n#include \"motion_types.h\"\n#include \"debugflags.h\"\n#include \"state_tag.h\"\n#include \"usrmotintf.h\"\nint main() {\n",
+        "#include <cstdio>\n#include \"emc.hh\"\n#include \"emc_nml.hh\"\n#include \"motion.h\"\n#include \"interp_return.hh\"\n#include \"nml.hh\"\n#include \"nml_oi.hh\"\n#include \"rcs.hh\"\n#include \"stat_msg.hh\"\n#include \"cmd_msg.hh\"\n#include \"cms.hh\"\n#include \"canon.hh\"\n#include \"kinematics.h\"\n#include \"motion_types.h\"\n#include \"debugflags.h\"\n#include \"state_tag.h\"\n#include \"usrmotintf.h\"\nint main() {\n",
     );
     for (domain, names) in &domains {
         for name in names {
@@ -659,6 +673,11 @@ fn main() {
                 "std::printf(\"{domain}\\t{name}\\t%lld\\n\", static_cast<long long>({name}));\n"
             ));
         }
+    }
+    for (class_name, message_type_name) in status_message_contracts {
+        probe.push_str(&format!(
+            "std::printf(\"__status_message_contract__\\t{class_name}\\t{message_type_name}\\t%lld\\t%zu\\n\", static_cast<long long>({message_type_name}), sizeof({class_name}));\n"
+        ));
     }
     probe.push_str("return 0;\n}\n");
     fs::write(&probe_source, probe).expect("failed to write LinuxCNC code probe");
@@ -695,11 +714,39 @@ fn main() {
     );
 
     let mut values = BTreeMap::new();
+    let mut status_contract_values = BTreeMap::new();
     for line in String::from_utf8(probe_output.stdout)
         .expect("LinuxCNC code probe produced non-UTF-8 output")
         .lines()
     {
         let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.first() == Some(&"__status_message_contract__") {
+            assert_eq!(
+                fields.len(),
+                5,
+                "malformed LinuxCNC status-message contract line: {line}"
+            );
+            let message_type = fields[3]
+                .parse::<i64>()
+                .unwrap_or_else(|error| panic!("invalid status-message type in {line:?}: {error}"));
+            let message_size = fields[4]
+                .parse::<i64>()
+                .unwrap_or_else(|error| panic!("invalid status-message size in {line:?}: {error}"));
+            assert!(
+                message_size > 0,
+                "non-positive status-message size in {line:?}"
+            );
+            assert!(
+                status_contract_values
+                    .insert(
+                        fields[1].to_owned(),
+                        (fields[2].to_owned(), message_type, message_size),
+                    )
+                    .is_none(),
+                "duplicate LinuxCNC status-message contract: {line}"
+            );
+            continue;
+        }
         assert_eq!(
             fields.len(),
             3,
@@ -721,6 +768,11 @@ fn main() {
         values.len(),
         requested_count,
         "LinuxCNC code probe omitted a source code"
+    );
+    assert_eq!(
+        status_contract_values.len(),
+        status_message_contracts.len(),
+        "LinuxCNC code probe omitted a public status-message contract"
     );
 
     let mut fingerprint = 0xcbf29ce484222325_u64;
@@ -755,15 +807,29 @@ fn main() {
          pub const LINUXCNC_SOURCE_COMMIT: &str = \"{EXPECTED_LINUXCNC_COMMIT}\";\n\
          pub const HEADER_SOURCE_FNV64: u64 = 0x{fingerprint:016x};\n\
          pub const GENERATED_CODE_COUNT: usize = {requested_count};\n\
+         pub const STATUS_MESSAGE_CONTRACT_COUNT: usize = {};\n\
          pub const EMCMOT_MAX_JOINTS: usize = {emcmot_max_joints};\n\
          pub const EMCMOT_MAX_AXIS: usize = {emcmot_max_axis};\n\
          pub const EMCMOT_MAX_SPINDLES: usize = {emcmot_max_spindles};\n\
-         pub const EMCMOT_MAX_MISC_ERROR: usize = {emcmot_max_misc_error};\n"
+         pub const EMCMOT_MAX_MISC_ERROR: usize = {emcmot_max_misc_error};\n",
+        status_message_contracts.len(),
     );
     generated.push_str("pub static INTERPRETER_ERROR_TEMPLATES: &[MessageTemplate] = &[\n");
     for (name, template) in &nce_templates {
         generated.push_str(&format!(
             "MessageTemplate {{ name: {name:?}, template: {template:?} }},\n"
+        ));
+    }
+    generated.push_str("];\n");
+    generated.push_str("pub static STATUS_MESSAGE_CONTRACTS: &[StatusMessageContract] = &[\n");
+    for (class_name, expected_message_type_name) in status_message_contracts {
+        let (message_type_name, message_type, message_size) = &status_contract_values[class_name];
+        assert_eq!(
+            message_type_name, expected_message_type_name,
+            "status-message probe returned the wrong type name for {class_name}"
+        );
+        generated.push_str(&format!(
+            "StatusMessageContract {{ class_name: {class_name:?}, message_type_name: {message_type_name:?}, message_type: {message_type}, message_size: {message_size} }},\n"
         ));
     }
     generated.push_str("];\n");

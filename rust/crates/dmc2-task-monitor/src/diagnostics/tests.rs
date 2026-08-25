@@ -1,9 +1,14 @@
+use std::collections::BTreeSet;
+
 use super::*;
-use crate::snapshot::{NativeSnapshot, RcsStatusSnapshot, SNAPSHOT_ABI_VERSION};
+use crate::snapshot::{
+    NativeSnapshot, RcsStatusSnapshot, SNAPSHOT_ABI_VERSION, SNAPSHOT_FIELDS,
+    SNAPSHOT_LOGICAL_FIELD_COUNT,
+};
 use dmc2_linuxcnc_interface::{
-    CodeDomain, CANON_UNITS, EMC_NML_MESSAGE_TYPE, INTERPRETER_RETURN, JOINT_TYPE, KINEMATICS_TYPE,
-    MOTION_COMMAND, NML_ERROR, RCS_STATE, RCS_STATUS, SPINDLE_ORIENT_STATE, TASK_EXEC, TASK_INTERP,
-    TASK_MODE, TASK_STATE, TRAJ_MODE,
+    status_message_contract, CodeDomain, CANON_UNITS, EMC_NML_MESSAGE_TYPE, INTERPRETER_RETURN,
+    JOINT_TYPE, KINEMATICS_TYPE, MOTION_COMMAND, NML_ERROR, RCS_STATE, RCS_STATUS,
+    SPINDLE_ORIENT_STATE, TASK_EXEC, TASK_INTERP, TASK_MODE, TASK_STATE, TRAJ_MODE,
 };
 
 fn code(domain: CodeDomain, name: &str) -> i32 {
@@ -23,20 +28,24 @@ fn normal_snapshot() -> NativeSnapshot {
     snapshot.struct_size = core::mem::size_of::<NativeSnapshot>() as u32;
     let done = code(RCS_STATUS, "RCS_DONE");
     let state = code(RCS_STATE, "S0");
-    let set_rcs = |rcs: &mut RcsStatusSnapshot| {
+    let set_rcs = |rcs: &mut RcsStatusSnapshot, class_name: &str| {
+        let contract = status_message_contract(class_name)
+            .unwrap_or_else(|| panic!("missing status contract for {class_name}"));
+        rcs.message_type = contract.message_type.try_into().unwrap();
+        rcs.message_size = contract.message_size;
         rcs.command_type = -1;
         rcs.status = done;
         rcs.state = state;
     };
-    set_rcs(&mut snapshot.top_rcs);
-    set_rcs(&mut snapshot.task.rcs);
-    set_rcs(&mut snapshot.motion_rcs);
-    set_rcs(&mut snapshot.trajectory.rcs);
-    set_rcs(&mut snapshot.io.rcs);
-    set_rcs(&mut snapshot.io.tool.rcs);
-    set_rcs(&mut snapshot.io.aux.rcs);
-    set_rcs(&mut snapshot.io.coolant.rcs);
-    set_rcs(&mut snapshot.io.lube.rcs);
+    set_rcs(&mut snapshot.top_rcs, "EMC_STAT");
+    set_rcs(&mut snapshot.task.rcs, "EMC_TASK_STAT");
+    set_rcs(&mut snapshot.motion_rcs, "EMC_MOTION_STAT");
+    set_rcs(&mut snapshot.trajectory.rcs, "EMC_TRAJ_STAT");
+    set_rcs(&mut snapshot.io.rcs, "EMC_IO_STAT");
+    set_rcs(&mut snapshot.io.tool.rcs, "EMC_TOOL_STAT");
+    set_rcs(&mut snapshot.io.aux.rcs, "EMC_AUX_STAT");
+    set_rcs(&mut snapshot.io.coolant.rcs, "EMC_COOLANT_STAT");
+    set_rcs(&mut snapshot.io.lube.rcs, "EMC_LUBE_STAT");
     snapshot.task.mode = code(TASK_MODE, "EMC_TASK_MODE_MANUAL");
     snapshot.task.state = code(TASK_STATE, "EMC_TASK_STATE_ESTOP");
     snapshot.task.exec_state = code(TASK_EXEC, "EMC_TASK_EXEC_DONE");
@@ -48,12 +57,17 @@ fn normal_snapshot() -> NativeSnapshot {
     snapshot.trajectory.axis_mask = 0b111;
     snapshot.trajectory.mode = code(TRAJ_MODE, "EMC_TRAJ_MODE_FREE");
     snapshot.trajectory.kinematics_type = code(KINEMATICS_TYPE, "KINEMATICS_IDENTITY");
-    for index in 0..3 {
-        set_rcs(&mut snapshot.joints[index].rcs);
+    for index in 0..snapshot.joints.len() {
+        set_rcs(&mut snapshot.joints[index].rcs, "EMC_JOINT_STAT");
         snapshot.joints[index].joint_type = code(JOINT_TYPE, "EMC_LINEAR");
-        set_rcs(&mut snapshot.axes[index].rcs);
     }
-    set_rcs(&mut snapshot.spindles[0].rcs);
+    for index in 0..snapshot.axes.len() {
+        set_rcs(&mut snapshot.axes[index].rcs, "EMC_AXIS_STAT");
+    }
+    for index in 0..snapshot.spindles.len() {
+        set_rcs(&mut snapshot.spindles[index].rcs, "EMC_SPINDLE_STAT");
+        snapshot.spindles[index].orient_state = code(SPINDLE_ORIENT_STATE, "EMCMOT_ORIENT_NONE");
+    }
     snapshot.io.aux.estop = 1;
     snapshot.io.lube.level = 1;
     snapshot
@@ -63,6 +77,35 @@ fn normal_snapshot() -> NativeSnapshot {
 fn known_normal_snapshot_has_no_diagnostics() {
     let report = evaluate(&normal_snapshot());
     assert_eq!(report, DiagnosticReport::default());
+}
+
+#[test]
+fn every_snapshot_field_has_exactly_one_executed_diagnostic_policy() {
+    let report = evaluate(&normal_snapshot());
+    let expected = SNAPSHOT_FIELDS
+        .iter()
+        .map(|field| field.path)
+        .collect::<BTreeSet<_>>();
+    let actual = report
+        .covered_fields()
+        .keys()
+        .map(String::as_str)
+        .collect::<BTreeSet<_>>();
+    let missing = expected.difference(&actual).copied().collect::<Vec<_>>();
+    let extra = actual.difference(&expected).copied().collect::<Vec<_>>();
+    assert!(
+        missing.is_empty() && extra.is_empty(),
+        "snapshot policy mismatch; missing={missing:?}; extra={extra:?}"
+    );
+    assert_eq!(expected.len(), SNAPSHOT_LOGICAL_FIELD_COUNT);
+    assert_eq!(actual.len(), SNAPSHOT_LOGICAL_FIELD_COUNT);
+    assert!(
+        report
+            .covered_fields()
+            .values()
+            .all(|policy| !policy.is_empty()),
+        "snapshot field has an empty diagnostic policy"
+    );
 }
 
 #[test]
@@ -86,6 +129,39 @@ fn every_rcs_error_source_is_classified() {
         select(&mut snapshot).status = code(RCS_STATUS, "RCS_ERROR");
         let report = evaluate(&snapshot);
         assert_ne!(report.active_error_mask & expected, 0);
+    }
+}
+
+#[test]
+fn every_rcs_source_enforces_its_exact_message_type_and_size() {
+    let sources: &[fn(&mut NativeSnapshot) -> &mut RcsStatusSnapshot] = &[
+        |s| &mut s.top_rcs,
+        |s| &mut s.task.rcs,
+        |s| &mut s.motion_rcs,
+        |s| &mut s.trajectory.rcs,
+        |s| &mut s.joints[0].rcs,
+        |s| &mut s.axes[0].rcs,
+        |s| &mut s.spindles[0].rcs,
+        |s| &mut s.io.rcs,
+        |s| &mut s.io.tool.rcs,
+        |s| &mut s.io.aux.rcs,
+        |s| &mut s.io.coolant.rcs,
+        |s| &mut s.io.lube.rcs,
+    ];
+    for select in sources {
+        let mut wrong_type = normal_snapshot();
+        select(&mut wrong_type).message_type = i32::MAX;
+        assert_ne!(
+            evaluate(&wrong_type).active_error_mask & category::STATUS_MESSAGE,
+            0
+        );
+
+        let mut wrong_size = normal_snapshot();
+        select(&mut wrong_size).message_size = i64::MAX;
+        assert_ne!(
+            evaluate(&wrong_size).active_error_mask & category::STATUS_MESSAGE,
+            0
+        );
     }
 }
 
@@ -154,6 +230,25 @@ fn stale_error_payloads_are_not_treated_as_active_faults() {
     let report = evaluate(&snapshot);
     assert_eq!(report.active_error_mask & category::INTERPRETER, 0);
     assert_eq!(report.active_error_mask & category::SPINDLE_ORIENT, 0);
+}
+
+#[test]
+fn spindle_orient_fault_is_preserved_as_an_open_signed_payload() {
+    for payload in [i32::MIN, -73, 0, 73, i32::MAX] {
+        let mut snapshot = normal_snapshot();
+        snapshot.spindles[0].orient_state = code(SPINDLE_ORIENT_STATE, "EMCMOT_ORIENT_FAULTED");
+        snapshot.spindles[0].orient_fault = payload;
+        let report = evaluate(&snapshot);
+        let issue = report
+            .issues
+            .iter()
+            .find(|issue| issue.category == category::SPINDLE_ORIENT)
+            .expect("faulted orient state omitted its payload");
+        assert_eq!(issue.domain, "spindle_orient_fault_payload");
+        assert_eq!(issue.value, i64::from(payload));
+        assert_eq!(issue.name, None);
+        assert!(!report.unknown_code_active());
+    }
 }
 
 #[test]
