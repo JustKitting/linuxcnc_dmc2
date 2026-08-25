@@ -2,11 +2,12 @@ use std::ffi::{c_int, CString};
 
 use dmc2_linuxcnc_interface::NML_ERROR;
 
+#[cfg(test)]
+use crate::snapshot::DMC2_TASK_STATUS_POLL_ERROR;
 use crate::snapshot::{
     dmc2_task_status_close, dmc2_task_status_open, dmc2_task_status_poll,
     dmc2_task_status_snapshot_abi_version, dmc2_task_status_snapshot_size, NativeSnapshot,
-    NativeTaskStatusChannel, DMC2_TASK_STATUS_POLL_ERROR, DMC2_TASK_STATUS_POLL_NOT_READY,
-    DMC2_TASK_STATUS_POLL_OK,
+    NativeTaskStatusChannel, DMC2_TASK_STATUS_POLL_NOT_READY, DMC2_TASK_STATUS_POLL_OK,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -26,6 +26,16 @@ REALTIME_ENVIRONMENT = "LINUXCNC_FORCE_REALTIME=1"
 EXPECTED_LINUXCNC_VERSION = "2.9.10"
 REALTIME_MODULE = Path("/usr/lib/linuxcnc/modules/dmc2_rt.so")
 STAGED_REALTIME_MODULE = ROOT / "rust" / "target" / "release" / "libdmc2_rt.so"
+USERSPACE_BINARY_DEPLOYMENTS = (
+    (
+        ROOT / "native" / "bin" / "dmc2-serial-bridge",
+        ROOT / "rust" / "target" / "release" / "dmc2-serial-bridge",
+    ),
+    (
+        ROOT / "native" / "bin" / "dmc2-task-monitor",
+        ROOT / "rust" / "target" / "release" / "dmc2-task-monitor",
+    ),
+)
 
 
 def running_process(pattern: str) -> bool:
@@ -44,6 +54,14 @@ def validate_realtime_module_deployment() -> None:
         raise RuntimeError(
             "installed dmc2_rt.so does not match the offline-tested staged module"
         )
+
+
+def validate_userspace_binary_deployment() -> None:
+    for deployed, staged in USERSPACE_BINARY_DEPLOYMENTS:
+        if deployed.read_bytes() != staged.read_bytes():
+            raise RuntimeError(
+                f"deployed {deployed.name} does not match its offline-tested release binary"
+            )
 
 
 def validate_launch_files() -> list[str]:
@@ -83,7 +101,8 @@ def validate_launch_files() -> list[str]:
     if missing:
         raise RuntimeError("missing live file(s): " + ", ".join(missing))
     validate_realtime_module_deployment()
-    checks.append("all live configuration files exist")
+    validate_userspace_binary_deployment()
+    checks.append("all live files and deployed binaries match their verified release outputs")
 
     if shutil.which("linuxcnc") is None or shutil.which("linuxcnc_var") is None:
         raise RuntimeError("LinuxCNC executables are unavailable")

@@ -17,11 +17,11 @@ pub(crate) use abi::{
     dmc2_task_status_channel as NativeTaskStatusChannel, dmc2_task_status_close,
     dmc2_task_status_copy_self_test, dmc2_task_status_copy_signature_rounds, dmc2_task_status_open,
     dmc2_task_status_poll, dmc2_task_status_snapshot_abi_version, dmc2_task_status_snapshot_size,
-    DMC2_TASK_STATUS_POLL_ERROR, DMC2_TASK_STATUS_POLL_NOT_READY, DMC2_TASK_STATUS_POLL_OK,
+    DMC2_TASK_STATUS_POLL_NOT_READY, DMC2_TASK_STATUS_POLL_OK,
 };
 
 #[cfg(test)]
-pub(crate) use abi::dmc2_task_status_snapshot_initialize;
+pub(crate) use abi::{dmc2_task_status_snapshot_initialize, DMC2_TASK_STATUS_POLL_ERROR};
 
 pub const SNAPSHOT_ABI_VERSION: u32 = abi::DMC2_SNAPSHOT_ABI_VERSION;
 

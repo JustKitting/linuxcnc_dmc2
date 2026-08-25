@@ -21,12 +21,13 @@ for script in "${project_dir}"/scripts/*.sh; do
 done
 
 for symbol in rtapi_app_main rtapi_app_exit; do
-    if ! readelf -Ws "${module}" | grep -q " ${symbol}$"; then
+    if ! readelf -Ws "${module}" | grep " ${symbol}$" >/dev/null; then
         echo "realtime module is missing ${symbol}" >&2
         exit 1
     fi
 done
 
+git -C "${project_dir}" diff --check
 "${project_dir}/scripts/check_source_layout.sh"
 
 PYTHONDONTWRITEBYTECODE=1 python3 "${project_dir}/tests/run_python.py"

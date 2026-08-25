@@ -222,8 +222,12 @@ class ConfigurationTests(unittest.TestCase):
                 launch_live,
                 "validate_realtime_module_deployment",
             ):
-                with self.assertRaisesRegex(RuntimeError, "exact offline profile"):
-                    launch_live.validate_launch_files()
+                with mock.patch.object(
+                    launch_live,
+                    "validate_userspace_binary_deployment",
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "exact offline profile"):
+                        launch_live.validate_launch_files()
 
     def test_launcher_refuses_any_linuxcnc_version_except_2_9_10(self):
         completed = subprocess.CompletedProcess(
@@ -237,8 +241,12 @@ class ConfigurationTests(unittest.TestCase):
                 launch_live,
                 "validate_realtime_module_deployment",
             ):
-                with self.assertRaisesRegex(RuntimeError, "expected 2.9.10"):
-                    launch_live.validate_launch_files()
+                with mock.patch.object(
+                    launch_live,
+                    "validate_userspace_binary_deployment",
+                ):
+                    with self.assertRaisesRegex(RuntimeError, "expected 2.9.10"):
+                        launch_live.validate_launch_files()
 
     def test_launcher_refuses_mismatched_installed_realtime_module(self):
         with tempfile.TemporaryDirectory() as directory:
@@ -250,6 +258,32 @@ class ConfigurationTests(unittest.TestCase):
                 with mock.patch.object(launch_live, "REALTIME_MODULE", installed):
                     with self.assertRaisesRegex(RuntimeError, "does not match"):
                         launch_live.validate_realtime_module_deployment()
+
+    def test_launcher_refuses_mismatched_userspace_binary(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            deployed_serial = root / "deployed-serial"
+            staged_serial = root / "staged-serial"
+            deployed_monitor = root / "deployed-monitor"
+            staged_monitor = root / "staged-monitor"
+            deployed_serial.write_bytes(b"verified serial")
+            staged_serial.write_bytes(b"verified serial")
+            deployed_monitor.write_bytes(b"stale monitor")
+            staged_monitor.write_bytes(b"verified monitor")
+            deployments = (
+                (deployed_serial, staged_serial),
+                (deployed_monitor, staged_monitor),
+            )
+            with mock.patch.object(
+                launch_live,
+                "USERSPACE_BINARY_DEPLOYMENTS",
+                deployments,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    "deployed-monitor does not match",
+                ):
+                    launch_live.validate_userspace_binary_deployment()
 
     def test_persistent_launcher_uses_detached_user_service(self):
         completed = subprocess.CompletedProcess(
