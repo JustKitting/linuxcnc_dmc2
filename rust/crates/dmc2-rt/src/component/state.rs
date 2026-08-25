@@ -4,7 +4,7 @@ use dmc2_core::supervisor::MachineSnapshot;
 
 use super::hal::Pins;
 
-#[derive(Clone, Copy)]
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub(super) struct CachedTaskSnapshot {
     pub(super) connected: bool,
     pub(super) fault: bool,

@@ -7,6 +7,7 @@ use std::sync::Mutex;
 use std::vec::Vec;
 
 mod schema;
+mod transport;
 
 #[repr(align(16))]
 struct Arena([u8; 131_072]);

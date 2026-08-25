@@ -1,10 +1,11 @@
 use core::ptr;
 use core::sync::atomic::{AtomicU32, Ordering};
 
-use dmc2_core::halui::HaluiCommandSequencer;
+use dmc2_core::halui::{HaluiCommandSequencer, PulsePhase};
 use dmc2_core::pendant::{AxisSelector, MultiplierSelector, PendantSample};
 use dmc2_core::runtime::{RuntimeInputs, RuntimeOutputs};
-use dmc2_core::supervisor::{FaultCode, MachineSnapshot};
+use dmc2_core::startup::{ControllerWatchdogPhase, MesaStartupPhase};
+use dmc2_core::supervisor::{FaultCode, MachineSnapshot, Phase};
 use dmc2_core::PULSES_PER_MM;
 use dmc2_hal_sys as hal;
 
@@ -21,6 +22,10 @@ unsafe fn write<T: Copy>(pointer: *mut T, value: T) {
 
 unsafe fn generation(pointer: *mut hal::hal_u32_t) -> u32 {
     unsafe { (&*pointer.cast::<AtomicU32>()).load(Ordering::SeqCst) }
+}
+
+const fn generation_is_coherent(first: u32, second: u32) -> bool {
+    first == second && second & 1 == 0
 }
 
 unsafe fn read_pendant(pins: &Pins) -> (bool, PendantSample, bool, bool, bool) {
@@ -46,7 +51,7 @@ unsafe fn read_pendant(pins: &Pins) -> (bool, PendantSample, bool, bool, bool) {
     };
     let second = unsafe { generation(pins.pendant_snapshot_generation) };
     (
-        first == second && second & 1 == 0,
+        generation_is_coherent(first, second),
         sample,
         connected,
         serial_fault,
@@ -67,10 +72,21 @@ const fn safe_pendant() -> PendantSample {
     }
 }
 
-unsafe fn refresh_task_snapshot(pins: &Pins, cached: &mut CachedTaskSnapshot) -> bool {
+fn commit_task_snapshot(
+    cached: &mut CachedTaskSnapshot,
+    first: u32,
+    second: u32,
+    value: CachedTaskSnapshot,
+) {
+    if generation_is_coherent(first, second) {
+        *cached = value;
+    }
+}
+
+unsafe fn refresh_task_snapshot(pins: &Pins, cached: &mut CachedTaskSnapshot) {
     let first = unsafe { generation(pins.task_snapshot_generation) };
     if first & 1 != 0 {
-        return false;
+        return;
     }
     let value = CachedTaskSnapshot {
         connected: unsafe { read(pins.task_monitor_connected) },
@@ -101,12 +117,7 @@ unsafe fn refresh_task_snapshot(pins: &Pins, cached: &mut CachedTaskSnapshot) ->
         },
     };
     let second = unsafe { generation(pins.task_snapshot_generation) };
-    if first == second && second & 1 == 0 {
-        *cached = value;
-        true
-    } else {
-        false
-    }
+    commit_task_snapshot(cached, first, second, value);
 }
 
 pub(in crate::component) unsafe fn runtime_inputs(
@@ -116,7 +127,7 @@ pub(in crate::component) unsafe fn runtime_inputs(
 ) -> RuntimeInputs {
     let (pendant_coherent, pendant_sample, connected, serial_fault, quadrature_fault) =
         unsafe { read_pendant(pins) };
-    let _task_coherent = unsafe { refresh_task_snapshot(pins, &mut state.task) };
+    unsafe { refresh_task_snapshot(pins, &mut state.task) };
     RuntimeInputs {
         servo_thread_ready: unsafe { read(pins.servo_thread_ready) },
         mesa_watchdog_has_bit: unsafe { read(pins.mesa_watchdog_has_bit) },
@@ -264,11 +275,21 @@ pub(in crate::component) unsafe fn publish_initial_safe(pins: &Pins) {
         write(pins.recovery_active, false);
         write(pins.jog_active, false);
         write(pins.bounce_active, false);
+        write(pins.supervisor_phase, Phase::Idle as i32);
+        write(pins.mesa_phase, MesaStartupPhase::WaitServo as i32);
+        write(
+            pins.controller_watchdog_phase,
+            ControllerWatchdogPhase::WaitPrerequisites as i32,
+        );
         write(pins.estop_reset_request, false);
         write(pins.machine_on_request, false);
         write(pins.axis_jog_speed, 0.0);
         write(pins.joint_jog_speed, 0.0);
         write(pins.jog_stop, false);
         write(pins.jog_stop_immediate, false);
+        write(pins.command_phase, PulsePhase::Idle as i32);
     }
 }
+
+#[cfg(test)]
+mod tests;
