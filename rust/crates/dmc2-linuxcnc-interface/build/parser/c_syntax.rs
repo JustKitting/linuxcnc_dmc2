@@ -45,6 +45,121 @@ fn strip_comments(input: &str) -> String {
     output
 }
 
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) enum EnumKind {
+    Named,
+    Typedef,
+}
+
+impl EnumKind {
+    pub(crate) const fn name(self) -> &'static str {
+        match self {
+            Self::Named => "named",
+            Self::Typedef => "typedef",
+        }
+    }
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+pub(crate) struct EnumDeclaration {
+    pub(crate) kind: EnumKind,
+    pub(crate) name: String,
+}
+
+fn c_tokens(source: &str) -> Vec<String> {
+    let cleaned = strip_comments(source);
+    let bytes = cleaned.as_bytes();
+    let mut tokens = Vec::new();
+    let mut index = 0;
+    while index < bytes.len() {
+        let byte = bytes[index];
+        if byte == b'\'' || byte == b'"' {
+            let quote = byte;
+            index += 1;
+            let mut escaped = false;
+            while index < bytes.len() {
+                let current = bytes[index];
+                index += 1;
+                if escaped {
+                    escaped = false;
+                } else if current == b'\\' {
+                    escaped = true;
+                } else if current == quote {
+                    break;
+                }
+            }
+            continue;
+        }
+        if byte.is_ascii_alphabetic() || byte == b'_' {
+            let start = index;
+            index += 1;
+            while index < bytes.len()
+                && (bytes[index].is_ascii_alphanumeric() || bytes[index] == b'_')
+            {
+                index += 1;
+            }
+            tokens.push(cleaned[start..index].to_owned());
+            continue;
+        }
+        if matches!(byte, b'{' | b'}' | b';') {
+            tokens.push((byte as char).to_string());
+        }
+        index += 1;
+    }
+    tokens
+}
+
+pub(crate) fn enum_declarations(source: &str) -> Vec<EnumDeclaration> {
+    let tokens = c_tokens(source);
+    let mut declarations = Vec::new();
+    let mut index = 0;
+    while index < tokens.len() {
+        if tokens[index] != "enum" {
+            index += 1;
+            continue;
+        }
+        let is_typedef = index > 0 && tokens[index - 1] == "typedef";
+        let mut cursor = index + 1;
+        let tag = if tokens.get(cursor).is_some_and(|token| token != "{") {
+            let value = tokens[cursor].clone();
+            cursor += 1;
+            Some(value)
+        } else {
+            None
+        };
+        if tokens.get(cursor).map(String::as_str) != Some("{") {
+            index += 1;
+            continue;
+        }
+        let mut depth = 1_u32;
+        cursor += 1;
+        while cursor < tokens.len() && depth > 0 {
+            match tokens[cursor].as_str() {
+                "{" => depth += 1,
+                "}" => depth -= 1,
+                _ => {}
+            }
+            cursor += 1;
+        }
+        assert_eq!(depth, 0, "unterminated enum declaration in LinuxCNC header");
+        let (kind, name) = if is_typedef {
+            let alias = tokens
+                .get(cursor)
+                .filter(|token| token.as_str() != ";")
+                .unwrap_or_else(|| panic!("typedef enum has no alias in LinuxCNC header"));
+            (EnumKind::Typedef, alias.clone())
+        } else {
+            (
+                EnumKind::Named,
+                tag.unwrap_or_else(|| panic!("non-typedef enum has no tag in LinuxCNC header")),
+            )
+        };
+        declarations.push(EnumDeclaration { kind, name });
+        index = cursor;
+    }
+    declarations
+}
+
 fn enum_body_after(source: &str, marker: &str) -> String {
     let cleaned = strip_comments(source);
     let marker_index = cleaned

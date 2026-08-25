@@ -1,16 +1,62 @@
 use std::collections::BTreeSet;
 
 use super::config::EXPECTED_DOMAIN_COUNTS;
-use super::parser::{macro_names, named_enum, typedef_enum};
+use super::parser::{enum_declarations, macro_names, named_enum, typedef_enum, EnumKind};
 use super::source::Headers;
+
+#[derive(Clone, Copy)]
+pub(crate) struct EnumOrigin {
+    pub(crate) header_name: &'static str,
+    pub(crate) kind: EnumKind,
+    pub(crate) declaration_name: &'static str,
+}
 
 pub(crate) struct Domain {
     pub(crate) name: &'static str,
     pub(crate) symbols: Vec<String>,
+    pub(crate) enum_origin: Option<EnumOrigin>,
 }
 
 fn domain(name: &'static str, symbols: Vec<String>) -> Domain {
-    Domain { name, symbols }
+    Domain {
+        name,
+        symbols,
+        enum_origin: None,
+    }
+}
+
+fn named_domain(
+    name: &'static str,
+    header_name: &'static str,
+    source: &str,
+    declaration_name: &'static str,
+) -> Domain {
+    Domain {
+        name,
+        symbols: named_enum(source, &format!("enum {declaration_name}")),
+        enum_origin: Some(EnumOrigin {
+            header_name,
+            kind: EnumKind::Named,
+            declaration_name,
+        }),
+    }
+}
+
+fn typedef_domain(
+    name: &'static str,
+    header_name: &'static str,
+    source: &str,
+    declaration_name: &'static str,
+) -> Domain {
+    Domain {
+        name,
+        symbols: typedef_enum(source, declaration_name),
+        enum_origin: Some(EnumOrigin {
+            header_name,
+            kind: EnumKind::Typedef,
+            declaration_name,
+        }),
+    }
 }
 
 pub(crate) fn collect(headers: &Headers) -> Vec<Domain> {
@@ -30,88 +76,91 @@ pub(crate) fn collect(headers: &Headers) -> Vec<Domain> {
                 ) && value.contains("NMLTYPE")
             }),
         ),
-        domain(
-            "task_mode",
-            named_enum(&headers.emc, "enum EMC_TASK_MODE_ENUM"),
-        ),
-        domain(
-            "task_state",
-            named_enum(&headers.emc, "enum EMC_TASK_STATE_ENUM"),
-        ),
-        domain(
-            "task_exec",
-            named_enum(&headers.emc, "enum EMC_TASK_EXEC_ENUM"),
-        ),
-        domain(
+        named_domain("task_mode", "emc.hh", &headers.emc, "EMC_TASK_MODE_ENUM"),
+        named_domain("task_state", "emc.hh", &headers.emc, "EMC_TASK_STATE_ENUM"),
+        named_domain("task_exec", "emc.hh", &headers.emc, "EMC_TASK_EXEC_ENUM"),
+        named_domain(
             "task_interp",
-            named_enum(&headers.emc, "enum EMC_TASK_INTERP_ENUM"),
+            "emc.hh",
+            &headers.emc,
+            "EMC_TASK_INTERP_ENUM",
         ),
-        domain(
-            "traj_mode",
-            named_enum(&headers.emc, "enum EMC_TRAJ_MODE_ENUM"),
-        ),
-        domain(
+        named_domain("traj_mode", "emc.hh", &headers.emc, "EMC_TRAJ_MODE_ENUM"),
+        named_domain(
             "io_abort_reason",
-            named_enum(&headers.emc, "enum EMC_IO_ABORT_REASON_ENUM"),
+            "emc.hh",
+            &headers.emc,
+            "EMC_IO_ABORT_REASON_ENUM",
         ),
-        domain("joint_type", named_enum(&headers.emc, "enum EmcJointType")),
-        domain(
-            "motion_command",
-            typedef_enum(&headers.motion, "cmd_code_t"),
-        ),
-        domain(
+        named_domain("joint_type", "emc.hh", &headers.emc, "EmcJointType"),
+        typedef_domain("motion_command", "motion.h", &headers.motion, "cmd_code_t"),
+        typedef_domain(
             "motion_command_status",
-            typedef_enum(&headers.motion, "cmd_status_t"),
+            "motion.h",
+            &headers.motion,
+            "cmd_status_t",
         ),
-        domain(
+        typedef_domain(
             "motion_state",
-            typedef_enum(&headers.motion, "motion_state_t"),
+            "motion.h",
+            &headers.motion,
+            "motion_state_t",
         ),
-        domain(
+        typedef_domain(
             "spindle_orient_state",
-            typedef_enum(&headers.motion, "orient_state_t"),
+            "motion.h",
+            &headers.motion,
+            "orient_state_t",
         ),
-        domain(
+        named_domain(
             "interpreter_return",
-            named_enum(&headers.interp_return, "enum InterpReturn"),
+            "interp_return.hh",
+            &headers.interp_return,
+            "InterpReturn",
         ),
-        domain("nml_error", named_enum(&headers.nml, "enum NML_ERROR_TYPE")),
-        domain(
+        named_domain("nml_error", "nml.hh", &headers.nml, "NML_ERROR_TYPE"),
+        named_domain(
             "nml_channel_type",
-            named_enum(&headers.nml, "enum NML_CHANNEL_TYPE"),
+            "nml.hh",
+            &headers.nml,
+            "NML_CHANNEL_TYPE",
         ),
-        domain("rcs_status", named_enum(&headers.rcs, "enum RCS_STATUS")),
-        domain("rcs_state", named_enum(&headers.stat_msg, "enum RCS_STATE")),
-        domain("canon_bool", named_enum(&headers.canon, "enum CanonBool")),
-        domain(
-            "canon_plane",
-            named_enum(&headers.canon, "enum CANON_PLANE"),
-        ),
-        domain(
-            "canon_units",
-            named_enum(&headers.canon, "enum CANON_UNITS"),
-        ),
-        domain(
+        named_domain("rcs_status", "rcs.hh", &headers.rcs, "RCS_STATUS"),
+        named_domain("rcs_state", "stat_msg.hh", &headers.stat_msg, "RCS_STATE"),
+        named_domain("canon_bool", "canon.hh", &headers.canon, "CanonBool"),
+        named_domain("canon_plane", "canon.hh", &headers.canon, "CANON_PLANE"),
+        named_domain("canon_units", "canon.hh", &headers.canon, "CANON_UNITS"),
+        named_domain(
             "canon_motion_mode",
-            named_enum(&headers.canon, "enum CANON_MOTION_MODE"),
+            "canon.hh",
+            &headers.canon,
+            "CANON_MOTION_MODE",
         ),
-        domain(
+        named_domain(
             "canon_speed_feed_mode",
-            named_enum(&headers.canon, "enum CANON_SPEED_FEED_MODE"),
+            "canon.hh",
+            &headers.canon,
+            "CANON_SPEED_FEED_MODE",
         ),
-        domain(
+        named_domain(
             "canon_direction",
-            named_enum(&headers.canon, "enum CANON_DIRECTION"),
+            "canon.hh",
+            &headers.canon,
+            "CANON_DIRECTION",
         ),
-        domain(
+        named_domain(
             "canon_feed_reference",
-            named_enum(&headers.canon, "enum CANON_FEED_REFERENCE"),
+            "canon.hh",
+            &headers.canon,
+            "CANON_FEED_REFERENCE",
         ),
-        domain("canon_side", named_enum(&headers.canon, "enum CANON_SIDE")),
-        domain("canon_axis", named_enum(&headers.canon, "enum CANON_AXIS")),
-        domain(
+        named_domain("canon_side", "canon.hh", &headers.canon, "CANON_SIDE"),
+        named_domain("canon_axis", "canon.hh", &headers.canon, "CANON_AXIS"),
+        typedef_domain(
             "kinematics_type",
-            typedef_enum(&headers.kinematics, "KINEMATICS_TYPE"),
+            "kinematics.h",
+            &headers.kinematics,
+            "KINEMATICS_TYPE",
         ),
         domain(
             "motion_type",
@@ -168,47 +217,62 @@ pub(crate) fn collect(headers: &Headers) -> Vec<Domain> {
                 name.starts_with("EMCMOT_COMM_")
             }),
         ),
-        domain(
+        typedef_domain(
             "state_tag_flag",
-            typedef_enum(&headers.state_tag, "StateFlag"),
+            "state_tag.h",
+            &headers.state_tag,
+            "StateFlag",
         ),
-        domain(
+        typedef_domain(
             "state_tag_field",
-            typedef_enum(&headers.state_tag, "StateField"),
+            "state_tag.h",
+            &headers.state_tag,
+            "StateField",
         ),
-        domain(
+        typedef_domain(
             "state_tag_float_field",
-            typedef_enum(&headers.state_tag, "StateFieldFloat"),
+            "state_tag.h",
+            &headers.state_tag,
+            "StateFieldFloat",
         ),
-        domain("cms_status", named_enum(&headers.cms, "enum CMS_STATUS")),
-        domain("cms_mode", named_enum(&headers.cms, "enum CMSMODE")),
-        domain(
+        named_domain("cms_status", "cms.hh", &headers.cms, "CMS_STATUS"),
+        named_domain("cms_mode", "cms.hh", &headers.cms, "CMSMODE"),
+        named_domain(
             "cms_internal_access",
-            named_enum(&headers.cms, "enum CMS_INTERNAL_ACCESS_TYPE"),
+            "cms.hh",
+            &headers.cms,
+            "CMS_INTERNAL_ACCESS_TYPE",
         ),
-        domain(
-            "cms_buffer_type",
-            named_enum(&headers.cms, "enum CMS_BUFFERTYPE"),
-        ),
-        domain(
+        named_domain("cms_buffer_type", "cms.hh", &headers.cms, "CMS_BUFFERTYPE"),
+        named_domain(
             "cms_process_type",
-            named_enum(&headers.cms, "enum CMS_PROCESSTYPE"),
+            "cms.hh",
+            &headers.cms,
+            "CMS_PROCESSTYPE",
         ),
-        domain(
+        named_domain(
             "cms_remote_port_type",
-            named_enum(&headers.cms, "enum CMS_REMOTE_PORT_TYPE"),
+            "cms.hh",
+            &headers.cms,
+            "CMS_REMOTE_PORT_TYPE",
         ),
-        domain(
+        named_domain(
             "cms_encoding",
-            named_enum(&headers.cms, "enum CMS_NEUTRAL_ENCODING_METHOD"),
+            "cms.hh",
+            &headers.cms,
+            "CMS_NEUTRAL_ENCODING_METHOD",
         ),
-        domain(
+        named_domain(
             "cms_connection_mode",
-            named_enum(&headers.cms, "enum CMS_CONNECTION_MODE"),
+            "cms.hh",
+            &headers.cms,
+            "CMS_CONNECTION_MODE",
         ),
-        domain(
+        named_domain(
             "rcs_generic_command",
-            named_enum(&headers.cmd_msg, "enum RCS_GENERIC_CMD_ID"),
+            "cmd_msg.hh",
+            &headers.cmd_msg,
+            "RCS_GENERIC_CMD_ID",
         ),
         domain(
             "rcs_generic_message_type",
@@ -223,11 +287,11 @@ pub(crate) fn collect(headers: &Headers) -> Vec<Domain> {
             .concat(),
         ),
     ];
-    validate(&domains);
+    validate(headers, &domains);
     domains
 }
 
-fn validate(domains: &[Domain]) {
+fn validate(headers: &Headers, domains: &[Domain]) {
     let mut seen_domain_names = BTreeSet::new();
     for domain in domains {
         assert!(
@@ -250,5 +314,30 @@ fn validate(domains: &[Domain]) {
     assert_eq!(
         actual_domain_counts, EXPECTED_DOMAIN_COUNTS,
         "LinuxCNC 2.9.10 public code domains changed or the source parser omitted a code"
+    );
+
+    let declared_enums = headers
+        .named()
+        .into_iter()
+        .flat_map(|(header_name, source)| {
+            enum_declarations(source)
+                .into_iter()
+                .map(move |declaration| (header_name, declaration.kind, declaration.name))
+        })
+        .collect::<BTreeSet<_>>();
+    let mapped_enums = domains
+        .iter()
+        .filter_map(|domain| domain.enum_origin)
+        .map(|origin| {
+            (
+                origin.header_name,
+                origin.kind,
+                origin.declaration_name.to_owned(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        mapped_enums, declared_enums,
+        "a LinuxCNC public enum declaration is missing from the generated code catalog"
     );
 }

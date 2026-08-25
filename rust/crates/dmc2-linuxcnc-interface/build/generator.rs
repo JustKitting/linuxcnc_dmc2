@@ -57,12 +57,18 @@ fn rust_identifier(name: &str) -> String {
         .collect()
 }
 
-fn preamble(fingerprint: u64, generated_code_count: usize, limits: &MachineLimits) -> String {
+fn preamble(
+    fingerprint: u64,
+    generated_code_count: usize,
+    enum_declaration_count: usize,
+    limits: &MachineLimits,
+) -> String {
     format!(
         "pub const LINUXCNC_VERSION: &str = \"{EXPECTED_LINUXCNC_VERSION}\";\n\
          pub const LINUXCNC_SOURCE_COMMIT: &str = \"{EXPECTED_LINUXCNC_COMMIT}\";\n\
          pub const HEADER_SOURCE_FNV64: u64 = 0x{fingerprint:016x};\n\
          pub const GENERATED_CODE_COUNT: usize = {generated_code_count};\n\
+         pub const ENUM_DECLARATION_COUNT: usize = {enum_declaration_count};\n\
          pub const STATUS_MESSAGE_CONTRACT_COUNT: usize = {};\n\
          pub const ERROR_MESSAGE_CONTRACT_COUNT: usize = {};\n\
          pub const EMCMOT_MAX_JOINTS: usize = {};\n\
@@ -76,6 +82,23 @@ fn preamble(fingerprint: u64, generated_code_count: usize, limits: &MachineLimit
         limits.spindles,
         limits.misc_errors,
     )
+}
+
+fn append_enum_domain_contracts(generated: &mut String, domains: &[Domain]) {
+    generated.push_str("pub static ENUM_DOMAIN_CONTRACTS: &[EnumDomainContract] = &[\n");
+    for domain in domains {
+        let Some(origin) = domain.enum_origin else {
+            continue;
+        };
+        generated.push_str(&format!(
+            "EnumDomainContract {{ header_name: {:?}, declaration_kind: {:?}, declaration_name: {:?}, domain_name: {:?} }},\n",
+            origin.header_name,
+            origin.kind.name(),
+            origin.declaration_name,
+            domain.name,
+        ));
+    }
+    generated.push_str("];\n");
 }
 
 fn append_interpreter_errors(generated: &mut String, templates: &[(String, String)]) {
@@ -175,10 +198,20 @@ fn write_catalog(
         .iter()
         .map(|domain| domain.symbols.len())
         .sum::<usize>();
-    let mut generated = preamble(fingerprint, generated_code_count, limits);
+    let enum_declaration_count = domains
+        .iter()
+        .filter(|domain| domain.enum_origin.is_some())
+        .count();
+    let mut generated = preamble(
+        fingerprint,
+        generated_code_count,
+        enum_declaration_count,
+        limits,
+    );
     append_interpreter_errors(&mut generated, templates);
     append_status_contracts(&mut generated, results);
     append_error_contracts(&mut generated, results);
+    append_enum_domain_contracts(&mut generated, domains);
     append_domains(&mut generated, domains, results);
     fs::write(output_directory.join("linuxcnc_code_catalog.rs"), generated)
         .expect("failed to write generated LinuxCNC code catalog");

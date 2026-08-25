@@ -40,6 +40,14 @@ pub struct ErrorMessageContract {
     pub id_size: usize,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct EnumDomainContract {
+    pub header_name: &'static str,
+    pub declaration_kind: &'static str,
+    pub declaration_name: &'static str,
+    pub domain_name: &'static str,
+}
+
 impl CodeDomain {
     pub fn lookup(self, code: i64) -> Option<&'static str> {
         self.codes
@@ -93,6 +101,33 @@ mod tests {
                     assert_ne!(code.code, other.code, "duplicate value in {}", domain.name);
                 }
                 assert_eq!(domain.lookup(code.code), Some(code.name));
+            }
+        }
+    }
+
+    #[test]
+    fn every_enum_declaration_in_the_audited_headers_has_one_domain() {
+        assert_eq!(ENUM_DECLARATION_COUNT, 38);
+        assert_eq!(ENUM_DOMAIN_CONTRACTS.len(), ENUM_DECLARATION_COUNT);
+        for (index, contract) in ENUM_DOMAIN_CONTRACTS.iter().enumerate() {
+            assert!(matches!(contract.declaration_kind, "named" | "typedef"));
+            assert!(!contract.header_name.is_empty());
+            assert!(!contract.declaration_name.is_empty());
+            assert!(domain(contract.domain_name).is_some());
+            for other in ENUM_DOMAIN_CONTRACTS.iter().skip(index + 1) {
+                assert_ne!(
+                    (
+                        contract.header_name,
+                        contract.declaration_kind,
+                        contract.declaration_name,
+                    ),
+                    (
+                        other.header_name,
+                        other.declaration_kind,
+                        other.declaration_name,
+                    ),
+                    "one LinuxCNC enum declaration was mapped more than once"
+                );
             }
         }
     }

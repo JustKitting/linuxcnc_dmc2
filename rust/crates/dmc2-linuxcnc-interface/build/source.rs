@@ -28,26 +28,30 @@ pub(crate) struct Headers {
 }
 
 impl Headers {
-    pub(crate) fn all(&self) -> [&str; 17] {
+    pub(crate) fn named(&self) -> [(&'static str, &str); 17] {
         [
-            &self.emc,
-            &self.emc_nml,
-            &self.motion,
-            &self.emcmotcfg,
-            &self.interp_return,
-            &self.nml,
-            &self.nml_oi,
-            &self.rcs,
-            &self.stat_msg,
-            &self.canon,
-            &self.kinematics,
-            &self.motion_types,
-            &self.debug_flags,
-            &self.state_tag,
-            &self.usrmotintf,
-            &self.cms,
-            &self.cmd_msg,
+            ("emc.hh", &self.emc),
+            ("emc_nml.hh", &self.emc_nml),
+            ("motion.h", &self.motion),
+            ("emcmotcfg.h", &self.emcmotcfg),
+            ("interp_return.hh", &self.interp_return),
+            ("nml.hh", &self.nml),
+            ("nml_oi.hh", &self.nml_oi),
+            ("rcs.hh", &self.rcs),
+            ("stat_msg.hh", &self.stat_msg),
+            ("canon.hh", &self.canon),
+            ("kinematics.h", &self.kinematics),
+            ("motion_types.h", &self.motion_types),
+            ("debugflags.h", &self.debug_flags),
+            ("state_tag.h", &self.state_tag),
+            ("usrmotintf.h", &self.usrmotintf),
+            ("cms.hh", &self.cms),
+            ("cmd_msg.hh", &self.cmd_msg),
         ]
+    }
+
+    pub(crate) fn all(&self) -> [&str; 17] {
+        self.named().map(|(_, source)| source)
     }
 }
 
