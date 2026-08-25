@@ -5,3 +5,6 @@ mod publisher;
 mod registration;
 
 pub(super) use publisher::HalPublisher;
+
+#[cfg(test)]
+mod tests;

@@ -34,8 +34,12 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 #[no_mangle]
 pub extern "C" fn rtapi_app_main() -> c_int {
     let component_id = unsafe { linuxcnc_hal::hal_init(COMPONENT_NAME.as_ptr().cast::<c_char>()) };
-    if component_id < 0 {
-        return component_id;
+    if component_id <= 0 {
+        return if component_id == 0 {
+            EINVAL
+        } else {
+            component_id
+        };
     }
     unsafe { COMPONENT_ID = component_id };
 

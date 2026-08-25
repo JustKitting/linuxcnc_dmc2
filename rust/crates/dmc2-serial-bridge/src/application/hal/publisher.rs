@@ -72,7 +72,10 @@ impl HalPublisher {
 
 impl Drop for HalPublisher {
     fn drop(&mut self) {
-        unsafe { hal::hal_exit(self.component_id) };
+        let result = unsafe { hal::hal_exit(self.component_id) };
+        if result != 0 {
+            eprintln!("dmc2-serial-bridge: hal_exit failed: {result}");
+        }
     }
 }
 

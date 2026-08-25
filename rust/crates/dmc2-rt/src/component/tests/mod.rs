@@ -16,6 +16,54 @@ static mut ARENA_OFFSET: usize = 0;
 static TEST_LOCK: Mutex<()> = Mutex::new(());
 static PINS: Mutex<Vec<PinRecord>> = Mutex::new(Vec::new());
 static FUNCTION: Mutex<Option<(usize, usize)>> = Mutex::new(None);
+static FAILURE_PLAN: Mutex<FailurePlan> = Mutex::new(FailurePlan::success());
+static HAL_CALLS: Mutex<HalCalls> = Mutex::new(HalCalls::new());
+
+#[derive(Clone, Copy, Debug)]
+struct FailurePlan {
+    init_result: c_int,
+    malloc_failure: Option<usize>,
+    pin_failure: Option<(usize, c_int)>,
+    export_result: c_int,
+    ready_result: c_int,
+    exit_result: c_int,
+}
+
+impl FailurePlan {
+    const fn success() -> Self {
+        Self {
+            init_result: 41,
+            malloc_failure: None,
+            pin_failure: None,
+            export_result: 0,
+            ready_result: 0,
+            exit_result: 0,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+struct HalCalls {
+    init: usize,
+    exit: usize,
+    ready: usize,
+    malloc: usize,
+    pin: usize,
+    export: usize,
+}
+
+impl HalCalls {
+    const fn new() -> Self {
+        Self {
+            init: 0,
+            exit: 0,
+            ready: 0,
+            malloc: 0,
+            pin: 0,
+            export: 0,
+        }
+    }
+}
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 enum PinKind {
@@ -82,26 +130,59 @@ extern "C" fn hal_init(name: *const c_char) -> c_int {
         .to_str()
         .expect("component name was UTF-8");
     assert_eq!(name, "dmc2_rt");
-    41
+    HAL_CALLS.lock().expect("HAL call lock").init += 1;
+    FAILURE_PLAN.lock().expect("failure plan lock").init_result
 }
 
 #[no_mangle]
-extern "C" fn hal_exit(_component_id: c_int) -> c_int {
-    0
+extern "C" fn hal_exit(component_id: c_int) -> c_int {
+    assert_eq!(component_id, 41);
+    HAL_CALLS.lock().expect("HAL call lock").exit += 1;
+    FAILURE_PLAN.lock().expect("failure plan lock").exit_result
 }
 
 #[no_mangle]
 extern "C" fn hal_ready(component_id: c_int) -> c_int {
     assert_eq!(component_id, 41);
-    0
+    HAL_CALLS.lock().expect("HAL call lock").ready += 1;
+    FAILURE_PLAN.lock().expect("failure plan lock").ready_result
 }
 
 #[no_mangle]
 extern "C" fn hal_malloc(size: c_long) -> *mut c_void {
+    let call = {
+        let mut calls = HAL_CALLS.lock().expect("HAL call lock");
+        let call = calls.malloc;
+        calls.malloc += 1;
+        call
+    };
+    if FAILURE_PLAN
+        .lock()
+        .expect("failure plan lock")
+        .malloc_failure
+        == Some(call)
+    {
+        return ptr::null_mut();
+    }
     if size <= 0 {
         return ptr::null_mut();
     }
     unsafe { allocate(size as usize) }
+}
+
+fn injected_pin_failure() -> Option<c_int> {
+    let call = {
+        let mut calls = HAL_CALLS.lock().expect("HAL call lock");
+        let call = calls.pin;
+        calls.pin += 1;
+        call
+    };
+    FAILURE_PLAN
+        .lock()
+        .expect("failure plan lock")
+        .pin_failure
+        .filter(|(failure_call, _)| *failure_call == call)
+        .map(|(_, error)| error)
 }
 
 #[no_mangle]
@@ -111,6 +192,9 @@ extern "C" fn hal_pin_bit_new(
     pointer: *mut *mut bool,
     _component_id: c_int,
 ) -> c_int {
+    if let Some(error) = injected_pin_failure() {
+        return error;
+    }
     unsafe { register(name, direction, pointer, PinKind::Bit) }
 }
 
@@ -121,6 +205,9 @@ extern "C" fn hal_pin_s32_new(
     pointer: *mut *mut i32,
     _component_id: c_int,
 ) -> c_int {
+    if let Some(error) = injected_pin_failure() {
+        return error;
+    }
     unsafe { register(name, direction, pointer, PinKind::S32) }
 }
 
@@ -131,6 +218,9 @@ extern "C" fn hal_pin_u32_new(
     pointer: *mut *mut u32,
     _component_id: c_int,
 ) -> c_int {
+    if let Some(error) = injected_pin_failure() {
+        return error;
+    }
     unsafe { register(name, direction, pointer, PinKind::U32) }
 }
 
@@ -141,6 +231,9 @@ extern "C" fn hal_pin_float_new(
     pointer: *mut *mut f64,
     _component_id: c_int,
 ) -> c_int {
+    if let Some(error) = injected_pin_failure() {
+        return error;
+    }
     unsafe { register(name, direction, pointer, PinKind::Float) }
 }
 
@@ -160,6 +253,14 @@ extern "C" fn hal_export_funct(
     assert_eq!(uses_fp, 1);
     assert_eq!(reentrant, 0);
     assert_eq!(component_id, 41);
+    HAL_CALLS.lock().expect("HAL call lock").export += 1;
+    let result = FAILURE_PLAN
+        .lock()
+        .expect("failure plan lock")
+        .export_result;
+    if result != 0 {
+        return result;
+    }
     let function = function.expect("realtime function was present") as usize;
     *FUNCTION.lock().expect("mock function lock") = Some((function, argument as usize));
     0
@@ -279,7 +380,7 @@ fn publish_task_state(
     set_u32("dmc2-pendant-control.task-snapshot-generation", generation);
 }
 
-fn reset_component() {
+fn reset_mock_hal() {
     rtapi_app_exit();
     unsafe {
         ARENA_OFFSET = 0;
@@ -287,6 +388,12 @@ fn reset_component() {
     }
     PINS.lock().expect("mock registry lock").clear();
     *FUNCTION.lock().expect("mock function lock") = None;
+    *FAILURE_PLAN.lock().expect("failure plan lock") = FailurePlan::success();
+    *HAL_CALLS.lock().expect("HAL call lock") = HalCalls::new();
+}
+
+fn reset_component() {
+    reset_mock_hal();
     assert_eq!(rtapi_app_main(), 0);
 
     set_bit("dmc2-pendant-control.servo-thread-ready", true);
@@ -343,6 +450,117 @@ fn publish_case_cycle(
     for (index, value) in stopped.into_iter().enumerate() {
         set_bit(&format!("dmc2-pendant-control.axis-{index}-stopped"), value);
     }
+}
+
+#[test]
+fn every_hal_lifecycle_failure_is_returned_and_cleanup_runs_exactly_once() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+
+    for (init_result, expected) in [(-19, -19), (0, EINVAL)] {
+        reset_mock_hal();
+        FAILURE_PLAN.lock().expect("failure plan lock").init_result = init_result;
+        assert_eq!(rtapi_app_main(), expected);
+        assert_eq!(
+            *HAL_CALLS.lock().expect("HAL call lock"),
+            HalCalls {
+                init: 1,
+                ..HalCalls::new()
+            }
+        );
+        rtapi_app_exit();
+        assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 0);
+    }
+
+    for malloc_failure in 0..2 {
+        reset_mock_hal();
+        FAILURE_PLAN
+            .lock()
+            .expect("failure plan lock")
+            .malloc_failure = Some(malloc_failure);
+        assert_eq!(rtapi_app_main(), ENOMEM);
+        let calls = *HAL_CALLS.lock().expect("HAL call lock");
+        assert_eq!(calls.init, 1);
+        assert_eq!(calls.exit, 1);
+        assert_eq!(calls.malloc, malloc_failure + 1);
+        assert_eq!(calls.pin, if malloc_failure == 0 { 0 } else { 103 });
+        assert_eq!(calls.export, 0);
+        assert_eq!(calls.ready, 0);
+        rtapi_app_exit();
+        assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+    }
+
+    for pin_failure in 0..103 {
+        reset_mock_hal();
+        let error = -1_000 - pin_failure as c_int;
+        FAILURE_PLAN.lock().expect("failure plan lock").pin_failure = Some((pin_failure, error));
+        assert_eq!(rtapi_app_main(), error);
+        let calls = *HAL_CALLS.lock().expect("HAL call lock");
+        assert_eq!(calls.init, 1);
+        assert_eq!(calls.exit, 1);
+        assert_eq!(calls.malloc, 1);
+        assert_eq!(calls.pin, pin_failure + 1);
+        assert_eq!(calls.export, 0);
+        assert_eq!(calls.ready, 0);
+        assert_eq!(PINS.lock().expect("mock registry lock").len(), pin_failure);
+        rtapi_app_exit();
+        assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+    }
+
+    reset_mock_hal();
+    FAILURE_PLAN
+        .lock()
+        .expect("failure plan lock")
+        .export_result = -2_001;
+    assert_eq!(rtapi_app_main(), -2_001);
+    assert_eq!(
+        *HAL_CALLS.lock().expect("HAL call lock"),
+        HalCalls {
+            init: 1,
+            exit: 1,
+            ready: 0,
+            malloc: 2,
+            pin: 103,
+            export: 1,
+        }
+    );
+    rtapi_app_exit();
+    assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+
+    reset_mock_hal();
+    FAILURE_PLAN.lock().expect("failure plan lock").ready_result = -2_002;
+    assert_eq!(rtapi_app_main(), -2_002);
+    assert_eq!(
+        *HAL_CALLS.lock().expect("HAL call lock"),
+        HalCalls {
+            init: 1,
+            exit: 1,
+            ready: 1,
+            malloc: 2,
+            pin: 103,
+            export: 1,
+        }
+    );
+    rtapi_app_exit();
+    assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+
+    reset_mock_hal();
+    {
+        let mut plan = FAILURE_PLAN.lock().expect("failure plan lock");
+        plan.malloc_failure = Some(0);
+        plan.exit_result = -2_003;
+    }
+    assert_eq!(rtapi_app_main(), ENOMEM);
+    assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+    rtapi_app_exit();
+    assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+
+    reset_mock_hal();
+    FAILURE_PLAN.lock().expect("failure plan lock").exit_result = -2_004;
+    assert_eq!(rtapi_app_main(), 0);
+    rtapi_app_exit();
+    assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+    rtapi_app_exit();
+    assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
 }
 
 #[test]

@@ -156,7 +156,7 @@ pub(super) unsafe fn create_hal(component: &str) -> Result<(c_int, *mut HalPins)
     let component_name = CString::new(component)
         .map_err(|_| "HAL component name contained a NUL byte".to_owned())?;
     let component_id = unsafe { hal::hal_init(component_name.as_ptr()) };
-    if component_id < 0 {
+    if component_id <= 0 {
         return Err(format!("hal_init failed: {component_id}"));
     }
 
@@ -175,8 +175,15 @@ pub(super) unsafe fn create_hal(component: &str) -> Result<(c_int, *mut HalPins)
         }
         Ok((component_id, pins))
     })();
-    if result.is_err() {
-        unsafe { hal::hal_exit(component_id) };
+    match result {
+        Ok(value) => Ok(value),
+        Err(error) => {
+            let cleanup = unsafe { hal::hal_exit(component_id) };
+            if cleanup == 0 {
+                Err(error)
+            } else {
+                Err(format!("{error}; hal_exit cleanup failed: {cleanup}"))
+            }
+        }
     }
-    result
 }
