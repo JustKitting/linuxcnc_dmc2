@@ -192,10 +192,44 @@ fn path_text(path: &Path) -> &str {
     path.to_str().expect("build path is not valid UTF-8")
 }
 
-fn fnv1a(bytes: &[u8]) -> u64 {
-    bytes.iter().fold(0xcbf29ce484222325_u64, |hash, byte| {
-        (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3)
-    })
+fn fnv1a_extend(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn hash_u64(hash: u64, value: usize) -> u64 {
+    let value = u64::try_from(value).expect("snapshot layout value exceeds u64");
+    fnv1a_extend(hash, &value.to_le_bytes())
+}
+
+fn hash_text(hash: u64, value: &str) -> u64 {
+    let hash = hash_u64(hash, value.len());
+    fnv1a_extend(hash, value.as_bytes())
+}
+
+fn layout_fingerprint(
+    leaves: &[Leaf],
+    layout: &BTreeMap<String, (usize, usize)>,
+    abi_version: u32,
+    struct_size: usize,
+    struct_alignment: usize,
+) -> u64 {
+    let mut hash = fnv1a_extend(0xcbf29ce484222325, b"DMC2_SNAPSHOT_LAYOUT_V1\0");
+    hash = fnv1a_extend(hash, &abi_version.to_le_bytes());
+    hash = hash_u64(hash, struct_size);
+    hash = hash_u64(hash, struct_alignment);
+    hash = hash_u64(hash, leaves.len());
+    for leaf in leaves {
+        let (offset, byte_size) = layout[&leaf.path];
+        hash = hash_text(hash, &leaf.path);
+        hash = hash_text(hash, &leaf.c_type);
+        hash = hash_u64(hash, leaf.element_count);
+        hash = hash_u64(hash, offset);
+        hash = hash_u64(hash, byte_size);
+    }
+    hash
 }
 
 pub(crate) fn generate(snapshot_header: &Path, output_directory: &Path) {
@@ -230,6 +264,9 @@ pub(crate) fn generate(snapshot_header: &Path, output_directory: &Path) {
     let probe_binary = output_directory.join("status_snapshot_schema_probe");
     let mut probe = String::from(
         "#include <cstddef>\n#include <cstdio>\n#include \"status_snapshot.h\"\nint main() {\ndmc2_task_status_snapshot value{};\nconst auto *base = reinterpret_cast<const unsigned char *>(&value);\n",
+    );
+    probe.push_str(
+        "std::printf(\"@meta\\t%u\\t%zu\\t%zu\\n\", static_cast<unsigned>(DMC2_SNAPSHOT_ABI_VERSION), sizeof(value), alignof(dmc2_task_status_snapshot));\n",
     );
     for leaf in &leaves {
         probe.push_str(&format!(
@@ -272,11 +309,33 @@ pub(crate) fn generate(snapshot_header: &Path, output_directory: &Path) {
         String::from_utf8_lossy(&result.stderr)
     );
     let mut layout = BTreeMap::new();
+    let mut metadata = None;
     for line in String::from_utf8(result.stdout)
         .expect("snapshot schema probe produced non-UTF-8 output")
         .lines()
     {
         let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.first() == Some(&"@meta") {
+            assert_eq!(fields.len(), 4, "malformed snapshot metadata: {line}");
+            let abi_version = fields[1]
+                .parse::<u32>()
+                .unwrap_or_else(|error| panic!("invalid ABI version in {line:?}: {error}"));
+            let struct_size = fields[2]
+                .parse::<usize>()
+                .unwrap_or_else(|error| panic!("invalid struct size in {line:?}: {error}"));
+            let struct_alignment = fields[3]
+                .parse::<usize>()
+                .unwrap_or_else(|error| panic!("invalid struct alignment in {line:?}: {error}"));
+            assert!(struct_size > 0, "zero-sized snapshot metadata");
+            assert!(struct_alignment > 0, "zero-aligned snapshot metadata");
+            assert!(
+                metadata
+                    .replace((abi_version, struct_size, struct_alignment))
+                    .is_none(),
+                "duplicate snapshot metadata"
+            );
+            continue;
+        }
         assert_eq!(fields.len(), 3, "malformed snapshot schema line: {line}");
         let offset = fields[1]
             .parse::<usize>()
@@ -297,12 +356,20 @@ pub(crate) fn generate(snapshot_header: &Path, output_directory: &Path) {
         leaves.len(),
         "native schema probe omitted a logical snapshot field"
     );
+    let (abi_version, struct_size, struct_alignment) =
+        metadata.expect("native schema probe omitted snapshot metadata");
+    let fingerprint =
+        layout_fingerprint(&leaves, &layout, abi_version, struct_size, struct_alignment);
 
     let mut generated = format!(
         "pub const SNAPSHOT_SCHEMA_FNV64: u64 = 0x{:016x};\n\
+         pub const SNAPSHOT_SCHEMA_STRUCT_SIZE: usize = {};\n\
+         pub const SNAPSHOT_SCHEMA_STRUCT_ALIGNMENT: usize = {};\n\
          pub const SNAPSHOT_LOGICAL_FIELD_COUNT: usize = {};\n\
          pub static SNAPSHOT_FIELDS: &[SnapshotFieldSpec] = &[\n",
-        fnv1a(source.as_bytes()),
+        fingerprint,
+        struct_size,
+        struct_alignment,
         leaves.len(),
     );
     for leaf in &leaves {

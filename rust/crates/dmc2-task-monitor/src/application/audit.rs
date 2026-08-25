@@ -8,8 +8,10 @@ use dmc2_linuxcnc_interface::{
 
 use crate::snapshot::{
     dmc2_task_status_copy_self_test, dmc2_task_status_copy_signature_rounds,
-    dmc2_task_status_snapshot_abi_version, dmc2_task_status_snapshot_size, NativeSnapshot,
-    SNAPSHOT_ABI_VERSION, SNAPSHOT_FIELDS, SNAPSHOT_LOGICAL_FIELD_COUNT, SNAPSHOT_SCHEMA_FNV64,
+    dmc2_task_status_snapshot_abi_version, dmc2_task_status_snapshot_size,
+    snapshot_schema_fingerprint, NativeSnapshot, SNAPSHOT_ABI_VERSION, SNAPSHOT_FIELDS,
+    SNAPSHOT_LOGICAL_FIELD_COUNT, SNAPSHOT_SCHEMA_FNV64, SNAPSHOT_SCHEMA_STRUCT_ALIGNMENT,
+    SNAPSHOT_SCHEMA_STRUCT_SIZE,
 };
 
 struct AuditReport {
@@ -63,6 +65,23 @@ impl AuditReport {
         if native_abi != SNAPSHOT_ABI_VERSION || native_snapshot_size != rust_snapshot_size {
             return Err(format!(
                 "native snapshot ABI mismatch: C++ version=0x{native_abi:08x} size={native_snapshot_size}, Rust version=0x{SNAPSHOT_ABI_VERSION:08x} size={rust_snapshot_size}"
+            ));
+        }
+        if SNAPSHOT_SCHEMA_STRUCT_SIZE != rust_snapshot_size
+            || SNAPSHOT_SCHEMA_STRUCT_ALIGNMENT != mem::align_of::<NativeSnapshot>()
+        {
+            return Err(format!(
+                "generated snapshot layout mismatch: generated size={} alignment={}, Rust size={} alignment={}",
+                SNAPSHOT_SCHEMA_STRUCT_SIZE,
+                SNAPSHOT_SCHEMA_STRUCT_ALIGNMENT,
+                rust_snapshot_size,
+                mem::align_of::<NativeSnapshot>()
+            ));
+        }
+        let recomputed_fingerprint = snapshot_schema_fingerprint();
+        if recomputed_fingerprint != SNAPSHOT_SCHEMA_FNV64 {
+            return Err(format!(
+                "snapshot layout fingerprint mismatch: generated=0x{SNAPSHOT_SCHEMA_FNV64:016x} recomputed=0x{recomputed_fingerprint:016x}"
             ));
         }
         let (snapshot_field_bytes, snapshot_padding_bytes) = snapshot_byte_coverage()?;

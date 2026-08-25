@@ -35,6 +35,43 @@ pub(crate) struct SnapshotFieldSpec {
 
 include!(concat!(env!("OUT_DIR"), "/status_snapshot_fields.rs"));
 
+fn extend_schema_fnv(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash = (hash ^ u64::from(*byte)).wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn hash_schema_usize(hash: u64, value: usize) -> u64 {
+    extend_schema_fnv(
+        hash,
+        &u64::try_from(value)
+            .expect("snapshot layout value exceeds u64")
+            .to_le_bytes(),
+    )
+}
+
+fn hash_schema_text(hash: u64, value: &str) -> u64 {
+    let hash = hash_schema_usize(hash, value.len());
+    extend_schema_fnv(hash, value.as_bytes())
+}
+
+pub(crate) fn snapshot_schema_fingerprint() -> u64 {
+    let mut hash = extend_schema_fnv(0xcbf29ce484222325, b"DMC2_SNAPSHOT_LAYOUT_V1\0");
+    hash = extend_schema_fnv(hash, &SNAPSHOT_ABI_VERSION.to_le_bytes());
+    hash = hash_schema_usize(hash, SNAPSHOT_SCHEMA_STRUCT_SIZE);
+    hash = hash_schema_usize(hash, SNAPSHOT_SCHEMA_STRUCT_ALIGNMENT);
+    hash = hash_schema_usize(hash, SNAPSHOT_FIELDS.len());
+    for field in SNAPSHOT_FIELDS {
+        hash = hash_schema_text(hash, field.path);
+        hash = hash_schema_text(hash, field.c_type);
+        hash = hash_schema_usize(hash, field.element_count);
+        hash = hash_schema_usize(hash, field.byte_offset);
+        hash = hash_schema_usize(hash, field.byte_size);
+    }
+    hash
+}
+
 impl NativeSnapshot {
     pub fn safe() -> Self {
         let mut snapshot = Self::default();
@@ -140,6 +177,15 @@ mod tests {
     fn generated_field_inventory_accounts_for_every_data_and_padding_byte() {
         assert_eq!(SNAPSHOT_FIELDS.len(), SNAPSHOT_LOGICAL_FIELD_COUNT);
         assert_ne!(SNAPSHOT_SCHEMA_FNV64, 0);
+        assert_eq!(
+            SNAPSHOT_SCHEMA_STRUCT_SIZE,
+            mem::size_of::<NativeSnapshot>()
+        );
+        assert_eq!(
+            SNAPSHOT_SCHEMA_STRUCT_ALIGNMENT,
+            mem::align_of::<NativeSnapshot>()
+        );
+        assert_eq!(SNAPSHOT_SCHEMA_FNV64, snapshot_schema_fingerprint());
         let mut owners = vec![None; mem::size_of::<NativeSnapshot>()];
         for field in SNAPSHOT_FIELDS {
             assert!(!field.path.is_empty());
