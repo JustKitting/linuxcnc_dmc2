@@ -1,5 +1,10 @@
 use super::*;
-use crate::snapshot::{NativeSnapshot, SNAPSHOT_ABI_VERSION};
+use crate::snapshot::{NativeSnapshot, RcsStatusSnapshot, SNAPSHOT_ABI_VERSION};
+use dmc2_linuxcnc_interface::{
+    CodeDomain, CANON_UNITS, EMC_NML_MESSAGE_TYPE, INTERPRETER_RETURN, JOINT_TYPE, KINEMATICS_TYPE,
+    MOTION_COMMAND, NML_ERROR, RCS_STATE, RCS_STATUS, SPINDLE_ORIENT_STATE, TASK_EXEC, TASK_INTERP,
+    TASK_MODE, TASK_STATE, TRAJ_MODE,
+};
 
 fn code(domain: CodeDomain, name: &str) -> i32 {
     domain
@@ -28,10 +33,10 @@ fn normal_snapshot() -> NativeSnapshot {
     set_rcs(&mut snapshot.motion_rcs);
     set_rcs(&mut snapshot.trajectory.rcs);
     set_rcs(&mut snapshot.io.rcs);
-    set_rcs(&mut snapshot.io.tool_rcs);
-    set_rcs(&mut snapshot.io.aux_rcs);
-    set_rcs(&mut snapshot.io.coolant_rcs);
-    set_rcs(&mut snapshot.io.lube_rcs);
+    set_rcs(&mut snapshot.io.tool.rcs);
+    set_rcs(&mut snapshot.io.aux.rcs);
+    set_rcs(&mut snapshot.io.coolant.rcs);
+    set_rcs(&mut snapshot.io.lube.rcs);
     snapshot.task.mode = code(TASK_MODE, "EMC_TASK_MODE_MANUAL");
     snapshot.task.state = code(TASK_STATE, "EMC_TASK_STATE_ESTOP");
     snapshot.task.exec_state = code(TASK_EXEC, "EMC_TASK_EXEC_DONE");
@@ -49,8 +54,8 @@ fn normal_snapshot() -> NativeSnapshot {
         set_rcs(&mut snapshot.axes[index].rcs);
     }
     set_rcs(&mut snapshot.spindles[0].rcs);
-    snapshot.io.estop = 1;
-    snapshot.io.lube_level = 1;
+    snapshot.io.aux.estop = 1;
+    snapshot.io.lube.level = 1;
     snapshot
 }
 
@@ -71,10 +76,10 @@ fn every_rcs_error_source_is_classified() {
         (|s| &mut s.axes[0].rcs, category::AXIS_RCS),
         (|s| &mut s.spindles[0].rcs, category::SPINDLE_RCS),
         (|s| &mut s.io.rcs, category::IO_RCS),
-        (|s| &mut s.io.tool_rcs, category::IO_RCS),
-        (|s| &mut s.io.aux_rcs, category::IO_RCS),
-        (|s| &mut s.io.coolant_rcs, category::IO_RCS),
-        (|s| &mut s.io.lube_rcs, category::IO_RCS),
+        (|s| &mut s.io.tool.rcs, category::IO_RCS),
+        (|s| &mut s.io.aux.rcs, category::IO_RCS),
+        (|s| &mut s.io.coolant.rcs, category::IO_RCS),
+        (|s| &mut s.io.lube.rcs, category::IO_RCS),
     ];
     for (select, expected) in sources {
         let mut snapshot = normal_snapshot();
@@ -154,8 +159,8 @@ fn stale_error_payloads_are_not_treated_as_active_faults() {
 #[test]
 fn unknown_nml_and_motion_command_echoes_are_both_reported() {
     let mut snapshot = normal_snapshot();
-    snapshot.top_rcs.command_type = i64::MAX;
-    snapshot.motion_rcs.command_type = i64::MAX;
+    snapshot.top_rcs.command_type = i32::MAX;
+    snapshot.motion_rcs.command_type = i32::MAX;
     let report = evaluate(&snapshot);
     assert_eq!(report.unknown_code_count(), 2);
     assert!(report

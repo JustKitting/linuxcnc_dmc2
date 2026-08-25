@@ -1,0 +1,117 @@
+//! Version-locked LinuxCNC code lookup and primitive value validators.
+
+use dmc2_linuxcnc_interface::{CodeDomain, DEBUG_FLAG, DOMAINS};
+
+use super::category;
+use super::report::{DiagnosticReport, Issue, Severity};
+
+pub(super) fn domain_id(domain: CodeDomain) -> u32 {
+    DOMAINS
+        .iter()
+        .position(|candidate| candidate.name == domain.name)
+        .expect("generated LinuxCNC domain was omitted from DOMAINS")
+        .try_into()
+        .expect("LinuxCNC domain index does not fit in u32")
+}
+
+pub(super) fn issue(
+    report: &mut DiagnosticReport,
+    severity: Severity,
+    category: u64,
+    source: impl Into<String>,
+    domain: &'static str,
+    domain_id: u32,
+    value: i64,
+    name: Option<&'static str>,
+    detail: &'static str,
+) {
+    report.push(Issue {
+        severity,
+        category,
+        source: source.into(),
+        domain,
+        domain_id,
+        value,
+        name,
+        detail,
+    });
+}
+
+pub(super) fn unknown_code(
+    report: &mut DiagnosticReport,
+    source: impl Into<String>,
+    domain: CodeDomain,
+    value: i64,
+) {
+    issue(
+        report,
+        Severity::Error,
+        category::UNKNOWN_CODE,
+        source,
+        domain.name,
+        domain_id(domain),
+        value,
+        None,
+        "value is absent from the version-locked LinuxCNC 2.9.10 source catalog",
+    );
+}
+
+pub(super) fn check_code(
+    report: &mut DiagnosticReport,
+    source: impl Into<String>,
+    domain: CodeDomain,
+    value: i64,
+) -> Option<&'static str> {
+    let source = source.into();
+    match domain.lookup(value) {
+        Some(name) => Some(name),
+        None => {
+            unknown_code(report, source, domain, value);
+            None
+        }
+    }
+}
+
+pub(super) fn check_i32_set(
+    report: &mut DiagnosticReport,
+    source: impl Into<String>,
+    value: i32,
+    allowed: &[i32],
+    detail: &'static str,
+) {
+    if !allowed.contains(&value) {
+        issue(
+            report,
+            Severity::Error,
+            category::INVALID_VALUE,
+            source,
+            "constrained_integer",
+            u32::MAX,
+            i64::from(value),
+            None,
+            detail,
+        );
+    }
+}
+
+pub(super) fn check_debug_mask(report: &mut DiagnosticReport, source: &str, raw: i32) {
+    let allowed = DEBUG_FLAG
+        .codes
+        .iter()
+        .fold(0_u32, |mask, code| mask | code.code as u32);
+    let unknown = (raw as u32) & !allowed;
+    if unknown != 0 {
+        issue(
+            report,
+            Severity::Error,
+            category::UNKNOWN_CODE,
+            source,
+            DEBUG_FLAG.name,
+            domain_id(DEBUG_FLAG),
+            i64::from(unknown),
+            None,
+            "debug mask contains bits absent from LinuxCNC 2.9.10",
+        );
+        report.unknown_domain_mask |= 1_u64 << domain_id(DEBUG_FLAG);
+    }
+}

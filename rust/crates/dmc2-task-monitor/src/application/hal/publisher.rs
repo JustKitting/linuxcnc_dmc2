@@ -50,7 +50,7 @@ impl HalPublisher {
             generation_pin.store(generation | 1, Ordering::SeqCst);
             ptr::write_volatile(pins.task_heartbeat, snapshot.task.heartbeat);
             ptr::write_volatile(pins.machine_on, snapshot.trajectory.enabled != 0);
-            ptr::write_volatile(pins.estopped, snapshot.io.estop != 0);
+            ptr::write_volatile(pins.estopped, snapshot.io.aux.estop != 0);
             ptr::write_volatile(
                 pins.manual_mode,
                 TASK_MODE.lookup(i64::from(snapshot.task.mode)) == Some("EMC_TASK_MODE_MANUAL"),

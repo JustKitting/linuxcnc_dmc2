@@ -1,8 +1,12 @@
-use std::ffi::{c_char, c_int, CString};
+use std::ffi::{c_int, CString};
 
 use dmc2_linuxcnc_interface::NML_ERROR;
 
-use crate::snapshot::NativeSnapshot;
+use crate::snapshot::{
+    dmc2_task_status_close, dmc2_task_status_open, dmc2_task_status_poll,
+    dmc2_task_status_snapshot_abi_version, dmc2_task_status_snapshot_size, NativeSnapshot,
+    NativeTaskStatusChannel,
+};
 
 const TASK_STATUS_POLL_OK: c_int = 0;
 const TASK_STATUS_POLL_NOT_READY: c_int = 1;
@@ -23,26 +27,6 @@ fn poll_disposition(result: c_int, nml_error: i32, no_nml_error: i32) -> PollDis
         TASK_STATUS_POLL_NOT_READY => PollDisposition::WaitingForFirstStatus,
         _ => PollDisposition::Fault,
     }
-}
-
-#[repr(C)]
-struct NativeTaskStatusChannel {
-    _private: [u8; 0],
-}
-
-unsafe extern "C" {
-    fn dmc2_task_status_snapshot_abi_version() -> u32;
-    fn dmc2_task_status_snapshot_size() -> usize;
-    fn dmc2_task_status_open(
-        nml_file: *const c_char,
-        nml_error: *mut i32,
-    ) -> *mut NativeTaskStatusChannel;
-    fn dmc2_task_status_poll(
-        channel: *mut NativeTaskStatusChannel,
-        snapshot: *mut NativeSnapshot,
-        nml_error: *mut i32,
-    ) -> c_int;
-    fn dmc2_task_status_close(channel: *mut NativeTaskStatusChannel);
 }
 
 pub(super) fn snapshot_abi_version() -> u32 {
