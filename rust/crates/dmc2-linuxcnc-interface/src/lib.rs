@@ -48,12 +48,22 @@ pub struct EnumDomainContract {
     pub domain_name: &'static str,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct PublicEnumHeaderContract {
+    pub header_name: &'static str,
+    pub declaration_count: usize,
+}
+
 impl CodeDomain {
-    pub fn lookup(self, code: i64) -> Option<&'static str> {
+    pub fn names(self, code: i64) -> impl Iterator<Item = &'static str> {
         self.codes
             .iter()
-            .find(|entry| entry.code == code)
+            .filter(move |entry| entry.code == code)
             .map(|entry| entry.name)
+    }
+
+    pub fn lookup(self, code: i64) -> Option<&'static str> {
+        self.names(code).next()
     }
 
     pub fn contains(self, code: i64) -> bool {
@@ -88,6 +98,14 @@ mod tests {
     #[test]
     fn every_generated_domain_and_code_has_a_unique_name() {
         assert!(!DOMAINS.is_empty());
+        assert_eq!(DOMAINS.len(), 91);
+        assert_eq!(
+            DOMAINS
+                .iter()
+                .map(|domain| domain.codes.len())
+                .sum::<usize>(),
+            GENERATED_CODE_COUNT
+        );
         for (domain_index, domain) in DOMAINS.iter().enumerate() {
             assert!(!domain.name.is_empty());
             assert!(!domain.codes.is_empty(), "empty domain: {}", domain.name);
@@ -98,19 +116,36 @@ mod tests {
                 assert!(!code.name.is_empty());
                 for other in domain.codes.iter().skip(code_index + 1) {
                     assert_ne!(code.name, other.name, "duplicate name in {}", domain.name);
-                    assert_ne!(code.code, other.code, "duplicate value in {}", domain.name);
                 }
-                assert_eq!(domain.lookup(code.code), Some(code.name));
+                assert!(domain.lookup(code.code).is_some());
+                assert!(domain.names(code.code).any(|name| name == code.name));
             }
         }
     }
 
     #[test]
-    fn every_enum_declaration_in_the_audited_headers_has_one_domain() {
-        assert_eq!(ENUM_DECLARATION_COUNT, 38);
+    fn every_enum_declaration_in_every_public_header_has_one_domain() {
+        assert_eq!(PUBLIC_ENUM_HEADERS.len(), PUBLIC_ENUM_HEADER_COUNT);
+        assert_eq!(
+            PUBLIC_ENUM_HEADERS
+                .iter()
+                .map(|header| header.declaration_count)
+                .sum::<usize>(),
+            ENUM_DECLARATION_COUNT
+        );
+        for (index, header) in PUBLIC_ENUM_HEADERS.iter().enumerate() {
+            assert!(!header.header_name.is_empty());
+            for other in PUBLIC_ENUM_HEADERS.iter().skip(index + 1) {
+                assert_ne!(header.header_name, other.header_name);
+            }
+        }
+        assert_eq!(ENUM_DECLARATION_COUNT, 79);
         assert_eq!(ENUM_DOMAIN_CONTRACTS.len(), ENUM_DECLARATION_COUNT);
         for (index, contract) in ENUM_DOMAIN_CONTRACTS.iter().enumerate() {
-            assert!(matches!(contract.declaration_kind, "named" | "typedef"));
+            assert!(matches!(
+                contract.declaration_kind,
+                "anonymous" | "named" | "typedef"
+            ));
             assert!(!contract.header_name.is_empty());
             assert!(!contract.declaration_name.is_empty());
             assert!(domain(contract.domain_name).is_some());
@@ -133,6 +168,16 @@ mod tests {
     }
 
     #[test]
+    fn source_aliases_are_preserved_without_ambiguity_or_data_loss() {
+        let pose_errors = domain("public_enum/emcpose.h/typedef/EmcPoseErr").unwrap();
+        assert_eq!(pose_errors.lookup(-2), Some("EMCPOSE_ERR_INPUT_MISSING"));
+        let mut aliases = pose_errors.names(-2);
+        assert_eq!(aliases.next(), Some("EMCPOSE_ERR_INPUT_MISSING"));
+        assert_eq!(aliases.next(), Some("EMCPOSE_ERR_ALL"));
+        assert_eq!(aliases.next(), None);
+    }
+
+    #[test]
     fn unknown_values_are_never_mislabeled() {
         for domain in DOMAINS {
             assert_eq!(domain.lookup(i64::MIN), None);
@@ -147,7 +192,11 @@ mod tests {
             LINUXCNC_SOURCE_COMMIT,
             "86cdca76fa2a36274c432caa21952b23c267989a"
         );
-        assert_eq!(GENERATED_CODE_COUNT, 550);
+        assert_eq!(GENERATED_CODE_COUNT, 920);
+        assert_eq!(ENUM_CODE_COUNT, 711);
+        assert_eq!(NON_ENUM_CODE_COUNT, 209);
+        assert_eq!(ENUM_CODE_COUNT + NON_ENUM_CODE_COUNT, GENERATED_CODE_COUNT);
+        assert_eq!(PUBLIC_ENUM_HEADER_COUNT, 30);
         assert_eq!(LINUXCNC_SOURCE_COMMIT.len(), 40);
         assert_ne!(HEADER_SOURCE_FNV64, 0);
         assert_eq!(EMCMOT_MAX_JOINTS, 16);

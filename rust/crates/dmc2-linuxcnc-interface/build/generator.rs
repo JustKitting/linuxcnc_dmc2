@@ -1,16 +1,15 @@
-use std::collections::BTreeSet;
 use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::config::{
     ERROR_MESSAGE_CONTRACTS, EXPECTED_HEADER_FNV64, EXPECTED_LINUXCNC_COMMIT,
-    EXPECTED_LINUXCNC_VERSION, STATUS_MESSAGE_CONTRACTS,
+    EXPECTED_LINUXCNC_VERSION, EXPECTED_PUBLIC_ENUM_HEADER_COUNT, STATUS_MESSAGE_CONTRACTS,
 };
 use super::domains::{self, Domain};
-use super::parser::{integer_macro, interpreter_error_templates};
+use super::parser::{enum_declarations, integer_macro, interpreter_error_templates};
 use super::probe::{self, Results};
-use super::source::{self, Headers};
+use super::source::{self, Headers, PublicEnumHeader};
 
 struct MachineLimits {
     joints: usize,
@@ -60,6 +59,7 @@ fn rust_identifier(name: &str) -> String {
 fn preamble(
     fingerprint: u64,
     generated_code_count: usize,
+    enum_code_count: usize,
     enum_declaration_count: usize,
     limits: &MachineLimits,
 ) -> String {
@@ -68,6 +68,9 @@ fn preamble(
          pub const LINUXCNC_SOURCE_COMMIT: &str = \"{EXPECTED_LINUXCNC_COMMIT}\";\n\
          pub const HEADER_SOURCE_FNV64: u64 = 0x{fingerprint:016x};\n\
          pub const GENERATED_CODE_COUNT: usize = {generated_code_count};\n\
+         pub const ENUM_CODE_COUNT: usize = {enum_code_count};\n\
+         pub const NON_ENUM_CODE_COUNT: usize = {};\n\
+         pub const PUBLIC_ENUM_HEADER_COUNT: usize = {EXPECTED_PUBLIC_ENUM_HEADER_COUNT};\n\
          pub const ENUM_DECLARATION_COUNT: usize = {enum_declaration_count};\n\
          pub const STATUS_MESSAGE_CONTRACT_COUNT: usize = {};\n\
          pub const ERROR_MESSAGE_CONTRACT_COUNT: usize = {};\n\
@@ -75,6 +78,7 @@ fn preamble(
          pub const EMCMOT_MAX_AXIS: usize = {};\n\
          pub const EMCMOT_MAX_SPINDLES: usize = {};\n\
          pub const EMCMOT_MAX_MISC_ERROR: usize = {};\n",
+        generated_code_count - enum_code_count,
         STATUS_MESSAGE_CONTRACTS.len(),
         ERROR_MESSAGE_CONTRACTS.len(),
         limits.joints,
@@ -87,7 +91,7 @@ fn preamble(
 fn append_enum_domain_contracts(generated: &mut String, domains: &[Domain]) {
     generated.push_str("pub static ENUM_DOMAIN_CONTRACTS: &[EnumDomainContract] = &[\n");
     for domain in domains {
-        let Some(origin) = domain.enum_origin else {
+        let Some(origin) = domain.enum_origin.as_ref() else {
             continue;
         };
         generated.push_str(&format!(
@@ -96,6 +100,18 @@ fn append_enum_domain_contracts(generated: &mut String, domains: &[Domain]) {
             origin.kind.name(),
             origin.declaration_name,
             domain.name,
+        ));
+    }
+    generated.push_str("];\n");
+}
+
+fn append_public_enum_headers(generated: &mut String, headers: &[PublicEnumHeader]) {
+    generated.push_str("pub static PUBLIC_ENUM_HEADERS: &[PublicEnumHeaderContract] = &[\n");
+    for header in headers {
+        let declaration_count = enum_declarations(&header.source).len();
+        generated.push_str(&format!(
+            "PublicEnumHeaderContract {{ header_name: {:?}, declaration_count: {declaration_count} }},\n",
+            header.name,
         ));
     }
     generated.push_str("];\n");
@@ -155,19 +171,13 @@ fn append_error_contracts(generated: &mut String, results: &Results) {
 
 fn append_domains(generated: &mut String, domains: &[Domain], results: &Results) {
     for domain in domains {
-        let identifier = rust_identifier(domain.name);
+        let identifier = rust_identifier(&domain.name);
         generated.push_str(&format!(
             "pub static {identifier}: CodeDomain = CodeDomain {{ name: {:?}, codes: &[\n",
             domain.name
         ));
-        let mut domain_values = BTreeSet::new();
         for symbol in &domain.symbols {
             let value = results.values[&(domain.name.to_owned(), symbol.to_owned())];
-            assert!(
-                domain_values.insert(value),
-                "duplicate numeric value {value} in LinuxCNC code domain {}",
-                domain.name
-            );
             generated.push_str(&format!(
                 "CodeName {{ code: {value}, name: {symbol:?} }},\n"
             ));
@@ -176,7 +186,7 @@ fn append_domains(generated: &mut String, domains: &[Domain], results: &Results)
     }
     generated.push_str("pub static DOMAINS: &[CodeDomain] = &[\n");
     for domain in domains {
-        generated.push_str(&format!("{},\n", rust_identifier(domain.name)));
+        generated.push_str(&format!("{},\n", rust_identifier(&domain.name)));
     }
     generated.push_str("];\n");
 }
@@ -184,6 +194,7 @@ fn append_domains(generated: &mut String, domains: &[Domain], results: &Results)
 fn write_catalog(
     output_directory: &Path,
     headers: &Headers,
+    public_enum_headers: &[PublicEnumHeader],
     domains: &[Domain],
     templates: &[(String, String)],
     results: &Results,
@@ -202,15 +213,22 @@ fn write_catalog(
         .iter()
         .filter(|domain| domain.enum_origin.is_some())
         .count();
+    let enum_code_count = domains
+        .iter()
+        .filter(|domain| domain.enum_origin.is_some())
+        .map(|domain| domain.symbols.len())
+        .sum();
     let mut generated = preamble(
         fingerprint,
         generated_code_count,
+        enum_code_count,
         enum_declaration_count,
         limits,
     );
     append_interpreter_errors(&mut generated, templates);
     append_status_contracts(&mut generated, results);
     append_error_contracts(&mut generated, results);
+    append_public_enum_headers(&mut generated, public_enum_headers);
     append_enum_domain_contracts(&mut generated, domains);
     append_domains(&mut generated, domains, results);
     fs::write(output_directory.join("linuxcnc_code_catalog.rs"), generated)
@@ -220,8 +238,9 @@ fn write_catalog(
 pub(crate) fn generate() {
     let source_root = source::verify_checkout();
     let headers = source::load_headers(&source_root);
+    let public_enum_headers = source::load_public_enum_headers(&source_root);
     let templates = interpreter_error_templates(&source::read_interpreter_errors(&source_root));
-    let domains = domains::collect(&headers);
+    let domains = domains::collect(&headers, &public_enum_headers);
     let limits = machine_limits(&headers);
     let output_directory =
         PathBuf::from(env::var_os("OUT_DIR").expect("Cargo did not provide OUT_DIR"));
@@ -234,6 +253,7 @@ pub(crate) fn generate() {
     write_catalog(
         &output_directory,
         &headers,
+        &public_enum_headers,
         &domains,
         &templates,
         &results,

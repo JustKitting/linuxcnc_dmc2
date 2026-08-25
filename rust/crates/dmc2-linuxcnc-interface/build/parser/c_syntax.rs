@@ -1,17 +1,22 @@
 fn strip_comments(input: &str) -> String {
     let bytes = input.as_bytes();
-    let mut output = String::with_capacity(input.len());
+    let mut output = Vec::with_capacity(input.len());
     let mut index = 0;
     let mut in_block = false;
     let mut in_line = false;
+    let mut quote = None;
+    let mut escaped = false;
     while index < bytes.len() {
         if in_block {
             if index + 1 < bytes.len() && bytes[index] == b'*' && bytes[index + 1] == b'/' {
                 in_block = false;
+                output.extend_from_slice(b"  ");
                 index += 2;
             } else {
                 if bytes[index] == b'\n' {
-                    output.push('\n');
+                    output.push(b'\n');
+                } else {
+                    output.push(b' ');
                 }
                 index += 1;
             }
@@ -20,33 +25,61 @@ fn strip_comments(input: &str) -> String {
         if in_line {
             if bytes[index] == b'\n' {
                 in_line = false;
-                output.push('\n');
+                output.push(b'\n');
+            } else {
+                output.push(b' ');
             }
+            index += 1;
+            continue;
+        }
+        if let Some(expected_quote) = quote {
+            let byte = bytes[index];
+            output.push(byte);
+            index += 1;
+            if escaped {
+                escaped = false;
+            } else if byte == b'\\' {
+                escaped = true;
+            } else if byte == expected_quote {
+                quote = None;
+            }
+            continue;
+        }
+        if bytes[index] == b'\'' || bytes[index] == b'"' {
+            quote = Some(bytes[index]);
+            output.push(bytes[index]);
             index += 1;
             continue;
         }
         if index + 1 < bytes.len() && bytes[index] == b'/' && bytes[index + 1] == b'*' {
             in_block = true;
+            output.extend_from_slice(b"  ");
             index += 2;
             continue;
         }
         if index + 1 < bytes.len() && bytes[index] == b'/' && bytes[index + 1] == b'/' {
             in_line = true;
+            output.extend_from_slice(b"  ");
             index += 2;
             continue;
         }
-        output.push(bytes[index] as char);
+        output.push(bytes[index]);
         index += 1;
     }
     assert!(
         !in_block,
         "unterminated block comment while parsing LinuxCNC headers"
     );
-    output
+    assert!(
+        quote.is_none(),
+        "unterminated literal while parsing LinuxCNC headers"
+    );
+    String::from_utf8(output).expect("LinuxCNC header is not valid UTF-8")
 }
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub(crate) enum EnumKind {
+    Anonymous,
     Named,
     Typedef,
 }
@@ -54,6 +87,7 @@ pub(crate) enum EnumKind {
 impl EnumKind {
     pub(crate) const fn name(self) -> &'static str {
         match self {
+            Self::Anonymous => "anonymous",
             Self::Named => "named",
             Self::Typedef => "typedef",
         }
@@ -64,10 +98,17 @@ impl EnumKind {
 pub(crate) struct EnumDeclaration {
     pub(crate) kind: EnumKind,
     pub(crate) name: String,
+    pub(crate) symbols: Vec<String>,
+    pub(crate) body: String,
 }
 
-fn c_tokens(source: &str) -> Vec<String> {
-    let cleaned = strip_comments(source);
+struct Token {
+    text: String,
+    start: usize,
+    end: usize,
+}
+
+fn c_tokens(cleaned: &str) -> Vec<Token> {
     let bytes = cleaned.as_bytes();
     let mut tokens = Vec::new();
     let mut index = 0;
@@ -77,6 +118,7 @@ fn c_tokens(source: &str) -> Vec<String> {
             let quote = byte;
             index += 1;
             let mut escaped = false;
+            let mut closed = false;
             while index < bytes.len() {
                 let current = bytes[index];
                 index += 1;
@@ -85,9 +127,14 @@ fn c_tokens(source: &str) -> Vec<String> {
                 } else if current == b'\\' {
                     escaped = true;
                 } else if current == quote {
+                    closed = true;
                     break;
                 }
             }
+            assert!(
+                closed,
+                "unterminated string or character literal in LinuxCNC header"
+            );
             continue;
         }
         if byte.is_ascii_alphabetic() || byte == b'_' {
@@ -98,11 +145,19 @@ fn c_tokens(source: &str) -> Vec<String> {
             {
                 index += 1;
             }
-            tokens.push(cleaned[start..index].to_owned());
+            tokens.push(Token {
+                text: cleaned[start..index].to_owned(),
+                start,
+                end: index,
+            });
             continue;
         }
         if matches!(byte, b'{' | b'}' | b';') {
-            tokens.push((byte as char).to_string());
+            tokens.push(Token {
+                text: (byte as char).to_string(),
+                start: index,
+                end: index + 1,
+            });
         }
         index += 1;
     }
@@ -110,31 +165,34 @@ fn c_tokens(source: &str) -> Vec<String> {
 }
 
 pub(crate) fn enum_declarations(source: &str) -> Vec<EnumDeclaration> {
-    let tokens = c_tokens(source);
+    let cleaned = strip_comments(source);
+    let tokens = c_tokens(&cleaned);
     let mut declarations = Vec::new();
+    let mut anonymous_count = 0_usize;
     let mut index = 0;
     while index < tokens.len() {
-        if tokens[index] != "enum" {
+        if tokens[index].text != "enum" {
             index += 1;
             continue;
         }
-        let is_typedef = index > 0 && tokens[index - 1] == "typedef";
+        let is_typedef = index > 0 && tokens[index - 1].text == "typedef";
         let mut cursor = index + 1;
-        let tag = if tokens.get(cursor).is_some_and(|token| token != "{") {
-            let value = tokens[cursor].clone();
+        let tag = if tokens.get(cursor).is_some_and(|token| token.text != "{") {
+            let value = tokens[cursor].text.clone();
             cursor += 1;
             Some(value)
         } else {
             None
         };
-        if tokens.get(cursor).map(String::as_str) != Some("{") {
+        if tokens.get(cursor).map(|token| token.text.as_str()) != Some("{") {
             index += 1;
             continue;
         }
+        let body_start = tokens[cursor].end;
         let mut depth = 1_u32;
         cursor += 1;
         while cursor < tokens.len() && depth > 0 {
-            match tokens[cursor].as_str() {
+            match tokens[cursor].text.as_str() {
                 "{" => depth += 1,
                 "}" => depth -= 1,
                 _ => {}
@@ -142,19 +200,28 @@ pub(crate) fn enum_declarations(source: &str) -> Vec<EnumDeclaration> {
             cursor += 1;
         }
         assert_eq!(depth, 0, "unterminated enum declaration in LinuxCNC header");
+        let body_end = tokens[cursor - 1].start;
+        let body = cleaned[body_start..body_end].to_owned();
         let (kind, name) = if is_typedef {
             let alias = tokens
                 .get(cursor)
-                .filter(|token| token.as_str() != ";")
+                .filter(|token| token.text != ";")
                 .unwrap_or_else(|| panic!("typedef enum has no alias in LinuxCNC header"));
-            (EnumKind::Typedef, alias.clone())
+            (EnumKind::Typedef, alias.text.clone())
+        } else if let Some(tag) = tag {
+            (EnumKind::Named, tag)
         } else {
-            (
-                EnumKind::Named,
-                tag.unwrap_or_else(|| panic!("non-typedef enum has no tag in LinuxCNC header")),
-            )
+            let name = format!("anonymous_{anonymous_count}");
+            anonymous_count += 1;
+            (EnumKind::Anonymous, name)
         };
-        declarations.push(EnumDeclaration { kind, name });
+        let symbols = parse_enum_names(&body);
+        declarations.push(EnumDeclaration {
+            kind,
+            name,
+            symbols,
+            body,
+        });
         index = cursor;
     }
     declarations

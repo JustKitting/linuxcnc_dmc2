@@ -3,6 +3,7 @@ pub(crate) const EXPECTED_LINUXCNC_COMMIT: &str = "86cdca76fa2a36274c432caa21952
 pub(crate) const SOURCE_ROOT_RELATIVE: &str = "../../../vendor/linuxcnc-2.9.10";
 pub(crate) const EXPECTED_HEADER_FNV64: u64 = 0x5d196ecfe398141a;
 pub(crate) const INCLUDE_ROOT: &str = "/usr/include/linuxcnc";
+pub(crate) const EXPECTED_PUBLIC_ENUM_HEADER_COUNT: usize = 30;
 
 pub(crate) const EXPECTED_DOMAIN_COUNTS: &[(&str, usize)] = &[
     ("emc_nml_message_type", 145),

@@ -37,6 +37,13 @@ fn paths(output_directory: &Path) -> (PathBuf, PathBuf) {
     )
 }
 
+fn enum_paths(output_directory: &Path) -> (PathBuf, PathBuf) {
+    (
+        output_directory.join("linuxcnc_public_enum_probe.cc"),
+        output_directory.join("linuxcnc_public_enum_probe"),
+    )
+}
+
 fn source(
     domains: &[Domain],
     status_contracts: &[(&str, &str)],
@@ -46,6 +53,9 @@ fn source(
         "#include <cstddef>\n#include <cstdio>\n#include \"emc.hh\"\n#include \"emc_nml.hh\"\n#include \"motion.h\"\n#include \"interp_return.hh\"\n#include \"nml.hh\"\n#include \"nml_oi.hh\"\n#include \"rcs.hh\"\n#include \"stat_msg.hh\"\n#include \"cmd_msg.hh\"\n#include \"cms.hh\"\n#include \"canon.hh\"\n#include \"kinematics.h\"\n#include \"motion_types.h\"\n#include \"debugflags.h\"\n#include \"state_tag.h\"\n#include \"usrmotintf.h\"\nint main() {\n",
     );
     for domain in domains {
+        if domain.enum_probe_body.is_some() {
+            continue;
+        }
         for symbol in &domain.symbols {
             probe.push_str(&format!(
                 "std::printf(\"{}\\t{symbol}\\t%lld\\n\", static_cast<long long>({symbol}));\n",
@@ -73,6 +83,32 @@ fn source(
         probe.push_str(&format!(
             "std::printf(\"__error_message_contract__\\t{class_name}\\t{message_type_name}\\t%lld\\t%zu\\t{payload_member}\\t%zu\\t%zu\\t{id_member}\\t%lld\\t%zu\\n\", static_cast<long long>({message_type_name}), sizeof({class_name}), offsetof({class_name}, {payload_member}), sizeof((({class_name} *)nullptr)->{payload_member}), {id_offset}, {id_size});\n"
         ));
+    }
+    probe.push_str("return 0;\n}\n");
+    probe
+}
+
+fn extracted_enum_source(domains: &[Domain]) -> String {
+    let mut probe = String::from("extern \"C\" int printf(const char *, ...);\n");
+    for (index, domain) in domains.iter().enumerate() {
+        let Some(body) = domain.enum_probe_body.as_deref() else {
+            continue;
+        };
+        probe.push_str(&format!(
+            "namespace dmc2_public_enum_{index} {{ enum Values {{\n{body}\n}}; }}\n"
+        ));
+    }
+    probe.push_str("int main() {\n");
+    for (index, domain) in domains.iter().enumerate() {
+        if domain.enum_probe_body.is_none() {
+            continue;
+        }
+        for symbol in &domain.symbols {
+            probe.push_str(&format!(
+                "printf(\"{}\\t{symbol}\\t%lld\\n\", static_cast<long long>(dmc2_public_enum_{index}::{symbol}));\n",
+                domain.name
+            ));
+        }
     }
     probe.push_str("return 0;\n}\n");
     probe
@@ -209,6 +245,18 @@ fn parse(stdout: Vec<u8>) -> Results {
     }
 }
 
+fn execute(binary: &Path) -> Results {
+    let result = Command::new(binary)
+        .output()
+        .expect("failed to execute LinuxCNC code probe");
+    assert!(
+        result.status.success(),
+        "LinuxCNC code probe failed: {}",
+        String::from_utf8_lossy(&result.stderr)
+    );
+    parse(result.stdout)
+}
+
 pub(crate) fn run(
     output_directory: &Path,
     domains: &[Domain],
@@ -222,15 +270,32 @@ pub(crate) fn run(
     )
     .expect("failed to write LinuxCNC code probe");
     compile(&probe_source, &probe_binary);
-    let result = Command::new(&probe_binary)
-        .output()
-        .expect("failed to execute LinuxCNC code probe");
-    assert!(
-        result.status.success(),
-        "LinuxCNC code probe failed: {}",
-        String::from_utf8_lossy(&result.stderr)
-    );
-    let parsed = parse(result.stdout);
+    let mut parsed = execute(&probe_binary);
+    let extracted_count = domains
+        .iter()
+        .filter(|domain| domain.enum_probe_body.is_some())
+        .map(|domain| domain.symbols.len())
+        .sum::<usize>();
+    if extracted_count > 0 {
+        let (enum_source, enum_binary) = enum_paths(output_directory);
+        fs::write(&enum_source, extracted_enum_source(domains))
+            .expect("failed to write LinuxCNC public-enum probe");
+        compile(&enum_source, &enum_binary);
+        let extracted = execute(&enum_binary);
+        assert_eq!(
+            extracted.values.len(),
+            extracted_count,
+            "LinuxCNC public-enum probe omitted a source code"
+        );
+        assert!(extracted.status_contracts.is_empty());
+        assert!(extracted.error_contracts.is_empty());
+        for (key, value) in extracted.values {
+            assert!(
+                parsed.values.insert(key.clone(), value).is_none(),
+                "duplicate result across LinuxCNC code probes: {key:?}"
+            );
+        }
+    }
     let requested_count = domains
         .iter()
         .map(|domain| domain.symbols.len())

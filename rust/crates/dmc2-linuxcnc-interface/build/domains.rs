@@ -2,26 +2,28 @@ use std::collections::BTreeSet;
 
 use super::config::EXPECTED_DOMAIN_COUNTS;
 use super::parser::{enum_declarations, macro_names, named_enum, typedef_enum, EnumKind};
-use super::source::Headers;
+use super::source::{Headers, PublicEnumHeader};
 
-#[derive(Clone, Copy)]
+#[derive(Clone)]
 pub(crate) struct EnumOrigin {
-    pub(crate) header_name: &'static str,
+    pub(crate) header_name: String,
     pub(crate) kind: EnumKind,
-    pub(crate) declaration_name: &'static str,
+    pub(crate) declaration_name: String,
 }
 
 pub(crate) struct Domain {
-    pub(crate) name: &'static str,
+    pub(crate) name: String,
     pub(crate) symbols: Vec<String>,
     pub(crate) enum_origin: Option<EnumOrigin>,
+    pub(crate) enum_probe_body: Option<String>,
 }
 
 fn domain(name: &'static str, symbols: Vec<String>) -> Domain {
     Domain {
-        name,
+        name: name.to_owned(),
         symbols,
         enum_origin: None,
+        enum_probe_body: None,
     }
 }
 
@@ -32,13 +34,14 @@ fn named_domain(
     declaration_name: &'static str,
 ) -> Domain {
     Domain {
-        name,
+        name: name.to_owned(),
         symbols: named_enum(source, &format!("enum {declaration_name}")),
         enum_origin: Some(EnumOrigin {
-            header_name,
+            header_name: header_name.to_owned(),
             kind: EnumKind::Named,
-            declaration_name,
+            declaration_name: declaration_name.to_owned(),
         }),
+        enum_probe_body: None,
     }
 }
 
@@ -49,18 +52,23 @@ fn typedef_domain(
     declaration_name: &'static str,
 ) -> Domain {
     Domain {
-        name,
+        name: name.to_owned(),
         symbols: typedef_enum(source, declaration_name),
         enum_origin: Some(EnumOrigin {
-            header_name,
+            header_name: header_name.to_owned(),
             kind: EnumKind::Typedef,
-            declaration_name,
+            declaration_name: declaration_name.to_owned(),
         }),
+        enum_probe_body: None,
     }
 }
 
-pub(crate) fn collect(headers: &Headers) -> Vec<Domain> {
-    let domains = vec![
+fn automatic_enum_domain_name(header: &str, kind: EnumKind, declaration: &str) -> String {
+    format!("public_enum/{header}/{}/{declaration}", kind.name())
+}
+
+pub(crate) fn collect(headers: &Headers, public_headers: &[PublicEnumHeader]) -> Vec<Domain> {
+    let mut domains = vec![
         domain(
             "emc_nml_message_type",
             macro_names(&headers.emc, |name, value| {
@@ -287,15 +295,55 @@ pub(crate) fn collect(headers: &Headers) -> Vec<Domain> {
             .concat(),
         ),
     ];
-    validate(headers, &domains);
+    validate_curated(&domains);
+    let curated_origins = domains
+        .iter()
+        .filter_map(|domain| domain.enum_origin.as_ref())
+        .map(|origin| {
+            (
+                origin.header_name.clone(),
+                origin.kind,
+                origin.declaration_name.clone(),
+            )
+        })
+        .collect::<BTreeSet<_>>();
+    for header in public_headers {
+        for declaration in enum_declarations(&header.source) {
+            let origin_key = (
+                header.name.clone(),
+                declaration.kind,
+                declaration.name.clone(),
+            );
+            if curated_origins.contains(&origin_key) {
+                continue;
+            }
+            domains.push(Domain {
+                name: automatic_enum_domain_name(&header.name, declaration.kind, &declaration.name),
+                symbols: declaration.symbols,
+                enum_origin: Some(EnumOrigin {
+                    header_name: header.name.clone(),
+                    kind: declaration.kind,
+                    declaration_name: declaration.name,
+                }),
+                enum_probe_body: Some(declaration.body),
+            });
+        }
+    }
+    validate_inventory(public_headers, &domains);
+    validate_core_enum_subset(headers, &domains);
     domains
 }
 
-fn validate(headers: &Headers, domains: &[Domain]) {
+fn validate_curated(domains: &[Domain]) {
+    assert_eq!(
+        domains.len(),
+        EXPECTED_DOMAIN_COUNTS.len(),
+        "the curated LinuxCNC code-domain inventory changed"
+    );
     let mut seen_domain_names = BTreeSet::new();
     for domain in domains {
         assert!(
-            seen_domain_names.insert(domain.name),
+            seen_domain_names.insert(domain.name.as_str()),
             "duplicate catalog domain {}",
             domain.name
         );
@@ -309,13 +357,67 @@ fn validate(headers: &Headers, domains: &[Domain]) {
     }
     let actual_domain_counts = domains
         .iter()
-        .map(|domain| (domain.name, domain.symbols.len()))
+        .map(|domain| (domain.name.as_str(), domain.symbols.len()))
         .collect::<Vec<_>>();
     assert_eq!(
         actual_domain_counts, EXPECTED_DOMAIN_COUNTS,
         "LinuxCNC 2.9.10 public code domains changed or the source parser omitted a code"
     );
+}
 
+fn validate_inventory(public_headers: &[PublicEnumHeader], domains: &[Domain]) {
+    let declared_enum_list = public_headers
+        .iter()
+        .flat_map(|header| {
+            enum_declarations(&header.source)
+                .into_iter()
+                .map(move |declaration| (header.name.clone(), declaration.kind, declaration.name))
+        })
+        .collect::<Vec<_>>();
+    let declared_enums = declared_enum_list.iter().cloned().collect::<BTreeSet<_>>();
+    assert_eq!(
+        declared_enums.len(),
+        declared_enum_list.len(),
+        "a LinuxCNC public header declares the same enum identity twice"
+    );
+    let mapped_enum_list = domains
+        .iter()
+        .filter_map(|domain| domain.enum_origin.as_ref())
+        .map(|origin| {
+            (
+                origin.header_name.clone(),
+                origin.kind,
+                origin.declaration_name.clone(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mapped_enums = mapped_enum_list.iter().cloned().collect::<BTreeSet<_>>();
+    assert_eq!(
+        mapped_enums.len(),
+        mapped_enum_list.len(),
+        "a LinuxCNC public enum declaration was mapped more than once"
+    );
+    assert_eq!(
+        mapped_enums, declared_enums,
+        "a LinuxCNC public enum declaration is missing from the generated code catalog"
+    );
+    let duplicate_probe_names = domains
+        .iter()
+        .map(|domain| domain.name.as_str())
+        .collect::<BTreeSet<_>>();
+    assert_eq!(
+        duplicate_probe_names.len(),
+        domains.len(),
+        "two LinuxCNC public enum declarations generated the same domain name"
+    );
+}
+
+/*
+    The 17 core headers remain available separately for ABI fingerprints and
+    message-layout probes. Their enum declarations are a strict subset of the
+    source-discovered public-header inventory above.
+*/
+fn validate_core_enum_subset(headers: &Headers, domains: &[Domain]) {
     let declared_enums = headers
         .named()
         .into_iter()
@@ -327,17 +429,17 @@ fn validate(headers: &Headers, domains: &[Domain]) {
         .collect::<BTreeSet<_>>();
     let mapped_enums = domains
         .iter()
-        .filter_map(|domain| domain.enum_origin)
+        .filter_map(|domain| domain.enum_origin.as_ref())
         .map(|origin| {
             (
-                origin.header_name,
+                origin.header_name.as_str(),
                 origin.kind,
-                origin.declaration_name.to_owned(),
+                origin.declaration_name.clone(),
             )
         })
         .collect::<BTreeSet<_>>();
-    assert_eq!(
-        mapped_enums, declared_enums,
-        "a LinuxCNC public enum declaration is missing from the generated code catalog"
+    assert!(
+        declared_enums.is_subset(&mapped_enums),
+        "a core LinuxCNC enum declaration is missing from the public enum inventory"
     );
 }

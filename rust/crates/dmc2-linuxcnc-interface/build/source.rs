@@ -3,9 +3,15 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::config::{
-    EXPECTED_LINUXCNC_COMMIT, EXPECTED_LINUXCNC_VERSION, INCLUDE_ROOT, SOURCE_ROOT_RELATIVE,
+    EXPECTED_LINUXCNC_COMMIT, EXPECTED_LINUXCNC_VERSION, EXPECTED_PUBLIC_ENUM_HEADER_COUNT,
+    INCLUDE_ROOT, SOURCE_ROOT_RELATIVE,
 };
 use super::process;
+
+pub(crate) struct PublicEnumHeader {
+    pub(crate) name: String,
+    pub(crate) source: String,
+}
 
 pub(crate) struct Headers {
     pub(crate) emc: String,
@@ -153,4 +159,171 @@ pub(crate) fn read_interpreter_errors(source_root: &Path) -> String {
     println!("cargo:rerun-if-changed={}", path.display());
     fs::read_to_string(&path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", path.display()))
+}
+
+fn contains_enum_token(source: &str) -> bool {
+    source.match_indices("enum").any(|(index, _)| {
+        let before = source[..index].bytes().next_back();
+        let after = source[index + 4..].bytes().next();
+        let is_identifier = |byte: u8| byte.is_ascii_alphanumeric() || byte == b'_';
+        before.is_none_or(|byte| !is_identifier(byte))
+            && after.is_none_or(|byte| !is_identifier(byte))
+    })
+}
+
+fn find_source_headers(directory: &Path, name: &str, matches: &mut Vec<PathBuf>) {
+    for entry in fs::read_dir(directory)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", directory.display()))
+    {
+        let entry = entry.unwrap_or_else(|error| {
+            panic!(
+                "failed to inspect an entry in {}: {error}",
+                directory.display()
+            )
+        });
+        let path = entry.path();
+        if path.file_name().and_then(|value| value.to_str()) == Some(".git") {
+            continue;
+        }
+        let file_type = entry
+            .file_type()
+            .unwrap_or_else(|error| panic!("failed to inspect {}: {error}", path.display()));
+        if file_type.is_dir() {
+            find_source_headers(&path, name, matches);
+        } else if file_type.is_file()
+            && path.file_name().and_then(|value| value.to_str()) == Some(name)
+        {
+            matches.push(path);
+        }
+    }
+}
+
+fn source_header_path(source_root: &Path, name: &str) -> PathBuf {
+    let mut matches = Vec::new();
+    find_source_headers(&source_root.join("src"), name, &mut matches);
+    if name == "hal.h" {
+        matches.retain(|path| path.ends_with("src/hal/hal.h"));
+    }
+    assert_eq!(
+        matches.len(),
+        1,
+        "expected one authoritative LinuxCNC source header named {name}, found {matches:?}"
+    );
+    matches.remove(0)
+}
+
+fn target_lines(preprocessed: &str, target: &str) -> String {
+    let mut active = false;
+    let mut selected = String::new();
+    for line in preprocessed.lines() {
+        if line.starts_with("# ") {
+            let Some(open_quote) = line.find('"') else {
+                active = false;
+                continue;
+            };
+            let remainder = &line[open_quote + 1..];
+            let Some(close_quote) = remainder.find('"') else {
+                active = false;
+                continue;
+            };
+            active = &remainder[..close_quote] == target;
+        } else if active {
+            selected.push_str(line);
+            selected.push('\n');
+        }
+    }
+    selected
+}
+
+fn preprocess_public_header(installed_path: &Path, name: &str) -> String {
+    let installed = installed_path
+        .to_str()
+        .expect("installed LinuxCNC header path is not UTF-8");
+    if name == "interp_internal.hh" {
+        return process::text(
+            "g++",
+            &[
+                "-std=c++17",
+                "-E",
+                "-P",
+                "-fpreprocessed",
+                "-x",
+                "c++",
+                installed,
+            ],
+        );
+    }
+    let preprocessed = process::text(
+        "g++",
+        &[
+            "-std=c++17",
+            "-E",
+            "-x",
+            "c++",
+            "-DULAPI",
+            "-I",
+            INCLUDE_ROOT,
+            installed,
+        ],
+    );
+    target_lines(&preprocessed, installed)
+}
+
+pub(crate) fn load_public_enum_headers(source_root: &Path) -> Vec<PublicEnumHeader> {
+    let mut installed_paths = fs::read_dir(INCLUDE_ROOT)
+        .unwrap_or_else(|error| panic!("failed to read {INCLUDE_ROOT}: {error}"))
+        .filter_map(|entry| {
+            let entry = entry.unwrap_or_else(|error| {
+                panic!("failed to inspect an entry in {INCLUDE_ROOT}: {error}")
+            });
+            let path = entry.path();
+            let file_type = entry
+                .file_type()
+                .unwrap_or_else(|error| panic!("failed to inspect {}: {error}", path.display()));
+            if !file_type.is_file() {
+                return None;
+            }
+            let source = fs::read_to_string(&path).unwrap_or_else(|error| {
+                panic!(
+                    "failed to read installed header {}: {error}",
+                    path.display()
+                )
+            });
+            contains_enum_token(&source).then_some(path)
+        })
+        .collect::<Vec<_>>();
+    installed_paths.sort();
+    assert_eq!(
+        installed_paths.len(),
+        EXPECTED_PUBLIC_ENUM_HEADER_COUNT,
+        "the installed LinuxCNC public-header enum inventory changed"
+    );
+
+    installed_paths
+        .into_iter()
+        .map(|installed_path| {
+            let name = installed_path
+                .file_name()
+                .and_then(|value| value.to_str())
+                .expect("installed LinuxCNC header name is not UTF-8")
+                .to_owned();
+            let source_path = source_header_path(source_root, &name);
+            println!("cargo:rerun-if-changed={}", installed_path.display());
+            println!("cargo:rerun-if-changed={}", source_path.display());
+            let installed_bytes = fs::read(&installed_path).unwrap_or_else(|error| {
+                panic!("failed to read {}: {error}", installed_path.display())
+            });
+            let source_bytes = fs::read(&source_path).unwrap_or_else(|error| {
+                panic!("failed to read {}: {error}", source_path.display())
+            });
+            assert_eq!(
+                source_bytes, installed_bytes,
+                "installed {name} does not exactly match pulled LinuxCNC v2.9.10 source"
+            );
+            PublicEnumHeader {
+                source: preprocess_public_header(&installed_path, &name),
+                name,
+            }
+        })
+        .collect()
 }
