@@ -7,3 +7,5 @@
 // bindgen against this computer's installed /usr/include/linuxcnc/hal.h and
 // refuses any LinuxCNC version other than the audited 2.9.10 installation.
 include!(concat!(env!("OUT_DIR"), "/hal_bindings.rs"));
+
+mod abi;
