@@ -2,11 +2,14 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-use super::config::STATUS_MESSAGE_TYPES;
+use super::config::{
+    ERROR_MESSAGE_CONTRACTS, EXPECTED_HEADER_FNV64, EXPECTED_LINUXCNC_COMMIT,
+    EXPECTED_LINUXCNC_VERSION, EXPECTED_PUBLIC_ENUM_HEADER_COUNT, STATUS_MESSAGE_CONTRACTS,
+};
 use super::domains::{self, Domain};
-use super::parser::integer_macro;
+use super::parser::{enum_declarations, integer_macro, interpreter_error_templates};
 use super::probe::{self, Results};
-use super::source::{self, Headers};
+use super::source::{self, Headers, PublicEnumHeader};
 
 struct MachineLimits {
     joints: usize,
@@ -24,6 +27,23 @@ fn machine_limits(headers: &Headers) -> MachineLimits {
     }
 }
 
+fn fnv1a(mut hash: u64, bytes: &[u8]) -> u64 {
+    for byte in bytes {
+        hash ^= u64::from(*byte);
+        hash = hash.wrapping_mul(0x100000001b3);
+    }
+    hash
+}
+
+fn header_fingerprint(headers: &Headers) -> u64 {
+    headers
+        .all()
+        .iter()
+        .fold(0xcbf29ce484222325_u64, |hash, source| {
+            fnv1a(hash, source.as_bytes())
+        })
+}
+
 fn rust_identifier(name: &str) -> String {
     name.chars()
         .map(|character| {
@@ -36,26 +56,114 @@ fn rust_identifier(name: &str) -> String {
         .collect()
 }
 
-fn preamble(limits: &MachineLimits) -> String {
+fn preamble(
+    fingerprint: u64,
+    generated_code_count: usize,
+    enum_code_count: usize,
+    enum_declaration_count: usize,
+    limits: &MachineLimits,
+) -> String {
     format!(
-        "pub const EMCMOT_MAX_JOINTS: usize = {};\n\
+        "pub const LINUXCNC_VERSION: &str = \"{EXPECTED_LINUXCNC_VERSION}\";\n\
+         pub const LINUXCNC_SOURCE_COMMIT: &str = \"{EXPECTED_LINUXCNC_COMMIT}\";\n\
+         pub const HEADER_SOURCE_FNV64: u64 = 0x{fingerprint:016x};\n\
+         pub const GENERATED_CODE_COUNT: usize = {generated_code_count};\n\
+         pub const ENUM_CODE_COUNT: usize = {enum_code_count};\n\
+         pub const NON_ENUM_CODE_COUNT: usize = {};\n\
+         pub const PUBLIC_ENUM_HEADER_COUNT: usize = {EXPECTED_PUBLIC_ENUM_HEADER_COUNT};\n\
+         pub const ENUM_DECLARATION_COUNT: usize = {enum_declaration_count};\n\
+         pub const STATUS_MESSAGE_CONTRACT_COUNT: usize = {};\n\
+         pub const ERROR_MESSAGE_CONTRACT_COUNT: usize = {};\n\
+         pub const EMCMOT_MAX_JOINTS: usize = {};\n\
          pub const EMCMOT_MAX_AXIS: usize = {};\n\
          pub const EMCMOT_MAX_SPINDLES: usize = {};\n\
          pub const EMCMOT_MAX_MISC_ERROR: usize = {};\n",
-        limits.joints, limits.axes, limits.spindles, limits.misc_errors,
+        generated_code_count - enum_code_count,
+        STATUS_MESSAGE_CONTRACTS.len(),
+        ERROR_MESSAGE_CONTRACTS.len(),
+        limits.joints,
+        limits.axes,
+        limits.spindles,
+        limits.misc_errors,
     )
+}
+
+fn append_enum_domain_contracts(generated: &mut String, domains: &[Domain]) {
+    generated.push_str("pub static ENUM_DOMAIN_CONTRACTS: &[EnumDomainContract] = &[\n");
+    for domain in domains {
+        let Some(origin) = domain.enum_origin.as_ref() else {
+            continue;
+        };
+        generated.push_str(&format!(
+            "EnumDomainContract {{ header_name: {:?}, declaration_kind: {:?}, declaration_name: {:?}, domain_name: {:?} }},\n",
+            origin.header_name,
+            origin.kind.name(),
+            origin.declaration_name,
+            domain.name,
+        ));
+    }
+    generated.push_str("];\n");
+}
+
+fn append_public_enum_headers(generated: &mut String, headers: &[PublicEnumHeader]) {
+    generated.push_str("pub static PUBLIC_ENUM_HEADERS: &[PublicEnumHeaderContract] = &[\n");
+    for header in headers {
+        let declaration_count = enum_declarations(&header.source).len();
+        generated.push_str(&format!(
+            "PublicEnumHeaderContract {{ header_name: {:?}, declaration_count: {declaration_count} }},\n",
+            header.name,
+        ));
+    }
+    generated.push_str("];\n");
+}
+
+fn append_interpreter_errors(generated: &mut String, templates: &[(String, String)]) {
+    generated.push_str("pub static INTERPRETER_ERROR_TEMPLATES: &[MessageTemplate] = &[\n");
+    for (name, template) in templates {
+        generated.push_str(&format!(
+            "MessageTemplate {{ name: {name:?}, template: {template:?} }},\n"
+        ));
+    }
+    generated.push_str("];\n");
 }
 
 fn append_status_contracts(generated: &mut String, results: &Results) {
     generated.push_str("pub static STATUS_MESSAGE_CONTRACTS: &[StatusMessageContract] = &[\n");
-    for (class_name, message_type_name) in STATUS_MESSAGE_TYPES {
-        let message_type = results.values[&(
-            "emc_nml_message_type".to_owned(),
-            (*message_type_name).to_owned(),
-        )];
-        let message_size = results.status_sizes[*class_name];
+    for (class_name, expected_message_type_name) in STATUS_MESSAGE_CONTRACTS {
+        let contract = &results.status_contracts[*class_name];
+        assert_eq!(
+            contract.message_type_name, *expected_message_type_name,
+            "status-message probe returned the wrong type name for {class_name}"
+        );
+        let message_type_name = &contract.message_type_name;
+        let message_type = contract.message_type;
+        let message_size = contract.message_size;
         generated.push_str(&format!(
             "StatusMessageContract {{ class_name: {class_name:?}, message_type_name: {message_type_name:?}, message_type: {message_type}, message_size: {message_size} }},\n"
+        ));
+    }
+    generated.push_str("];\n");
+}
+
+fn append_error_contracts(generated: &mut String, results: &Results) {
+    generated.push_str("pub static ERROR_MESSAGE_CONTRACTS: &[ErrorMessageContract] = &[\n");
+    for expected in ERROR_MESSAGE_CONTRACTS {
+        let contract = &results.error_contracts[expected.class_name];
+        assert_eq!(contract.message_type_name, expected.message_type_name);
+        assert_eq!(contract.payload_member, expected.payload_member);
+        assert_eq!(contract.id_member.as_deref(), expected.id_member);
+        generated.push_str(&format!(
+            "ErrorMessageContract {{ class_name: {:?}, message_type_name: {:?}, message_type: {}, message_size: {}, payload_member: {:?}, payload_offset: {}, payload_size: {}, id_member: {:?}, id_offset: {:?}, id_size: {} }},\n",
+            expected.class_name,
+            contract.message_type_name,
+            contract.message_type,
+            contract.message_size,
+            contract.payload_member,
+            contract.payload_offset,
+            contract.payload_size,
+            contract.id_member.as_deref(),
+            contract.id_offset,
+            contract.id_size,
         ));
     }
     generated.push_str("];\n");
@@ -69,7 +177,7 @@ fn append_domains(generated: &mut String, domains: &[Domain], results: &Results)
             domain.name
         ));
         for symbol in &domain.symbols {
-            let value = results.values[&(domain.name.clone(), symbol.clone())];
+            let value = results.values[&(domain.name.to_owned(), symbol.to_owned())];
             generated.push_str(&format!(
                 "CodeName {{ code: {value}, name: {symbol:?} }},\n"
             ));
@@ -83,29 +191,72 @@ fn append_domains(generated: &mut String, domains: &[Domain], results: &Results)
     generated.push_str("];\n");
 }
 
-fn write_interface(
+fn write_catalog(
     output_directory: &Path,
+    headers: &Headers,
+    public_enum_headers: &[PublicEnumHeader],
     domains: &[Domain],
+    templates: &[(String, String)],
     results: &Results,
     limits: &MachineLimits,
 ) {
-    let mut generated = preamble(limits);
+    let fingerprint = header_fingerprint(headers);
+    assert_eq!(
+        fingerprint, EXPECTED_HEADER_FNV64,
+        "installed LinuxCNC 2.9.10 public headers differ from the audited source"
+    );
+    let generated_code_count = domains
+        .iter()
+        .map(|domain| domain.symbols.len())
+        .sum::<usize>();
+    let enum_declaration_count = domains
+        .iter()
+        .filter(|domain| domain.enum_origin.is_some())
+        .count();
+    let enum_code_count = domains
+        .iter()
+        .filter(|domain| domain.enum_origin.is_some())
+        .map(|domain| domain.symbols.len())
+        .sum();
+    let mut generated = preamble(
+        fingerprint,
+        generated_code_count,
+        enum_code_count,
+        enum_declaration_count,
+        limits,
+    );
+    append_interpreter_errors(&mut generated, templates);
     append_status_contracts(&mut generated, results);
+    append_error_contracts(&mut generated, results);
+    append_public_enum_headers(&mut generated, public_enum_headers);
+    append_enum_domain_contracts(&mut generated, domains);
     append_domains(&mut generated, domains, results);
-    fs::write(
-        output_directory.join("linuxcnc_program_interface.rs"),
-        generated,
-    )
-    .expect("failed to write the controller's LinuxCNC interface values");
+    fs::write(output_directory.join("linuxcnc_code_catalog.rs"), generated)
+        .expect("failed to write generated LinuxCNC code catalog");
 }
 
 pub(crate) fn generate() {
     let source_root = source::verify_checkout();
     let headers = source::load_headers(&source_root);
-    let domains = domains::collect(&headers);
+    let public_enum_headers = source::load_public_enum_headers(&source_root);
+    let templates = interpreter_error_templates(&source::read_interpreter_errors(&source_root));
+    let domains = domains::collect(&headers, &public_enum_headers);
     let limits = machine_limits(&headers);
     let output_directory =
         PathBuf::from(env::var_os("OUT_DIR").expect("Cargo did not provide OUT_DIR"));
-    let results = probe::run(&output_directory, &domains);
-    write_interface(&output_directory, &domains, &results, &limits);
+    let results = probe::run(
+        &output_directory,
+        &domains,
+        STATUS_MESSAGE_CONTRACTS,
+        ERROR_MESSAGE_CONTRACTS,
+    );
+    write_catalog(
+        &output_directory,
+        &headers,
+        &public_enum_headers,
+        &domains,
+        &templates,
+        &results,
+        &limits,
+    );
 }
