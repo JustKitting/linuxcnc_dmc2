@@ -71,7 +71,9 @@ pub(super) fn run() -> Result<(), String> {
             let now_ns = epoch.elapsed().as_nanos().min(u64::MAX as u128) as u64;
             let mut published_line = false;
             for &byte in &buffer[..count] {
-                published_line |= assembler.consume(byte, &mut state, now_ns);
+                published_line |= assembler
+                    .consume(byte, &mut state, now_ns)
+                    .requires_publish();
             }
             let timed_out = state.check_timeout(now_ns);
             if published_line || timed_out || count == 0 {

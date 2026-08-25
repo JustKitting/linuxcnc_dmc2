@@ -17,15 +17,20 @@ fn run(program: &str, arguments: &[&str]) {
 
 fn main() {
     println!("cargo:rerun-if-changed=src/serial_shim.c");
+    println!("cargo:rerun-if-changed=src/serial_shim.h");
     println!("cargo:rerun-if-changed=build.rs");
     let output_directory =
         PathBuf::from(env::var_os("OUT_DIR").expect("Cargo did not provide OUT_DIR"));
     let object = output_directory.join("serial_shim.o");
     let archive = output_directory.join("libdmc2_serial_shim.a");
+    let bindings = output_directory.join("serial_shim_bindings.rs");
     let object_text = object
         .to_str()
         .expect("Cargo output path is not valid UTF-8");
     let archive_text = archive
+        .to_str()
+        .expect("Cargo output path is not valid UTF-8");
+    let bindings_text = bindings
         .to_str()
         .expect("Cargo output path is not valid UTF-8");
     run(
@@ -44,11 +49,24 @@ fn main() {
         ],
     );
     run("ar", &["crus", archive_text, object_text]);
+    run(
+        "bindgen",
+        &[
+            "src/serial_shim.h",
+            "--allowlist-function",
+            "dmc2_serial_(open|read|close)",
+            "--use-core",
+            "--no-layout-tests",
+            "--output",
+            bindings_text,
+        ],
+    );
     println!(
         "cargo:rustc-link-search=native={}",
         output_directory.display()
     );
     println!("cargo:rustc-link-search=native=/usr/lib");
     println!("cargo:rustc-link-lib=static=dmc2_serial_shim");
+    println!("cargo:rustc-link-lib=util");
     println!("cargo:rustc-link-lib=linuxcnchal");
 }

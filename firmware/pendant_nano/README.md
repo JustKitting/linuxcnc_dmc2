@@ -60,6 +60,14 @@ Nano retains only the most recent complete detent direction, reports that one
 slot, and clears it. Any number of wheel events inside one poll therefore
 becomes at most one movement request; it cannot become a movement queue.
 
+P3 frames are ASCII with exactly 12 comma-separated fields and at most 128
+payload bytes. Unsigned and signed integers use the Nano's canonical decimal
+form: no leading `+`, whitespace, redundant leading zero, or negative zero.
+The receiver accepts LF or one terminal CR followed by LF. A CR anywhere else
+is payload and makes the packet invalid. Invalid, non-ASCII, or overlong input
+faults the bridge closed and the next valid packet is a non-commanding
+baseline.
+
 When the axis selector is physically OFF and the side button is released, P3
 reports `axis=N,multiplier=N,deadman=0,selector_valid=0`. While the side button
 is held at OFF, the selected multiplier line becomes observable; for x1 this is

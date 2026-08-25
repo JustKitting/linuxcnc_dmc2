@@ -96,8 +96,12 @@ The USB bridge brackets its individually written HAL fields with an odd/even
 snapshot generation. The servo-thread supervisor consumes a packet only when the
 generation is unchanged and even before and after the read; a selector,
 detent, E-stop, and sequence from different Nano reports cannot be combined.
-Serial reads are capped at 128 bytes, above the maximum valid P3 packet, so a
-corrupt device cannot grow an unbounded line buffer.
+Raw reads use fixed 256-byte chunks. The separate framing state retains at most
+128 payload bytes plus one possible terminal CR, faults closed as soon as a
+frame is provably overlong, and discards through the next LF. Every 8-bit input
+value, CR/LF boundary, and 127/128/129-byte boundary is covered by the compiled
+serial tests, including a native pseudo-terminal pass through the C/termios
+adapter.
 
 - The side button must be held to jog.
 - x1 requests 10 pulses at 5000 pulses/s (the preceding 2500 rate x2).

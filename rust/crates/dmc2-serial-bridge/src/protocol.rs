@@ -40,7 +40,7 @@ pub struct Packet {
     pub selector_valid: bool,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+#[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum ProtocolError {
     WrongFieldCount,
     WrongMarker,
@@ -53,6 +53,22 @@ pub enum ProtocolError {
     UnexpectedBootMarker,
     NonAscii,
     OverlongLine,
+}
+
+impl ProtocolError {
+    pub const ALL: [Self; 11] = [
+        Self::WrongFieldCount,
+        Self::WrongMarker,
+        Self::InvalidInteger,
+        Self::InvalidDetent,
+        Self::InvalidAxis,
+        Self::InvalidMultiplier,
+        Self::InvalidBoolean,
+        Self::RepeatedOrReversedSequence,
+        Self::UnexpectedBootMarker,
+        Self::NonAscii,
+        Self::OverlongLine,
+    ];
 }
 
 fn parse_bool(token: &str) -> Result<bool, ProtocolError> {
@@ -87,6 +103,32 @@ fn parse_multiplier(token: &str) -> Result<MultiplierCode, ProtocolError> {
     }
 }
 
+fn canonical_unsigned(token: &str) -> bool {
+    token == "0"
+        || token.as_bytes().split_first().is_some_and(|(first, rest)| {
+            matches!(first, b'1'..=b'9') && rest.iter().all(u8::is_ascii_digit)
+        })
+}
+
+fn parse_u32(token: &str) -> Result<u32, ProtocolError> {
+    if !canonical_unsigned(token) {
+        return Err(ProtocolError::InvalidInteger);
+    }
+    token
+        .parse::<u32>()
+        .map_err(|_| ProtocolError::InvalidInteger)
+}
+
+fn parse_i32(token: &str) -> Result<i32, ProtocolError> {
+    let digits = token.strip_prefix('-').unwrap_or(token);
+    if !canonical_unsigned(digits) || (token.starts_with('-') && digits == "0") {
+        return Err(ProtocolError::InvalidInteger);
+    }
+    token
+        .parse::<i32>()
+        .map_err(|_| ProtocolError::InvalidInteger)
+}
+
 pub fn parse_packet(line: &str) -> Result<Packet, ProtocolError> {
     if line.len() > MAX_SERIAL_LINE_BYTES {
         return Err(ProtocolError::OverlongLine);
@@ -94,7 +136,7 @@ pub fn parse_packet(line: &str) -> Result<Packet, ProtocolError> {
     if !line.is_ascii() {
         return Err(ProtocolError::NonAscii);
     }
-    let mut fields = line.trim().split(',');
+    let mut fields = line.split(',');
     let marker = fields.next().ok_or(ProtocolError::WrongFieldCount)?;
     let sequence = fields.next().ok_or(ProtocolError::WrongFieldCount)?;
     let milliseconds = fields.next().ok_or(ProtocolError::WrongFieldCount)?;
@@ -113,26 +155,21 @@ pub fn parse_packet(line: &str) -> Result<Packet, ProtocolError> {
     if marker != "P3" {
         return Err(ProtocolError::WrongMarker);
     }
-    let parse_u32 = |value: &str| {
-        value
-            .parse::<u32>()
-            .map_err(|_| ProtocolError::InvalidInteger)
-    };
-    let parse_i32 = |value: &str| {
-        value
-            .parse::<i32>()
-            .map_err(|_| ProtocolError::InvalidInteger)
-    };
+    let sequence = parse_u32(sequence)?;
+    let milliseconds = parse_u32(milliseconds)?;
+    let detent_count = parse_i32(detent_count)?;
+    let transition_count = parse_i32(transition_count)?;
+    let quadrature_errors = parse_u32(quadrature_errors)?;
     let latest_detent = parse_i32(latest_detent)?;
     if !(-1..=1).contains(&latest_detent) {
         return Err(ProtocolError::InvalidDetent);
     }
     Ok(Packet {
-        sequence: parse_u32(sequence)?,
-        milliseconds: parse_u32(milliseconds)?,
-        detent_count: parse_i32(detent_count)?,
-        transition_count: parse_i32(transition_count)?,
-        quadrature_errors: parse_u32(quadrature_errors)?,
+        sequence,
+        milliseconds,
+        detent_count,
+        transition_count,
+        quadrature_errors,
         latest_detent,
         axis: parse_axis(axis)?,
         multiplier: parse_multiplier(multiplier)?,

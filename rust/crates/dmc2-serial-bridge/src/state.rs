@@ -191,7 +191,7 @@ impl BridgeState {
             return Err(ProtocolError::OverlongLine);
         }
         let line = match core::str::from_utf8(bytes) {
-            Ok(value) if value.is_ascii() => value.trim(),
+            Ok(value) if value.is_ascii() => value,
             _ => {
                 self.note_protocol_error();
                 return Err(ProtocolError::NonAscii);
