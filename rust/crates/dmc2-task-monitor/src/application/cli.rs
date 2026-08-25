@@ -8,12 +8,14 @@ pub(super) struct Arguments {
     pub(super) component: String,
     pub(super) nml_file: String,
     pub(super) validate: bool,
+    pub(super) validation_json: bool,
 }
 
 pub(super) fn arguments() -> Result<Arguments, String> {
     let mut component = DEFAULT_COMPONENT.to_owned();
     let mut nml_file = env::var("EMC2_NMLFILE").unwrap_or_else(|_| DEFAULT_NML_FILE.to_owned());
     let mut validate = false;
+    let mut validation_json = false;
     let mut items = env::args().skip(1);
     while let Some(argument) = items.next() {
         match argument.as_str() {
@@ -28,9 +30,13 @@ pub(super) fn arguments() -> Result<Arguments, String> {
                     .ok_or_else(|| "--nml-file requires a value".to_owned())?;
             }
             "--validate" => validate = true,
+            "--validate-json" => {
+                validate = true;
+                validation_json = true;
+            }
             "--help" | "-h" => {
                 println!(
-                    "Usage: dmc2-task-monitor [--component NAME] [--nml-file PATH] [--validate]"
+                    "Usage: dmc2-task-monitor [--component NAME] [--nml-file PATH] [--validate|--validate-json]"
                 );
                 std::process::exit(0);
             }
@@ -41,5 +47,6 @@ pub(super) fn arguments() -> Result<Arguments, String> {
         component,
         nml_file,
         validate,
+        validation_json,
     })
 }

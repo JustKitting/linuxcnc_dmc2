@@ -1,3 +1,4 @@
+mod audit;
 mod cli;
 mod diagnostic_state;
 mod hal;
@@ -7,8 +8,6 @@ use std::ffi::CString;
 use std::mem;
 use std::thread;
 use std::time::Duration;
-
-use dmc2_linuxcnc_interface::{GENERATED_CODE_COUNT, LINUXCNC_SOURCE_COMMIT, LINUXCNC_VERSION};
 
 use crate::diagnostics;
 use crate::snapshot::{NativeSnapshot, SNAPSHOT_ABI_VERSION};
@@ -32,15 +31,7 @@ pub(super) fn run() -> Result<(), String> {
         ));
     }
     if args.validate {
-        println!(
-            "dmc2-task-monitor: offline validation passed; LinuxCNC={} source={} catalog_codes={} snapshot_abi=0x{:08x} snapshot_size={}",
-            LINUXCNC_VERSION,
-            LINUXCNC_SOURCE_COMMIT,
-            GENERATED_CODE_COUNT,
-            SNAPSHOT_ABI_VERSION,
-            mem::size_of::<NativeSnapshot>(),
-        );
-        return Ok(());
+        return audit::run(args.validation_json);
     }
 
     let nml_file = CString::new(args.nml_file.as_str())

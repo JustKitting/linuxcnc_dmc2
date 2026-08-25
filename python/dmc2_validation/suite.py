@@ -1,6 +1,5 @@
 """Composition root for the complete offline profile validation."""
 
-import re
 import shutil
 
 from .common import (
@@ -91,32 +90,6 @@ def validate() -> list[str]:
         raise AssertionError(
             f"Pendant Mode readiness/state-request handshake is incomplete: {missing}"
         )
-    rust_root = ROOT / "rust" / "crates"
-    runtime = (rust_root / "dmc2-core" / "src" / "runtime.rs").read_text(
-        encoding="utf-8"
-    )
-    supervisor = source_tree_text(
-        rust_root / "dmc2-core" / "src" / "supervisor", ".rs"
-    )
-    realtime = source_tree_text(rust_root / "dmc2-rt" / "src", ".rs")
-    task_monitor = (
-        rust_root / "dmc2-task-monitor" / "src" / "task_status_shim.cc"
-    ).read_text(encoding="utf-8")
-    required_native_contract = (
-        (runtime, "TaskHeartbeatTimeout"),
-        (runtime, "pendant_coherent"),
-        (supervisor, "JogCountMismatch"),
-        (supervisor, "command_channel_ready"),
-        (realtime, 'b"dmc2-pendant-control.update\\0"'),
-        (realtime, "hal_export_funct"),
-        (realtime, "HaluiCommandSequencer"),
-        (task_monitor, "snapshot->task.heartbeat = status.task.heartbeat"),
-        (task_monitor, "dmc2_task_status_snapshot_abi_version"),
-        (task_monitor, "RCS_STAT_CHANNEL"),
-    )
-    missing = [token for text, token in required_native_contract if token not in text]
-    if missing:
-        raise AssertionError(f"native realtime contract is incomplete: {missing}")
     live_pendant = (LIVE_DIR / "pendant.hal").read_text(encoding="utf-8")
     if "python3" in executable_hal_text(LIVE_DIR / "pendant.hal"):
         raise AssertionError("live pendant control still invokes Python")

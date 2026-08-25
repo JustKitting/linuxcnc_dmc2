@@ -154,3 +154,8 @@ extern "C" int dmc2_task_status_copy_self_test(
     *logical_fields = reference_field_count;
     return 0;
 }
+
+extern "C" std::uint32_t
+dmc2_task_status_copy_signature_rounds(void) noexcept {
+    return dmc2::status_fixture::TOTAL_ROUNDS;
+}

@@ -264,6 +264,7 @@ void dmc2_task_status_snapshot_initialize(
 int dmc2_task_status_copy_self_test(
     uint32_t *logical_fields,
     size_t *failure_offset) DMC2_NOEXCEPT;
+uint32_t dmc2_task_status_copy_signature_rounds(void) DMC2_NOEXCEPT;
 dmc2_task_status_channel *dmc2_task_status_open(
     const char *nml_file,
     int32_t *nml_error) DMC2_NOEXCEPT;

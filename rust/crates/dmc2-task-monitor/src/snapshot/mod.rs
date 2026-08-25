@@ -15,12 +15,12 @@ pub use abi::{
 
 pub(crate) use abi::{
     dmc2_task_status_channel as NativeTaskStatusChannel, dmc2_task_status_close,
-    dmc2_task_status_open, dmc2_task_status_poll, dmc2_task_status_snapshot_abi_version,
-    dmc2_task_status_snapshot_size,
+    dmc2_task_status_copy_self_test, dmc2_task_status_copy_signature_rounds, dmc2_task_status_open,
+    dmc2_task_status_poll, dmc2_task_status_snapshot_abi_version, dmc2_task_status_snapshot_size,
 };
 
 #[cfg(test)]
-pub(crate) use abi::{dmc2_task_status_copy_self_test, dmc2_task_status_snapshot_initialize};
+pub(crate) use abi::dmc2_task_status_snapshot_initialize;
 
 pub const SNAPSHOT_ABI_VERSION: u32 = abi::DMC2_SNAPSHOT_ABI_VERSION;
 
@@ -184,5 +184,6 @@ mod tests {
             "native status copy failed in signature round {result} at destination byte {failure_offset}"
         );
         assert_eq!(logical_fields as usize, SNAPSHOT_LOGICAL_FIELD_COUNT);
+        assert_eq!(unsafe { dmc2_task_status_copy_signature_rounds() }, 21);
     }
 }
