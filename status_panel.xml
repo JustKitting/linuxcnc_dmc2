@@ -37,6 +37,21 @@
                width="13" anchor='"w"'/>
         <led halpin='"controller-bounce-active"' size="16"
              on_color='"orange"' off_color='"gray35"'/>
+        <tablerow/>
+        <label text='"LinuxCNC error"' font='("Helvetica", 10, "bold")'
+               width="14" anchor='"w"'/>
+        <rectled halpin='"linuxcnc-error-active"' height="16" width="24"
+                 on_color='"red"' off_color='"gray35"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"Warning"' font='("Helvetica", 10, "bold")'
+               width="8" anchor='"w"'/>
+        <rectled halpin='"linuxcnc-warning-active"' height="16" width="24"
+                 on_color='"yellow"' off_color='"gray35"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"Unknown code"' font='("Helvetica", 10, "bold")'
+               width="12" anchor='"w"'/>
+        <rectled halpin='"linuxcnc-unknown-code"' height="16" width="24"
+                 on_color='"red"' off_color='"gray35"'/>
       </table>
     </labelframe>
 

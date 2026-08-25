@@ -11,6 +11,10 @@ name = "dmc2-hal-sys"
 version = "0.1.0"
 
 [[package]]
+name = "dmc2-linuxcnc-interface"
+version = "0.1.0"
+
+[[package]]
 name = "dmc2-rt"
 version = "0.1.0"
 dependencies = [
@@ -30,4 +34,5 @@ name = "dmc2-task-monitor"
 version = "0.1.0"
 dependencies = [
  "dmc2-hal-sys",
+ "dmc2-linuxcnc-interface",
 ]

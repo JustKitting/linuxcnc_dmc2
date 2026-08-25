@@ -60,6 +60,30 @@ class StatusPanelLayoutTests(unittest.TestCase):
         }
         self.assertIn('"controller-ready"', pins)
         self.assertIn('"controller-fault"', pins)
+        self.assertIn('"linuxcnc-error-active"', pins)
+        self.assertIn('"linuxcnc-warning-active"', pins)
+        self.assertIn('"linuxcnc-unknown-code"', pins)
+
+    def test_linuxcnc_diagnostics_are_top_level_and_observational(self):
+        frame = self.frame("CONTROL STATE")
+        pins = {node.attrib.get("halpin") for node in frame.iter()}
+        self.assertTrue(
+            {
+                '"linuxcnc-error-active"',
+                '"linuxcnc-warning-active"',
+                '"linuxcnc-unknown-code"',
+            }
+            <= pins
+        )
+        postgui = POSTGUI.read_text(encoding="utf-8")
+        self.assertIn(
+            "dmc2-task-monitor.linuxcnc-error-active => pyvcp.linuxcnc-error-active",
+            postgui,
+        )
+        self.assertIn(
+            "dmc2-task-monitor.unknown-code-active => pyvcp.linuxcnc-unknown-code",
+            postgui,
+        )
 
     def test_all_operator_text_is_left_justified_and_uses_one_font(self):
         for label in self.root.iter("label"):

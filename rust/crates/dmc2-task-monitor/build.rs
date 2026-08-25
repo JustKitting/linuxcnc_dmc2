@@ -1,6 +1,11 @@
 use std::env;
+use std::fs;
 use std::path::PathBuf;
 use std::process::Command;
+
+const EXPECTED_LINUXCNC_VERSION: &str = "2.9.10";
+const INSTALLED_EMC_NML: &str = "/usr/include/linuxcnc/emc_nml.hh";
+const SOURCE_EMC_NML: &str = "/home/kit/linuxcnc-2.9.10-source/src/emc/nml_intf/emc_nml.hh";
 
 fn run(program: &str, arguments: &[&str]) {
     let output = Command::new(program)
@@ -18,6 +23,30 @@ fn run(program: &str, arguments: &[&str]) {
 fn main() {
     println!("cargo:rerun-if-changed=src/task_status_shim.cc");
     println!("cargo:rerun-if-changed=build.rs");
+    println!("cargo:rerun-if-changed={INSTALLED_EMC_NML}");
+    println!("cargo:rerun-if-changed={SOURCE_EMC_NML}");
+
+    let version = Command::new("linuxcnc_var")
+        .arg("LINUXCNCVERSION")
+        .output()
+        .expect("failed to execute linuxcnc_var");
+    assert!(
+        version.status.success(),
+        "linuxcnc_var failed: {}",
+        String::from_utf8_lossy(&version.stderr)
+    );
+    assert_eq!(
+        String::from_utf8(version.stdout)
+            .expect("linuxcnc_var produced non-UTF-8 output")
+            .trim(),
+        EXPECTED_LINUXCNC_VERSION,
+        "refusing to compile task monitor against an unaudited LinuxCNC version"
+    );
+    assert_eq!(
+        fs::read(INSTALLED_EMC_NML).expect("failed to read installed emc_nml.hh"),
+        fs::read(SOURCE_EMC_NML).expect("failed to read source emc_nml.hh"),
+        "installed emc_nml.hh differs from the official LinuxCNC 2.9.10 source"
+    );
 
     let output_directory =
         PathBuf::from(env::var_os("OUT_DIR").expect("Cargo did not provide OUT_DIR"));

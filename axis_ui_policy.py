@@ -20,6 +20,45 @@ CONTROLLER_READY_PIN = "controller-ready"
 PENDANT_WIDGET_PATH = ".toolbar.dmc2_pendant_mode"
 PENDANT_ICON_FILE = "pendant_icon.xbm"
 READINESS_POLL_MILLISECONDS = 20
+REQUIRED_LINUXCNC_VERSION = "2.9.10"
+ERROR_CHANNEL_KIND_DEFINITIONS = (
+    ("NML_ERROR", 1, "error"),
+    ("NML_TEXT", 2, "info"),
+    ("NML_DISPLAY", 3, "info"),
+    ("OPERATOR_ERROR", 11, "error"),
+    ("OPERATOR_TEXT", 12, "info"),
+    ("OPERATOR_DISPLAY", 13, "info"),
+)
+
+
+def error_channel_kind_catalog(linuxcnc_module) -> dict[int, tuple[str, str]]:
+    """Return the complete public 2.9.10 error-channel type catalog."""
+    version = str(getattr(linuxcnc_module, "version", ""))
+    if version != REQUIRED_LINUXCNC_VERSION:
+        raise RuntimeError(
+            f"DMC2 requires LinuxCNC {REQUIRED_LINUXCNC_VERSION}; loaded {version or 'unknown'}"
+        )
+    catalog: dict[int, tuple[str, str]] = {}
+    for name, expected_value, severity in ERROR_CHANNEL_KIND_DEFINITIONS:
+        try:
+            value = int(getattr(linuxcnc_module, name))
+        except (AttributeError, TypeError, ValueError) as error:
+            raise RuntimeError(
+                f"LinuxCNC {REQUIRED_LINUXCNC_VERSION} omitted error-channel type {name}"
+            ) from error
+        if value != expected_value:
+            raise RuntimeError(
+                f"LinuxCNC {REQUIRED_LINUXCNC_VERSION} error-channel type {name} "
+                f"must equal {expected_value}, found {value}"
+            )
+        if value in catalog:
+            raise RuntimeError(
+                f"LinuxCNC error-channel types {catalog[value][0]} and {name} both equal {value}"
+            )
+        catalog[value] = (name, severity)
+    if len(catalog) != len(ERROR_CHANNEL_KIND_DEFINITIONS):
+        raise RuntimeError("LinuxCNC error-channel catalog is incomplete")
+    return catalog
 
 
 class PendantModeBinding:
@@ -278,6 +317,7 @@ def install_axis_ui_policy(namespace: Mapping[str, object]) -> None:
 
     error_channel = namespace["e"]
     linuxcnc_module = namespace["linuxcnc"]
+    kind_catalog = error_channel_kind_catalog(linuxcnc_module)
     notifications = namespace["notifications"]
     original_add = notifications.add
 
@@ -295,28 +335,50 @@ def install_axis_ui_policy(namespace: Mapping[str, object]) -> None:
         )
 
     def filtered_error_task():
-        error = error_channel.poll()
-        while error:
-            kind, message = error
-            if should_suppress_notification(kind, message, linuxcnc_module):
-                print(
-                    "DMC2 UI: expected realtime limit jog stop acknowledged",
-                    flush=True,
-                )
-            else:
-                if kind in (
-                    linuxcnc_module.NML_ERROR,
-                    linuxcnc_module.OPERATOR_ERROR,
-                ):
-                    icon = "error"
-                else:
-                    icon = "info"
-                notifications.add(icon, message)
+        try:
             error = error_channel.poll()
-        live_plotter.error_after = live_plotter.win.after(
-            200,
-            filtered_error_task,
-        )
+            while error:
+                try:
+                    kind, raw_message = error
+                    kind = int(kind)
+                    message = str(raw_message)
+                except (TypeError, ValueError) as malformed:
+                    print(
+                        "DMC2_LINUXCNC_ERROR_CHANNEL "
+                        f"kind=malformed name=UNKNOWN severity=error suppressed=0 "
+                        f"record={error!r} exception={malformed!r}",
+                        flush=True,
+                    )
+                    notifications.add("error", f"Malformed LinuxCNC error record: {error!r}")
+                else:
+                    name, severity = kind_catalog.get(kind, ("UNKNOWN", "error"))
+                    suppressed = should_suppress_notification(
+                        kind,
+                        message,
+                        linuxcnc_module,
+                    )
+                    print(
+                        "DMC2_LINUXCNC_ERROR_CHANNEL "
+                        f"kind={kind} name={name} severity={severity} "
+                        f"suppressed={int(suppressed)} message={message!r}",
+                        flush=True,
+                    )
+                    if not suppressed:
+                        notifications.add(severity, message)
+                error = error_channel.poll()
+        except Exception as error:
+            print(
+                "DMC2_LINUXCNC_ERROR_CHANNEL "
+                f"kind=poll_failure name=UNKNOWN severity=error suppressed=0 "
+                f"exception={error!r}",
+                flush=True,
+            )
+            notifications.add("error", f"LinuxCNC error-channel polling failed: {error}")
+        finally:
+            live_plotter.error_after = live_plotter.win.after(
+                200,
+                filtered_error_task,
+            )
 
     notifications.add = add_without_covering_status_panel
     live_plotter.error_task = filtered_error_task

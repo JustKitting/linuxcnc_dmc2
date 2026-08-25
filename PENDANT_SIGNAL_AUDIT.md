@@ -137,8 +137,9 @@ accepted LinuxCNC 30 mm/s machine ceiling.
 ## Evidence and research basis
 
 - User-observed live mapping: `pendant_nano/LIVE_MAPPING.md`.
-- Mesa/limit policy: `live/machine.hal`, `live_motion_core.py`, and the exact
-  existing -250-pulse bounce tests.
+- Mesa/limit policy: `live/machine.hal`, the compiled
+  `rust/crates/dmc2-rt` servo-thread component, and the exact existing
+  -250-pulse bounce tests.
 - LinuxCNC `motion.jog-stop-immediate` semantics and the source-level
   `reportError` behavior: official LinuxCNC `motion(9)` documentation and
   `src/emc/motion/control.c` at official tag `v2.9.10`.

@@ -13,6 +13,7 @@ fi
 
 cargo test --manifest-path "${rust_dir}/Cargo.toml" --workspace
 cargo build --manifest-path "${rust_dir}/Cargo.toml" --workspace --release
+"${rust_dir}/target/release/dmc2-task-monitor" --validate
 
 module="${rust_dir}/target/release/libdmc2_rt.so"
 for symbol in rtapi_app_main rtapi_app_exit; do

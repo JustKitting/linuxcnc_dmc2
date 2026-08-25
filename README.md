@@ -48,10 +48,11 @@ homing range reaches its accepted switch coordinate 0.25 mm farther positive.
 
 ## Pendant control
 
-`live/pendant.hal`, `nano_hal_bridge.py`,
-`linuxcnc_pendant_control.py`, and `live_motion_core.py` provide pendant input
-through LinuxCNC's command interface. They do not directly control a Mesa
-motion or output pin.
+`live/pendant.hal`, the compiled `dmc2-serial-bridge`, the compiled
+`dmc2-task-monitor`, and the no-`std` `dmc2_rt.so` realtime component provide
+pendant input through LinuxCNC's native HALUI/motion interfaces. Python has no
+authority in the live pendant motion path and no component directly writes a
+Mesa motion command.
 
 AXIS starts with **Pendant Mode off** and the PyVCP status panel hidden. The
 24-pixel pendant/handwheel button immediately to the right of **Clear live
@@ -66,7 +67,7 @@ limit detection, and an already-required limit bounce remain active with the
 panel hidden and Pendant Mode off.
 
 The USB bridge brackets its individually written HAL fields with an odd/even
-snapshot generation. The 1 kHz supervisor consumes a packet only when the
+snapshot generation. The servo-thread supervisor consumes a packet only when the
 generation is unchanged and even before and after the read; a selector,
 detent, E-stop, and sequence from different Nano reports cannot be combined.
 Serial reads are capped at 128 bytes, above the maximum valid P3 packet, so a
@@ -329,8 +330,7 @@ The following commands open neither USB serial nor Mesa hardware:
 ```bash
 cd /home/kit
 python3 -m unittest discover -s linuxcnc_dmc2 -p 'test_*.py' -v
-python3 linuxcnc_dmc2/nano_hal_bridge.py --validate
-python3 linuxcnc_dmc2/linuxcnc_pendant_control.py --validate
+linuxcnc_dmc2/native/bin/dmc2-task-monitor --validate
 python3 linuxcnc_dmc2/validate_offline.py
 python3 linuxcnc_dmc2/check_live_readiness.py
 python3 linuxcnc_dmc2/launch_live.py

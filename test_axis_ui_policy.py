@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import types
 import unittest
+from contextlib import redirect_stdout
+from io import StringIO
 from pathlib import Path
 
 from axis_ui_policy import (
@@ -11,6 +13,7 @@ from axis_ui_policy import (
     PENDANT_MODE_PIN,
     PENDANT_WIDGET_PATH,
     PendantModeBinding,
+    error_channel_kind_catalog,
     install_axis_pendant_mode,
     install_axis_ui_policy,
 )
@@ -118,7 +121,15 @@ class FakeBitmapImage:
 
 class AxisUiPolicyTests(unittest.TestCase):
     def make_namespace(self, errors):
-        linuxcnc = types.SimpleNamespace(NML_ERROR=1, OPERATOR_ERROR=2)
+        linuxcnc = types.SimpleNamespace(
+            version="2.9.10",
+            NML_ERROR=1,
+            NML_TEXT=2,
+            NML_DISPLAY=3,
+            OPERATOR_ERROR=11,
+            OPERATOR_TEXT=12,
+            OPERATOR_DISPLAY=13,
+        )
         notifications = FakeNotifications()
         live_plotter = types.SimpleNamespace(
             win=FakeWindow(),
@@ -137,7 +148,7 @@ class AxisUiPolicyTests(unittest.TestCase):
         errors = [
             (1, EXPECTED_LIMIT_STOP_MESSAGE),
             (1, "Joint 0 following error"),
-            (2, EXPECTED_LIMIT_STOP_MESSAGE),
+            (11, EXPECTED_LIMIT_STOP_MESSAGE),
             (99, "informational message"),
         ]
         namespace, notifications, live_plotter = self.make_namespace(errors)
@@ -149,10 +160,77 @@ class AxisUiPolicyTests(unittest.TestCase):
             notifications.shown,
             [
                 ("error", "Joint 0 following error"),
-                ("info", "informational message"),
+                ("error", "informational message"),
             ],
         )
         self.assertEqual(live_plotter.error_after, "scheduled-id")
+        self.assertEqual(len(live_plotter.win.scheduled), 1)
+
+    def test_all_six_linuxcnc_error_channel_types_are_explicitly_classified(self):
+        namespace, notifications, live_plotter = self.make_namespace(
+            [
+                (1, "nml error"),
+                (2, "nml text"),
+                (3, "nml display"),
+                (11, "operator error"),
+                (12, "operator text"),
+                (13, "operator display"),
+            ]
+        )
+        output = StringIO()
+        with redirect_stdout(output):
+            install_axis_ui_policy(namespace)
+            live_plotter.error_task()
+        self.assertEqual(
+            notifications.shown,
+            [
+                ("error", "nml error"),
+                ("info", "nml text"),
+                ("info", "nml display"),
+                ("error", "operator error"),
+                ("info", "operator text"),
+                ("info", "operator display"),
+            ],
+        )
+        for name in (
+            "NML_ERROR",
+            "NML_TEXT",
+            "NML_DISPLAY",
+            "OPERATOR_ERROR",
+            "OPERATOR_TEXT",
+            "OPERATOR_DISPLAY",
+        ):
+            self.assertIn(f"name={name}", output.getvalue())
+
+    def test_error_channel_catalog_rejects_any_non_2_9_10_module(self):
+        namespace, _notifications, _live_plotter = self.make_namespace([])
+        namespace["linuxcnc"].version = "2.9.9"
+        with self.assertRaisesRegex(RuntimeError, "requires LinuxCNC 2.9.10"):
+            error_channel_kind_catalog(namespace["linuxcnc"])
+
+    def test_error_channel_catalog_rejects_a_wrong_numeric_code(self):
+        namespace, _notifications, _live_plotter = self.make_namespace([])
+        namespace["linuxcnc"].OPERATOR_DISPLAY = 99
+        with self.assertRaisesRegex(RuntimeError, "must equal 13, found 99"):
+            error_channel_kind_catalog(namespace["linuxcnc"])
+
+    def test_malformed_record_is_reported_and_polling_survives(self):
+        namespace, notifications, live_plotter = self.make_namespace(
+            [(1, "valid error"), (1,), (2, "still draining")]
+        )
+        output = StringIO()
+        with redirect_stdout(output):
+            install_axis_ui_policy(namespace)
+            live_plotter.error_task()
+        self.assertEqual(
+            notifications.shown,
+            [
+                ("error", "valid error"),
+                ("error", "Malformed LinuxCNC error record: (1,)"),
+                ("info", "still draining"),
+            ],
+        )
+        self.assertIn("kind=malformed", output.getvalue())
         self.assertEqual(len(live_plotter.win.scheduled), 1)
 
     def test_visible_notifications_are_moved_away_from_status_panel(self):

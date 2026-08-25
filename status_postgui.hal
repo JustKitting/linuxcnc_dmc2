@@ -11,6 +11,13 @@ net dmc2-controller-recovery      => pyvcp.controller-recovery
 net dmc2-controller-jog-active    => pyvcp.controller-jog-active
 net dmc2-controller-bounce-active => pyvcp.controller-bounce-active
 
+# Complete source-derived LinuxCNC 2.9.10 diagnostics. These indicators are
+# observational; the existing native controller's fail-closed transport gate
+# remains a separate signal.
+net dmc2-linuxcnc-error-active dmc2-task-monitor.linuxcnc-error-active => pyvcp.linuxcnc-error-active
+net dmc2-linuxcnc-warning-active dmc2-task-monitor.linuxcnc-warning-active => pyvcp.linuxcnc-warning-active
+net dmc2-linuxcnc-unknown-code dmc2-task-monitor.unknown-code-active => pyvcp.linuxcnc-unknown-code
+
 # HALUI performs the NML state changes outside the controller's 100 ms
 # heartbeat loop.  Both requests are held until LinuxCNC status acknowledges
 # the corresponding state and are forced low by every fail-closed path.
