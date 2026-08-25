@@ -4,12 +4,19 @@ set -euo pipefail
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 rust_dir="${project_dir}/rust"
 module="${rust_dir}/target/release/libdmc2_rt.so"
+h100_project="${project_dir}/../h100_modbus"
 
 installed_version="$(linuxcnc_var LINUXCNCVERSION)"
 if [[ "${installed_version}" != "2.9.10" ]]; then
     echo "refusing unaudited LinuxCNC version: ${installed_version}" >&2
     exit 1
 fi
+
+if [[ ! -x "${h100_project}/scripts/verify.sh" ]]; then
+    echo "missing H100 hardware-free release verifier" >&2
+    exit 1
+fi
+"${h100_project}/scripts/verify.sh"
 
 cargo fmt --manifest-path "${rust_dir}/Cargo.toml" --all -- --check
 env RUSTFLAGS=-Dwarnings cargo test --manifest-path "${rust_dir}/Cargo.toml" --workspace

@@ -52,12 +52,22 @@ printf 'stale realtime module\n' > "${test_target}"
 chmod 0600 "${test_source}" "${test_target}"
 
 assert_no_temporary_module() {
-    if find "${test_directory}" -maxdepth 1 -name '.dmc2_rt.so.*' -print -quit |
+    if find "${test_directory}" -maxdepth 1 -name '.target.so.*' -print -quit |
         grep -q .; then
         echo "atomic installer left a temporary module behind" >&2
         return 1
     fi
 }
+
+if [[ "${#source_modules[@]}" -ne 2 || "${#target_modules[@]}" -ne 2 ]]; then
+    echo "installer does not own exactly both realtime module deployments" >&2
+    exit 1
+fi
+if [[ "$(basename -- "${target_modules[0]}")" != "dmc2_rt.so" ||
+      "$(basename -- "${target_modules[1]}")" != "h100_spindle.so" ]]; then
+    echo "installer realtime module targets are incomplete or reordered" >&2
+    exit 1
+fi
 
 mktemp() {
     return 73

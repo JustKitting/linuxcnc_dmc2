@@ -9,14 +9,33 @@ from .paths import LIVE_DIR, PROJECT_ROOT as ROOT
 
 def validate_h100_spindle_integration() -> str:
     project = ROOT.parent / "h100_modbus"
-    map_path = project / "h100-spindle.mbccs"
-    binary_path = project / "h100-spindle.mbccb"
-    component_path = project / "h100_spindle.comp"
-    logic_path = project / "h100_spindle_logic.h"
-    test_path = project / "test_h100_spindle_logic.c"
-    for path in (map_path, binary_path, component_path, logic_path, test_path):
+    map_path = project / "maps" / "live" / "h100-spindle.mbccs"
+    binary_path = project / "maps" / "live" / "h100-spindle.mbccb"
+    component_path = project / "src" / "component" / "h100_spindle.comp"
+    logic_header_path = (
+        project / "src" / "component" / "h100_spindle_logic.h"
+    )
+    logic_source_path = (
+        project / "src" / "component" / "h100_spindle_logic.c"
+    )
+    release_path = project / "target" / "release" / "h100_spindle.so"
+    test_paths = tuple(sorted((project / "tests" / "c").glob("*.c")))
+    required_paths = (
+        map_path,
+        binary_path,
+        component_path,
+        logic_header_path,
+        logic_source_path,
+        release_path,
+        *test_paths,
+    )
+    for path in required_paths:
         if not path.is_file():
             raise AssertionError(f"H100 integration artifact is missing: {path}")
+    if len(test_paths) != 5:
+        raise AssertionError(
+            f"expected five separated H100 C test modules, found {len(test_paths)}"
+        )
 
     tree = ET.parse(map_path)
     root = tree.getroot()
@@ -69,27 +88,30 @@ def validate_h100_spindle_integration() -> str:
         )
 
     component = component_path.read_text(encoding="utf-8")
-    logic = logic_path.read_text(encoding="utf-8")
+    logic = logic_source_path.read_text(encoding="utf-8")
+    contract = logic_header_path.read_text(encoding="utf-8")
     required_tokens = (
         'pin out u32 main_control = 8',
         'pin out u32 given_frequency = 0',
-        '#include "h100_spindle_logic.h"',
+        '#include "h100_spindle_logic.c"',
         "H100_CONTROL_REVERSE",
         "H100_BLOCK_COMMAND_DISABLED",
+        "H100_BLOCK_INTERNAL_STATE",
         "input.i_any_command_disabled = 1;",
         "input->i_given_frequency_readback ==",
         "case H100_STOPPING:",
         "output->o_main_control = H100_CONTROL_STOP;",
         "if (stopped_feedback)",
     )
-    combined_source = component + "\n" + logic
+    combined_source = component + "\n" + contract + "\n" + logic
     missing = [token for token in required_tokens if token not in combined_source]
     if missing:
         raise AssertionError(f"H100 fail-stopped sequencer is incomplete: {missing}")
 
     return (
         "H100 map starts suspended, writes STOP/control before frequency, reads "
-        "all run prerequisites, and uses the unit-tested fail-stopped sequencer"
+        "all run prerequisites, and uses the fully covered reproducible "
+        "fail-stopped sequencer release"
     )
 
 

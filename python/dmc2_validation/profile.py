@@ -105,7 +105,7 @@ def validate_live_hal() -> list[str]:
 
     required_machine_tokens = (
         'loadrt hm2_eth board_ip=[DMC2]MESA_IP config="num_encoders=0 num_stepgens=3 num_pwmgens=0 num_3pwmgens=0 num_inmuxs=1 num_pktuarts=1"',
-        'loadrt hm2_modbus ports="hm2_7i95.0.pktuart.0" mbccbs="/home/kit/h100_modbus/h100-spindle.mbccb"',
+        'loadrt hm2_modbus ports="hm2_7i95.0.pktuart.0" mbccbs="../../h100_modbus/maps/live/h100-spindle.mbccb"',
         "loadrt h100_spindle",
         "loadrt dmc2_rt",
         "loadrt mux2 names=dmc2-x-feedback-loss-guard,dmc2-y-feedback-loss-guard,dmc2-z-feedback-loss-guard",
@@ -219,8 +219,8 @@ def validate_live_hal() -> list[str]:
         raise AssertionError("live servo-thread read/safety/motion/write order changed")
 
     required_pendant_tokens = (
-        "/home/kit/linuxcnc_dmc2/native/bin/dmc2-serial-bridge",
-        "/home/kit/linuxcnc_dmc2/native/bin/dmc2-task-monitor",
+        "../native/bin/dmc2-serial-bridge",
+        "../native/bin/dmc2-task-monitor",
         "dmc2-pendant.snapshot-generation",
         "dmc2-pendant-control.snapshot-generation",
         "dmc2-task-monitor.task-heartbeat => dmc2-pendant-control.task-heartbeat",

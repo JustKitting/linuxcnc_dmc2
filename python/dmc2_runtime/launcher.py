@@ -26,6 +26,15 @@ REALTIME_ENVIRONMENT = "LINUXCNC_FORCE_REALTIME=1"
 EXPECTED_LINUXCNC_VERSION = "2.9.10"
 REALTIME_MODULE = Path("/usr/lib/linuxcnc/modules/dmc2_rt.so")
 STAGED_REALTIME_MODULE = ROOT / "rust" / "target" / "release" / "libdmc2_rt.so"
+H100_PROJECT = ROOT.parent / "h100_modbus"
+H100_REALTIME_MODULE = Path("/usr/lib/linuxcnc/modules/h100_spindle.so")
+STAGED_H100_REALTIME_MODULE = (
+    H100_PROJECT / "target" / "release" / "h100_spindle.so"
+)
+REALTIME_MODULE_DEPLOYMENTS = (
+    (REALTIME_MODULE, STAGED_REALTIME_MODULE),
+    (H100_REALTIME_MODULE, STAGED_H100_REALTIME_MODULE),
+)
 USERSPACE_BINARY_DEPLOYMENTS = (
     (
         ROOT / "native" / "bin" / "dmc2-serial-bridge",
@@ -57,10 +66,12 @@ def running_process(pattern: str) -> bool:
 
 
 def validate_realtime_module_deployment() -> None:
-    if REALTIME_MODULE.read_bytes() != STAGED_REALTIME_MODULE.read_bytes():
-        raise RuntimeError(
-            "installed dmc2_rt.so does not match the offline-tested staged module"
-        )
+    for installed, staged in REALTIME_MODULE_DEPLOYMENTS:
+        if installed.read_bytes() != staged.read_bytes():
+            raise RuntimeError(
+                f"installed {installed.name} does not match its "
+                "offline-tested staged module"
+            )
 
 
 def validate_userspace_binary_deployment() -> None:
@@ -98,6 +109,9 @@ def validate_launch_files() -> list[str]:
         ROOT / "native" / "bin" / "dmc2-task-monitor",
         STAGED_REALTIME_MODULE,
         REALTIME_MODULE,
+        H100_PROJECT / "maps" / "live" / "h100-spindle.mbccb",
+        STAGED_H100_REALTIME_MODULE,
+        H100_REALTIME_MODULE,
         ROOT / "live" / "ui" / "status_panel.xml",
         ROOT / "python" / "dmc2_axis" / "axis_user_command.py",
         ROOT / "python" / "dmc2_axis" / "notifications.py",

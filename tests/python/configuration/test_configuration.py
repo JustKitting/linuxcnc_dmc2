@@ -283,10 +283,45 @@ class ConfigurationTests(unittest.TestCase):
             installed = Path(directory) / "installed.so"
             staged.write_bytes(b"verified staged module")
             installed.write_bytes(b"different installed module")
-            with mock.patch.object(launch_live, "STAGED_REALTIME_MODULE", staged):
-                with mock.patch.object(launch_live, "REALTIME_MODULE", installed):
-                    with self.assertRaisesRegex(RuntimeError, "does not match"):
-                        launch_live.validate_realtime_module_deployment()
+            deployments = ((installed, staged),)
+            with mock.patch.object(
+                launch_live,
+                "REALTIME_MODULE_DEPLOYMENTS",
+                deployments,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "does not match"):
+                    launch_live.validate_realtime_module_deployment()
+
+    def test_launcher_checks_both_realtime_modules_byte_for_byte(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            installed_dmc2 = root / "dmc2_rt.so"
+            staged_dmc2 = root / "staged_dmc2_rt.so"
+            installed_h100 = root / "h100_spindle.so"
+            staged_h100 = root / "staged_h100_spindle.so"
+            installed_dmc2.write_bytes(b"exact dmc2")
+            staged_dmc2.write_bytes(b"exact dmc2")
+            installed_h100.write_bytes(b"stale h100")
+            staged_h100.write_bytes(b"exact h100")
+            deployments = (
+                (installed_dmc2, staged_dmc2),
+                (installed_h100, staged_h100),
+            )
+            with mock.patch.object(
+                launch_live,
+                "REALTIME_MODULE_DEPLOYMENTS",
+                deployments,
+            ):
+                with self.assertRaisesRegex(RuntimeError, "h100_spindle.so"):
+                    launch_live.validate_realtime_module_deployment()
+
+            installed_h100.write_bytes(b"exact h100")
+            with mock.patch.object(
+                launch_live,
+                "REALTIME_MODULE_DEPLOYMENTS",
+                deployments,
+            ):
+                launch_live.validate_realtime_module_deployment()
 
     def test_launcher_refuses_mismatched_userspace_binary(self):
         with tempfile.TemporaryDirectory() as directory:

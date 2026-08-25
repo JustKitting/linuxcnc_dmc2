@@ -2,13 +2,20 @@
 set -euo pipefail
 
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
-source_module="${project_dir}/rust/target/release/libdmc2_rt.so"
-target_module="/usr/lib/linuxcnc/modules/dmc2_rt.so"
+h100_project="${project_dir}/../h100_modbus"
+source_modules=(
+    "${project_dir}/rust/target/release/libdmc2_rt.so"
+    "${h100_project}/target/release/h100_spindle.so"
+)
+target_modules=(
+    "/usr/lib/linuxcnc/modules/dmc2_rt.so"
+    "/usr/lib/linuxcnc/modules/h100_spindle.so"
+)
 
 require_realtime_host_stopped() {
     local status
     if pgrep -x rtapi_app >/dev/null 2>&1; then
-        echo "refusing to replace dmc2_rt.so while rtapi_app is active" >&2
+        echo "refusing to replace realtime modules while rtapi_app is active" >&2
         return 1
     else
         status=$?
@@ -23,13 +30,18 @@ install_module_atomically() {
     local source_path="$1"
     local target_path="$2"
     local target_directory
+    local target_name
     local temporary_path
 
     if ! target_directory="$(dirname -- "${target_path}")"; then
         echo "failed to resolve realtime-module target directory" >&2
         return 1
     fi
-    if ! temporary_path="$(mktemp "${target_directory}/.dmc2_rt.so.XXXXXX")"; then
+    if ! target_name="$(basename -- "${target_path}")"; then
+        echo "failed to resolve realtime-module target name" >&2
+        return 1
+    fi
+    if ! temporary_path="$(mktemp "${target_directory}/.${target_name}.XXXXXX")"; then
         echo "failed to create temporary realtime module in ${target_directory}" >&2
         return 1
     fi
@@ -61,19 +73,29 @@ install_module_atomically() {
 }
 
 main() {
+    local index
     if [[ "${EUID}" -ne 0 ]]; then
         echo "run this exact installer as root" >&2
         return 1
     fi
-    if [[ ! -f "${source_module}" ]]; then
-        echo "missing staged realtime module; run scripts/build_native.sh first" >&2
-        return 1
-    fi
+    for index in "${!source_modules[@]}"; do
+        if [[ ! -f "${source_modules[index]}" ]]; then
+            echo "missing staged realtime module: ${source_modules[index]}" >&2
+            return 1
+        fi
+    done
 
     require_realtime_host_stopped
-    install_module_atomically "${source_module}" "${target_module}"
+    for index in "${!source_modules[@]}"; do
+        install_module_atomically \
+            "${source_modules[index]}" \
+            "${target_modules[index]}"
+        require_realtime_host_stopped
+    done
     require_realtime_host_stopped
-    echo "installed exact verified module: ${target_module}"
+    for index in "${!target_modules[@]}"; do
+        echo "installed exact verified module: ${target_modules[index]}"
+    done
 }
 
 if [[ "${BASH_SOURCE[0]}" == "$0" ]]; then

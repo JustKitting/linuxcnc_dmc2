@@ -30,7 +30,7 @@
 ### Implemented and validated offline; not activated on hardware
 
 - The accepted provisional live profile is
-  `/home/kit/linuxcnc_dmc2/live/dmc2.ini`.
+  `live/dmc2.ini` in the main project.
 - Normal software zones are exactly X 0..300 mm, Y 0..173 mm, and Z 0..135 mm
   at 1000 pulses/mm. The accepted switch coordinates are X 300.25, Y 173.25,
   and Z 135.25 mm; final homes are X 300, Y 173, and Z 135 mm.
@@ -65,10 +65,10 @@
 
 ### Accepted provisional profile / explicit first-live boundary
 
-- `/home/kit/linuxcnc_dmc2/live_requirements.json` separates the accepted
+- `live_requirements.json` separates the accepted
   provisional motion profile from explicitly deferred probing, alarm,
   physical-drive-enable, spindle, and integrated-hardware-validation work.
-- `/home/kit/linuxcnc_dmc2/launch_live.py` defaults to validation only. The
+- `scripts/launch_live.py` defaults to validation only. The
   literal `--live` flag is required to start LinuxCNC, and that live path has
   not been run.
 - OUT5 remains false, IN0/IN1 remain status-only, no spindle command is routed,
@@ -77,29 +77,18 @@
 
 ## Version control
 
-The CNC sources in `/home/kit` are versioned in the local Git repository at
-`/home/kit/.cnc-vcs.git`. Because the home directory's reserved `.git`
-directory is unavailable as a repository, use the wrapper:
-
-```bash
-/home/kit/cnc-git status
-/home/kit/cnc-git log --oneline
-/home/kit/cnc-git diff
-```
-
-The tracked set contains CNC source code, scripts, mappings, documentation,
-Mesa firmware files, and the user-mandated hardware integrity rules. Recorded
-TSV captures, caches, credentials, generated Arduino build directories, logs,
-and compiled host objects are excluded.
+This historical note predates the current project split. The main LinuxCNC
+project and its sibling H100 Modbus project are now independent ordinary Git
+repositories; the old home-directory bare repository and wrapper are archived.
 
 ## Current work boundary — 2026-08-22
 
 - Spindle activation is paused at the user's instruction. The H100 work is
-  preserved under `/home/kit/h100_modbus`; its live run path has not been
+  preserved in the sibling `h100_modbus` project; its live run path had not been
   exercised.
 - The current focus is tool-height and workpiece calibration using the puck and
   continuity probe.
 - The confirmed puck/probe wiring, successful input test, and unresolved
-  probing parameters are recorded in `/home/kit/cnc_axis_mapping.md`.
+  probing parameters are recorded in `docs/history/cnc_axis_mapping.md`.
 - This state record does not authorize spindle activation, axis motion, probing
   motion, or wiring changes.

@@ -364,15 +364,22 @@ cd <project-root>
 scripts/verify.sh
 ```
 
+That command also runs the sibling H100 project's complete hardware-free gate:
+100% of the realtime sequencer's 215 compiler-observed branch outcomes, 100%
+of the pure Modbus protocol's executable lines, exact recompilation of every
+Mesa Modbus map, and two byte-identical normalized realtime-module builds.
+
 Individual validation, readiness, and launcher entry points remain under
 `scripts/`. `scripts/launch_live.py` is validation-only unless the literal
 `--live` flag is present. It checks for a conflicting LinuxCNC, HAL, or legacy
 direct-Mesa owner before its explicit live path.
 
 The realtime-module installer refuses to run while `rtapi_app` is active,
-stages and byte-checks the verified module beside the installed target, and
-uses an atomic same-filesystem rename. Abnormal process-probe results fail the
-installation instead of being treated as proof that LinuxCNC is stopped.
+stages and byte-checks both `dmc2_rt.so` and `h100_spindle.so` beside their
+installed targets, and uses atomic same-filesystem renames. The launcher then
+byte-compares both installed modules against the exact offline-tested release
+artifacts. Abnormal process-probe results fail installation instead of being
+treated as proof that LinuxCNC is stopped.
 
 For a live GUI/controller that is owned by the user service manager instead of
 the initiating terminal, use the explicit persistent form:
@@ -394,7 +401,7 @@ POSIX non-realtime scheduling.
 The optional hardware-free HAL integration check is:
 
 ```bash
-cd /home/kit/linuxcnc_dmc2/sim
+cd <project-root>/sim
 halrun offline_hal_smoke.hal
 ```
 
