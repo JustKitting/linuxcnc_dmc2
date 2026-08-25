@@ -5,7 +5,7 @@ use std::process::Command;
 
 const EXPECTED_LINUXCNC_VERSION: &str = "2.9.10";
 const INSTALLED_EMC_NML: &str = "/usr/include/linuxcnc/emc_nml.hh";
-const SOURCE_EMC_NML: &str = "/home/kit/linuxcnc-2.9.10-source/src/emc/nml_intf/emc_nml.hh";
+const SOURCE_EMC_NML_RELATIVE: &str = "../../../vendor/linuxcnc-2.9.10/src/emc/nml_intf/emc_nml.hh";
 
 fn run(program: &str, arguments: &[&str]) {
     let output = Command::new(program)
@@ -21,10 +21,14 @@ fn run(program: &str, arguments: &[&str]) {
 }
 
 fn main() {
+    let manifest_directory =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("missing CARGO_MANIFEST_DIR"));
+    let source_emc_nml = manifest_directory.join(SOURCE_EMC_NML_RELATIVE);
+
     println!("cargo:rerun-if-changed=src/task_status_shim.cc");
     println!("cargo:rerun-if-changed=build.rs");
     println!("cargo:rerun-if-changed={INSTALLED_EMC_NML}");
-    println!("cargo:rerun-if-changed={SOURCE_EMC_NML}");
+    println!("cargo:rerun-if-changed={}", source_emc_nml.display());
 
     let version = Command::new("linuxcnc_var")
         .arg("LINUXCNCVERSION")
@@ -44,7 +48,7 @@ fn main() {
     );
     assert_eq!(
         fs::read(INSTALLED_EMC_NML).expect("failed to read installed emc_nml.hh"),
-        fs::read(SOURCE_EMC_NML).expect("failed to read source emc_nml.hh"),
+        fs::read(&source_emc_nml).expect("failed to read source emc_nml.hh"),
         "installed emc_nml.hh differs from the official LinuxCNC 2.9.10 source"
     );
 

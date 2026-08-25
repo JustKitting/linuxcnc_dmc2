@@ -9,10 +9,11 @@ The live machine profile uses three compiled components:
 - `dmc2_rt.so`: the no-`std` servo-thread supervisor, limit/bounce policy, and
   finite HALUI command-edge generator.
 
-`build_native.sh` runs every offline unit/integration test, builds release
-artifacts, verifies the realtime module ABI, and stages the two userspace
-binaries under `native/bin`. `install_native_module.sh` copies only the exact
-staged realtime module to LinuxCNC's module directory and verifies the copy.
+`scripts/build_native.sh` runs the complete hardware-free verification suite,
+builds release artifacts, verifies the realtime module ABI, and stages the two
+userspace binaries under `native/bin`. `scripts/install_native_module.sh`
+copies only the exact staged realtime module to LinuxCNC's module directory
+and verifies the copy.
 
 The build is locked to LinuxCNC 2.9.10 and its exact official source commit.
 It refuses changed source or installed headers, generates 50 numeric code

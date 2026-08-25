@@ -9,9 +9,35 @@ LinuxCNC on Raspberry Pi -> Ethernet -> Mesa 7I95T -> machine I/O and axes
 ```
 
 LinuxCNC is the only Mesa owner. The Nano is an input bridge; it does not run
-LinuxCNC, load HostMot2, or command an axis by itself. The older
-`/home/kit/pendant_cnc/control.py` direct-Mesa program must never run at the
-same time as this LinuxCNC profile.
+LinuxCNC, load HostMot2, or command an axis by itself. The preserved
+`reference/legacy_controller/control.py` direct-Mesa program must never run at
+the same time as this LinuxCNC profile.
+
+## Repository layout
+
+- `config/`: reviewed machine constants consumed by compiled code.
+- `live/`: the accepted LinuxCNC profile, HAL, UI, and NC programs.
+- `rust/crates/`: realtime policy, LinuxCNC interfaces, serial bridge, and task
+  diagnostics split into independent crates and responsibility modules.
+- `python/`: presentation, launch, and offline-validation packages; never the
+  live motion loop.
+- `firmware/`: Nano source and Mesa firmware images.
+- `tests/`: configuration, UI, operation, and preserved-behavior suites.
+- `scripts/`: build, verification, installation, readiness, and launch entry
+  points.
+- `docs/`: architecture, signal audits, and historical machine notes.
+- `reference/`: non-live earlier implementations retained for comparison.
+- `archive/local/`: ignored one-off diagnostic programs and the preserved old
+  home-directory VCS history.
+- `artifacts/`: ignored hardware captures, firmware builds, and backups.
+- `var/log/` and `var/tmp/`: ignored persistent diagnostics and disposable
+  project scratch files.
+- `vendor/`: the clean, commit-locked official LinuxCNC 2.9.10 checkout.
+
+The enforced dependency rules and runtime data flow are documented in
+`docs/architecture.md`. `scripts/check_source_layout.sh` rejects oversized
+production modules, Python in the live HAL path, generated caches, and live
+dependencies on archived or temporary files.
 
 ## Accepted provisional machine profile
 
@@ -325,27 +351,23 @@ explicitly disabled—not silently guessed.
 
 ## Hardware-free validation
 
-The following commands open neither USB serial nor Mesa hardware:
+The complete verification command opens neither USB serial nor Mesa hardware:
 
 ```bash
-cd /home/kit
-python3 -m unittest discover -s linuxcnc_dmc2 -p 'test_*.py' -v
-linuxcnc_dmc2/native/bin/dmc2-task-monitor --validate
-python3 linuxcnc_dmc2/validate_offline.py
-python3 linuxcnc_dmc2/check_live_readiness.py
-python3 linuxcnc_dmc2/launch_live.py
+cd <project-root>
+scripts/verify.sh
 ```
 
-The last command is validation-only unless the literal `--live` flag is
-present. It checks for a conflicting LinuxCNC, HAL, or legacy direct-Mesa
-owner before its explicit live path. The construction and validation work did
-not run that path.
+Individual validation, readiness, and launcher entry points remain under
+`scripts/`. `scripts/launch_live.py` is validation-only unless the literal
+`--live` flag is present. It checks for a conflicting LinuxCNC, HAL, or legacy
+direct-Mesa owner before its explicit live path.
 
 For a live GUI/controller that is owned by the user service manager instead of
 the initiating terminal, use the explicit persistent form:
 
 ```bash
-python3 /home/kit/linuxcnc_dmc2/launch_live.py --live --persistent
+scripts/launch_live.py --live --persistent
 ```
 
 This creates the transient `dmc2-linuxcnc.service` unit with no automatic

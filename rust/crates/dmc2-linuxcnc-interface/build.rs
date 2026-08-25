@@ -6,7 +6,7 @@ use std::process::Command;
 
 const EXPECTED_LINUXCNC_VERSION: &str = "2.9.10";
 const EXPECTED_LINUXCNC_COMMIT: &str = "86cdca76fa2a36274c432caa21952b23c267989a";
-const SOURCE_ROOT: &str = "/home/kit/linuxcnc-2.9.10-source";
+const SOURCE_ROOT_RELATIVE: &str = "../../../vendor/linuxcnc-2.9.10";
 const EXPECTED_HEADER_FNV64: u64 = 0x5d196ecfe398141a;
 const INCLUDE_ROOT: &str = "/usr/include/linuxcnc";
 
@@ -78,6 +78,11 @@ fn command_output(program: &str, arguments: &[&str]) -> String {
         .unwrap_or_else(|error| panic!("{program} produced non-UTF-8 output: {error}"))
 }
 
+fn source_root() -> PathBuf {
+    PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("missing CARGO_MANIFEST_DIR"))
+        .join(SOURCE_ROOT_RELATIVE)
+}
+
 fn source_header_path(name: &str) -> PathBuf {
     let relative = match name {
         "emc.hh" | "interp_return.hh" | "canon.hh" | "motion_types.h" | "debugflags.h" => {
@@ -96,7 +101,7 @@ fn source_header_path(name: &str) -> PathBuf {
         "usrmotintf.h" => "src/emc/motion/usrmotintf.h".to_owned(),
         _ => panic!("no audited LinuxCNC source mapping for {name}"),
     };
-    Path::new(SOURCE_ROOT).join(relative)
+    source_root().join(relative)
 }
 
 fn read_header(name: &str) -> String {
@@ -405,19 +410,23 @@ fn rust_identifier(name: &str) -> String {
 
 fn main() {
     println!("cargo:rerun-if-changed=build.rs");
+    let source_root = source_root();
+    let source_root_text = source_root
+        .to_str()
+        .expect("LinuxCNC source path is not valid UTF-8");
     let installed_version = command_output("linuxcnc_var", &["LINUXCNCVERSION"]);
     assert_eq!(
         installed_version.trim(),
         EXPECTED_LINUXCNC_VERSION,
         "refusing to generate an interface catalog for an unaudited LinuxCNC version"
     );
-    let source_commit = command_output("git", &["-C", SOURCE_ROOT, "rev-parse", "HEAD"]);
+    let source_commit = command_output("git", &["-C", source_root_text, "rev-parse", "HEAD"]);
     assert_eq!(
         source_commit.trim(),
         EXPECTED_LINUXCNC_COMMIT,
         "pulled LinuxCNC source is not the audited v2.9.10 commit"
     );
-    let source_changes = command_output("git", &["-C", SOURCE_ROOT, "status", "--porcelain"]);
+    let source_changes = command_output("git", &["-C", source_root_text, "status", "--porcelain"]);
     assert!(
         source_changes.trim().is_empty(),
         "pulled LinuxCNC v2.9.10 source has local modifications"
@@ -440,7 +449,7 @@ fn main() {
     let usrmotintf = read_header("usrmotintf.h");
     let cms = read_header("cms.hh");
     let cmd_msg = read_header("cmd_msg.hh");
-    let nce_path = Path::new(SOURCE_ROOT).join("src/emc/rs274ngc/rs274ngc_return.hh");
+    let nce_path = source_root.join("src/emc/rs274ngc/rs274ngc_return.hh");
     println!("cargo:rerun-if-changed={}", nce_path.display());
     let nce_source = fs::read_to_string(&nce_path)
         .unwrap_or_else(|error| panic!("failed to read {}: {error}", nce_path.display()));

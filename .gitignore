@@ -3,12 +3,29 @@ __pycache__/
 
 /rust/target/
 /native/bin/
+/vendor/linuxcnc-2.9.10/
 
 *.o
 *.so
 *.core
 *.log
 linuxcnc.report
+
+# Runtime/debug output belongs under var and is never source-controlled.
+/var/log/*
+!/var/log/README.md
+/var/tmp/*
+!/var/tmp/README.md
+
+# Hardware captures and old experiments are retained locally, not committed.
+/artifacts/captures/*
+!/artifacts/captures/README.md
+/artifacts/firmware-builds/*
+!/artifacts/firmware-builds/README.md
+/artifacts/firmware-backups/*
+!/artifacts/firmware-backups/README.md
+/archive/local/*
+!/archive/local/README.md
 
 /live/*.var
 /live/*.var.bak

@@ -1,2 +1,0 @@
-# OFFLINE SIMULATION ONLY: the bridge reads a recorded text file, not USB.
-loadusr -Wn dmc2-pendant python3 ../nano_hal_bridge.py --component dmc2-pendant --replay ../replay/pendant_nominal.p3 --replay-idle --replay-period-ms 20

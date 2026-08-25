@@ -2,9 +2,9 @@ use std::env;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const MACHINE_CONFIG: &str = "/home/kit/cnc_motion_config.sh";
+const MACHINE_CONFIG_RELATIVE: &str = "../../../config/machine-pulses.conf";
 
-fn setting(text: &str, name: &str) -> u32 {
+fn setting(text: &str, name: &str, machine_config: &Path) -> u32 {
     let prefix = format!("{name}=");
     let values: Vec<_> = text
         .lines()
@@ -14,24 +14,30 @@ fn setting(text: &str, name: &str) -> u32 {
     assert_eq!(
         values.len(),
         1,
-        "expected exactly one {name} in {MACHINE_CONFIG}"
+        "expected exactly one {name} in {}",
+        machine_config.display()
     );
     values[0]
         .parse::<u32>()
-        .unwrap_or_else(|error| panic!("invalid {name} in {MACHINE_CONFIG}: {error}"))
+        .unwrap_or_else(|error| panic!("invalid {name} in {}: {error}", machine_config.display()))
 }
 
 fn main() {
-    println!("cargo:rerun-if-changed={MACHINE_CONFIG}");
+    let manifest_directory =
+        PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("missing CARGO_MANIFEST_DIR"));
+    let machine_config = manifest_directory.join(MACHINE_CONFIG_RELATIVE);
+
+    println!("cargo:rerun-if-changed={}", machine_config.display());
     println!("cargo:rerun-if-changed=build.rs");
     assert!(
-        Path::new(MACHINE_CONFIG).is_file(),
-        "missing {MACHINE_CONFIG}"
+        Path::new(&machine_config).is_file(),
+        "missing {}",
+        machine_config.display()
     );
-    let text = fs::read_to_string(MACHINE_CONFIG)
-        .unwrap_or_else(|error| panic!("failed to read {MACHINE_CONFIG}: {error}"));
-    let motor = setting(&text, "MOTOR_PULSES_PER_REV");
-    let reference = setting(&text, "REFERENCE_PULSES_PER_REV");
+    let text = fs::read_to_string(&machine_config)
+        .unwrap_or_else(|error| panic!("failed to read {}: {error}", machine_config.display()));
+    let motor = setting(&text, "MOTOR_PULSES_PER_REV", &machine_config);
+    let reference = setting(&text, "REFERENCE_PULSES_PER_REV", &machine_config);
     assert!(
         motor > 0 && reference > 0,
         "pulse settings must be positive"

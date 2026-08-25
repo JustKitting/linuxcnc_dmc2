@@ -31,7 +31,7 @@ addf dmc2-safety-limit-z servo-thread
 # This source defines the verified raw IN11/IN9/IN10, IN0/IN1, OUT5, and
 # generated-count status signals. It also adds its count converters here,
 # after the Mesa read and before motion.
-source ../mesa_status_sources.hal
+source hal/mesa_status_sources.hal
 
 # The compiled Rust policy executes in the LinuxCNC servo thread after the
 # current Mesa inputs, generated counts, and safety latches are available and
@@ -49,7 +49,7 @@ net dmc2-safety-limit-y-live <= dmc2-safety-limit-y.out
 net dmc2-safety-limit-z-live <= dmc2-safety-limit-z.out
 
 # The display latches were included in the single flipflop module load above.
-source ../status_latches.hal
+source hal/status_latches.hal
 
 # Exact port of the previously validated direct-stepgen directional gate:
 #   * own latched limit + toward-limit command blocks that motor;
