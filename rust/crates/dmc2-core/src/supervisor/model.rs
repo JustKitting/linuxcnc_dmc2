@@ -93,3 +93,6 @@ pub struct SupervisorInputs {
     pub pendant_mode_enabled: bool,
     pub command_channel_ready: bool,
 }
+
+#[cfg(test)]
+mod tests;
