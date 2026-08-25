@@ -250,6 +250,12 @@ typedef struct dmc2_task_status_snapshot {
 
 typedef struct dmc2_task_status_channel dmc2_task_status_channel;
 
+typedef enum dmc2_task_status_poll_result {
+    DMC2_TASK_STATUS_POLL_ERROR = -1,
+    DMC2_TASK_STATUS_POLL_OK = 0,
+    DMC2_TASK_STATUS_POLL_NOT_READY = 1
+} dmc2_task_status_poll_result;
+
 #ifdef __cplusplus
 extern "C" {
 #define DMC2_NOEXCEPT noexcept
@@ -268,7 +274,7 @@ uint32_t dmc2_task_status_copy_signature_rounds(void) DMC2_NOEXCEPT;
 dmc2_task_status_channel *dmc2_task_status_open(
     const char *nml_file,
     int32_t *nml_error) DMC2_NOEXCEPT;
-int dmc2_task_status_poll(
+dmc2_task_status_poll_result dmc2_task_status_poll(
     dmc2_task_status_channel *channel,
     dmc2_task_status_snapshot *snapshot,
     int32_t *nml_error) DMC2_NOEXCEPT;

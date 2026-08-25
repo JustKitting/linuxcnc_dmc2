@@ -17,12 +17,21 @@ pub(crate) use abi::{
     dmc2_task_status_channel as NativeTaskStatusChannel, dmc2_task_status_close,
     dmc2_task_status_copy_self_test, dmc2_task_status_copy_signature_rounds, dmc2_task_status_open,
     dmc2_task_status_poll, dmc2_task_status_snapshot_abi_version, dmc2_task_status_snapshot_size,
+    DMC2_TASK_STATUS_POLL_ERROR, DMC2_TASK_STATUS_POLL_NOT_READY, DMC2_TASK_STATUS_POLL_OK,
 };
 
 #[cfg(test)]
 pub(crate) use abi::dmc2_task_status_snapshot_initialize;
 
 pub const SNAPSHOT_ABI_VERSION: u32 = abi::DMC2_SNAPSHOT_ABI_VERSION;
+
+const _: unsafe extern "C" fn() -> u32 = dmc2_task_status_snapshot_abi_version;
+const _: unsafe extern "C" fn() -> usize = dmc2_task_status_snapshot_size;
+const _: unsafe extern "C" fn(*const core::ffi::c_char, *mut i32) -> *mut NativeTaskStatusChannel =
+    dmc2_task_status_open;
+const _: unsafe extern "C" fn(*mut NativeTaskStatusChannel, *mut NativeSnapshot, *mut i32) -> i32 =
+    dmc2_task_status_poll;
+const _: unsafe extern "C" fn(*mut NativeTaskStatusChannel) = dmc2_task_status_close;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) struct SnapshotFieldSpec {

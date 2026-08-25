@@ -123,6 +123,7 @@ fn main() {
             "--use-core",
             "--with-derive-default",
             "--with-derive-partialeq",
+            "--no-prepend-enum-name",
             "--formatter",
             "rustfmt",
             "--output",

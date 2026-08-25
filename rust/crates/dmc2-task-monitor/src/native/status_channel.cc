@@ -18,6 +18,98 @@ void set_nml_error(std::int32_t *destination, NML_ERROR_TYPE error) noexcept {
     }
 }
 
+struct PollDecision {
+    dmc2_task_status_poll_result result;
+    NML_ERROR_TYPE error;
+    bool received_status;
+    bool copy_snapshot;
+};
+
+constexpr PollDecision classify_poll(
+    NMLTYPE type,
+    NML_ERROR_TYPE error,
+    bool received_status) noexcept {
+    if (error != NML_NO_ERROR) {
+        return {
+            DMC2_TASK_STATUS_POLL_ERROR,
+            error,
+            received_status,
+            false,
+        };
+    }
+    if (type == EMC_STAT_TYPE) {
+        return {
+            DMC2_TASK_STATUS_POLL_OK,
+            NML_NO_ERROR,
+            true,
+            true,
+        };
+    }
+    if (type == 0 && !received_status) {
+        return {
+            DMC2_TASK_STATUS_POLL_NOT_READY,
+            NML_NO_ERROR,
+            false,
+            false,
+        };
+    }
+    if (type != 0) {
+        return {
+            DMC2_TASK_STATUS_POLL_ERROR,
+            NML_INVALID_MESSAGE_ERROR,
+            received_status,
+            false,
+        };
+    }
+    return {
+        DMC2_TASK_STATUS_POLL_OK,
+        NML_NO_ERROR,
+        true,
+        true,
+    };
+}
+
+constexpr PollDecision POLL_TRANSPORT_ERROR = classify_poll(
+    EMC_STAT_TYPE,
+    NML_INTERNAL_CMS_ERROR,
+    false);
+static_assert(
+    POLL_TRANSPORT_ERROR.result == DMC2_TASK_STATUS_POLL_ERROR &&
+    POLL_TRANSPORT_ERROR.error == NML_INTERNAL_CMS_ERROR &&
+    !POLL_TRANSPORT_ERROR.received_status &&
+    !POLL_TRANSPORT_ERROR.copy_snapshot);
+
+constexpr PollDecision POLL_NEW_STATUS =
+    classify_poll(EMC_STAT_TYPE, NML_NO_ERROR, false);
+static_assert(
+    POLL_NEW_STATUS.result == DMC2_TASK_STATUS_POLL_OK &&
+    POLL_NEW_STATUS.error == NML_NO_ERROR &&
+    POLL_NEW_STATUS.received_status &&
+    POLL_NEW_STATUS.copy_snapshot);
+
+constexpr PollDecision POLL_FIRST_WAIT = classify_poll(0, NML_NO_ERROR, false);
+static_assert(
+    POLL_FIRST_WAIT.result == DMC2_TASK_STATUS_POLL_NOT_READY &&
+    POLL_FIRST_WAIT.error == NML_NO_ERROR &&
+    !POLL_FIRST_WAIT.received_status &&
+    !POLL_FIRST_WAIT.copy_snapshot);
+
+constexpr PollDecision POLL_INVALID_MESSAGE =
+    classify_poll(-1, NML_NO_ERROR, true);
+static_assert(
+    POLL_INVALID_MESSAGE.result == DMC2_TASK_STATUS_POLL_ERROR &&
+    POLL_INVALID_MESSAGE.error == NML_INVALID_MESSAGE_ERROR &&
+    POLL_INVALID_MESSAGE.received_status &&
+    !POLL_INVALID_MESSAGE.copy_snapshot);
+
+constexpr PollDecision POLL_CURRENT_STATUS =
+    classify_poll(0, NML_NO_ERROR, true);
+static_assert(
+    POLL_CURRENT_STATUS.result == DMC2_TASK_STATUS_POLL_OK &&
+    POLL_CURRENT_STATUS.error == NML_NO_ERROR &&
+    POLL_CURRENT_STATUS.received_status &&
+    POLL_CURRENT_STATUS.copy_snapshot);
+
 } // namespace
 
 struct dmc2_task_status_channel {
@@ -79,34 +171,29 @@ extern "C" dmc2_task_status_channel *dmc2_task_status_open(
     return holder;
 }
 
-extern "C" int dmc2_task_status_poll(
+extern "C" dmc2_task_status_poll_result dmc2_task_status_poll(
     dmc2_task_status_channel *holder,
     dmc2_task_status_snapshot *snapshot,
     std::int32_t *nml_error) noexcept {
     set_nml_error(nml_error, NML_INVALID_CONFIGURATION);
     if (holder == nullptr || snapshot == nullptr || holder->channel == nullptr ||
         holder->status == nullptr || !holder->channel->valid()) {
-        return -1;
+        return DMC2_TASK_STATUS_POLL_ERROR;
     }
 
     const NMLTYPE type = holder->channel->peek();
-    if (holder->channel->error_type != NML_NO_ERROR) {
-        set_nml_error(nml_error, holder->channel->error_type);
-        return -1;
-    }
-    if (type == EMC_STAT_TYPE) {
-        holder->received_status = true;
-    } else if (type == 0 && !holder->received_status) {
-        set_nml_error(nml_error, NML_NO_ERROR);
-        return 1;
-    } else if (type != 0) {
-        set_nml_error(nml_error, NML_INVALID_MESSAGE_ERROR);
-        return -1;
+    const PollDecision decision = classify_poll(
+        type,
+        holder->channel->error_type,
+        holder->received_status);
+    holder->received_status = decision.received_status;
+    set_nml_error(nml_error, decision.error);
+    if (!decision.copy_snapshot) {
+        return decision.result;
     }
 
     dmc2_copy_status(*holder->status, *snapshot);
-    set_nml_error(nml_error, NML_NO_ERROR);
-    return 0;
+    return decision.result;
 }
 
 extern "C" void dmc2_task_status_close(
