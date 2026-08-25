@@ -25,6 +25,7 @@ typedef int (*expected_hal_pin_u32_new)(
 typedef void (*expected_hal_realtime_function)(void *, long);
 typedef int (*expected_hal_export_funct)(
     const char *, expected_hal_realtime_function, void *, int, int, int);
+typedef void (*expected_rtapi_print_msg)(msg_level_t, const char *, ...);
 
 #define ABI_COMPATIBLE(actual, expected, label) \
     _Static_assert(__builtin_types_compatible_p(actual, expected), label)
@@ -47,6 +48,8 @@ ABI_COMPATIBLE(__typeof__(&hal_pin_u32_new), expected_hal_pin_u32_new,
                "hal_pin_u32_new signature changed");
 ABI_COMPATIBLE(__typeof__(&hal_export_funct), expected_hal_export_funct,
                "hal_export_funct signature changed");
+ABI_COMPATIBLE(__typeof__(&rtapi_print_msg), expected_rtapi_print_msg,
+               "rtapi_print_msg signature changed");
 
 ABI_COMPATIBLE(hal_bit_t *, volatile bool *, "hal_bit_t changed");
 ABI_COMPATIBLE(hal_float_t *, volatile double *, "hal_float_t changed");
@@ -58,6 +61,7 @@ _Static_assert(sizeof(hal_pin_dir_t) == sizeof(int),
 _Static_assert(HAL_IN == 16, "HAL_IN value changed");
 _Static_assert(HAL_OUT == 32, "HAL_OUT value changed");
 _Static_assert(HAL_IO == 48, "HAL_IO value changed");
+_Static_assert(RTAPI_MSG_ERR == 1, "RTAPI_MSG_ERR value changed");
 "#;
 
 pub(crate) fn compile_c_abi_contract(output_directory: &Path) {

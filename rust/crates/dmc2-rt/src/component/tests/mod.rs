@@ -19,6 +19,7 @@ static PINS: Mutex<Vec<PinRecord>> = Mutex::new(Vec::new());
 static FUNCTION: Mutex<Option<(usize, usize)>> = Mutex::new(None);
 static FAILURE_PLAN: Mutex<FailurePlan> = Mutex::new(FailurePlan::success());
 static HAL_CALLS: Mutex<HalCalls> = Mutex::new(HalCalls::new());
+static RTAPI_MESSAGES: Mutex<Vec<(hal::msg_level_t, String)>> = Mutex::new(Vec::new());
 
 #[derive(Clone, Copy, Debug)]
 struct FailurePlan {
@@ -147,6 +148,18 @@ extern "C" fn hal_ready(component_id: c_int) -> c_int {
     assert_eq!(component_id, 41);
     HAL_CALLS.lock().expect("HAL call lock").ready += 1;
     FAILURE_PLAN.lock().expect("failure plan lock").ready_result
+}
+
+#[no_mangle]
+extern "C" fn rtapi_print_msg(level: hal::msg_level_t, format: *const c_char) {
+    let message = unsafe { std::ffi::CStr::from_ptr(format) }
+        .to_str()
+        .expect("RTAPI message was UTF-8")
+        .to_string();
+    RTAPI_MESSAGES
+        .lock()
+        .expect("RTAPI message lock")
+        .push((level, message));
 }
 
 #[no_mangle]
@@ -391,6 +404,7 @@ fn reset_mock_hal() {
     *FUNCTION.lock().expect("mock function lock") = None;
     *FAILURE_PLAN.lock().expect("failure plan lock") = FailurePlan::success();
     *HAL_CALLS.lock().expect("HAL call lock") = HalCalls::new();
+    RTAPI_MESSAGES.lock().expect("RTAPI message lock").clear();
 }
 
 fn reset_component() {
@@ -552,6 +566,13 @@ fn every_hal_lifecycle_failure_is_returned_and_cleanup_runs_exactly_once() {
     }
     assert_eq!(rtapi_app_main(), ENOMEM);
     assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+    assert_eq!(
+        *RTAPI_MESSAGES.lock().expect("RTAPI message lock"),
+        vec![(
+            hal::msg_level_t_RTAPI_MSG_ERR,
+            "dmc2_rt: ERROR: hal_exit() failed\n".to_string(),
+        )]
+    );
     rtapi_app_exit();
     assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
 
@@ -560,8 +581,10 @@ fn every_hal_lifecycle_failure_is_returned_and_cleanup_runs_exactly_once() {
     assert_eq!(rtapi_app_main(), 0);
     rtapi_app_exit();
     assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+    assert_eq!(RTAPI_MESSAGES.lock().expect("RTAPI message lock").len(), 1);
     rtapi_app_exit();
     assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+    assert_eq!(RTAPI_MESSAGES.lock().expect("RTAPI message lock").len(), 1);
 }
 
 #[test]

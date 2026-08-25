@@ -3,17 +3,18 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::config::{
-    EXPECTED_LINUXCNC_COMMIT, EXPECTED_LINUXCNC_VERSION, HAL_HEADER, SOURCE_HAL_HEADER_RELATIVE,
-    SOURCE_ROOT_RELATIVE,
+    EXPECTED_LINUXCNC_COMMIT, EXPECTED_LINUXCNC_VERSION, HAL_HEADER, RTAPI_HEADER,
+    SOURCE_HAL_HEADER_RELATIVE, SOURCE_ROOT_RELATIVE, SOURCE_RTAPI_HEADER_RELATIVE,
 };
 use super::process;
 
 pub(crate) fn verify_audited_source() {
-    let installed_header = Path::new(HAL_HEADER);
-    assert!(
-        installed_header.is_file(),
-        "the installed LinuxCNC HAL header is missing: {HAL_HEADER}"
-    );
+    for installed_header in [HAL_HEADER, RTAPI_HEADER] {
+        assert!(
+            Path::new(installed_header).is_file(),
+            "the installed LinuxCNC interface header is missing: {installed_header}"
+        );
+    }
 
     let source_root =
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("missing CARGO_MANIFEST_DIR"))
@@ -21,9 +22,14 @@ pub(crate) fn verify_audited_source() {
     let source_root_text = source_root
         .to_str()
         .expect("LinuxCNC source path is not valid UTF-8");
-    let source_header = source_root.join(SOURCE_HAL_HEADER_RELATIVE);
-    println!("cargo:rerun-if-changed={HAL_HEADER}");
-    println!("cargo:rerun-if-changed={}", source_header.display());
+    let audited_headers = [
+        (HAL_HEADER, source_root.join(SOURCE_HAL_HEADER_RELATIVE)),
+        (RTAPI_HEADER, source_root.join(SOURCE_RTAPI_HEADER_RELATIVE)),
+    ];
+    for (installed, authoritative) in &audited_headers {
+        println!("cargo:rerun-if-changed={installed}");
+        println!("cargo:rerun-if-changed={}", authoritative.display());
+    }
 
     let installed_version = process::text("linuxcnc_var", &["LINUXCNCVERSION"]);
     assert_eq!(
@@ -44,16 +50,18 @@ pub(crate) fn verify_audited_source() {
         "pulled LinuxCNC v2.9.10 source has local modifications"
     );
 
-    let installed = fs::read(installed_header)
-        .unwrap_or_else(|error| panic!("failed to read {HAL_HEADER}: {error}"));
-    let authoritative = fs::read(&source_header).unwrap_or_else(|error| {
-        panic!(
-            "failed to read authoritative HAL header {}: {error}",
-            source_header.display()
-        )
-    });
-    assert_eq!(
-        installed, authoritative,
-        "installed hal.h does not exactly match the audited LinuxCNC v2.9.10 source"
-    );
+    for (installed_path, authoritative_path) in audited_headers {
+        let installed = fs::read(installed_path)
+            .unwrap_or_else(|error| panic!("failed to read {installed_path}: {error}"));
+        let authoritative = fs::read(&authoritative_path).unwrap_or_else(|error| {
+            panic!(
+                "failed to read authoritative header {}: {error}",
+                authoritative_path.display()
+            )
+        });
+        assert_eq!(
+            installed, authoritative,
+            "installed {installed_path} does not exactly match the audited LinuxCNC v2.9.10 source"
+        );
+    }
 }

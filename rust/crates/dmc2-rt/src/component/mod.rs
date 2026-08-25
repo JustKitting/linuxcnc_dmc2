@@ -17,10 +17,23 @@ use self::state::ComponentState;
 // names intentionally retain the stable `dmc2-pendant-control` namespace.
 const COMPONENT_NAME: &[u8] = b"dmc2_rt\0";
 const FUNCTION_NAME: &[u8] = b"dmc2-pendant-control.update\0";
+const HAL_EXIT_FAILURE_MESSAGE: &[u8] = b"dmc2_rt: ERROR: hal_exit() failed\n\0";
 const ENOMEM: c_int = -12;
 const EINVAL: c_int = -22;
 
 static mut COMPONENT_ID: c_int = -1;
+
+unsafe fn exit_component(component_id: c_int) {
+    let result = unsafe { linuxcnc_hal::hal_exit(component_id) };
+    if result != 0 {
+        unsafe {
+            linuxcnc_hal::rtapi_print_msg(
+                linuxcnc_hal::msg_level_t_RTAPI_MSG_ERR,
+                HAL_EXIT_FAILURE_MESSAGE.as_ptr().cast::<c_char>(),
+            );
+        }
+    }
+}
 
 #[cfg(not(debug_assertions))]
 #[panic_handler]
@@ -86,7 +99,7 @@ pub extern "C" fn rtapi_app_main() -> c_int {
         Ok(()) => 0,
         Err(error) => {
             unsafe {
-                linuxcnc_hal::hal_exit(component_id);
+                exit_component(component_id);
                 COMPONENT_ID = -1;
             }
             if error == 0 {
@@ -103,7 +116,7 @@ pub extern "C" fn rtapi_app_exit() {
     let component_id = unsafe { COMPONENT_ID };
     if component_id >= 0 {
         unsafe {
-            linuxcnc_hal::hal_exit(component_id);
+            exit_component(component_id);
             COMPONENT_ID = -1;
         }
     }
