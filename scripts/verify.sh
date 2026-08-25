@@ -19,6 +19,10 @@ env RUSTFLAGS=-Dwarnings cargo build --manifest-path "${rust_dir}/Cargo.toml" --
 for script in "${project_dir}"/scripts/*.sh; do
     bash -n "${script}"
 done
+for test_script in "${project_dir}"/tests/shell/*.sh; do
+    bash -n "${test_script}"
+    bash "${test_script}"
+done
 
 for symbol in rtapi_app_main rtapi_app_exit; do
     if ! readelf -Ws "${module}" | grep " ${symbol}$" >/dev/null; then

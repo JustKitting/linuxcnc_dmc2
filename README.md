@@ -369,6 +369,11 @@ Individual validation, readiness, and launcher entry points remain under
 `--live` flag is present. It checks for a conflicting LinuxCNC, HAL, or legacy
 direct-Mesa owner before its explicit live path.
 
+The realtime-module installer refuses to run while `rtapi_app` is active,
+stages and byte-checks the verified module beside the installed target, and
+uses an atomic same-filesystem rename. Abnormal process-probe results fail the
+installation instead of being treated as proof that LinuxCNC is stopped.
+
 For a live GUI/controller that is owned by the user service manager instead of
 the initiating terminal, use the explicit persistent form:
 
