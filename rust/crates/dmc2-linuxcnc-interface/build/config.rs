@@ -3,6 +3,17 @@ pub(crate) const EXPECTED_LINUXCNC_COMMIT: &str = "86cdca76fa2a36274c432caa21952
 pub(crate) const SOURCE_ROOT_RELATIVE: &str = "../../../vendor/linuxcnc-2.9.10";
 pub(crate) const EXPECTED_HEADER_FNV64: u64 = 0x5d196ecfe398141a;
 pub(crate) const INCLUDE_ROOT: &str = "/usr/include/linuxcnc";
+pub(crate) const EXPECTED_PUBLIC_HEADER_COUNT: usize = 120;
+pub(crate) const EXPECTED_PUBLIC_HEADER_SOURCE_FNV64: u64 = 0x8f2986fcf6b52329;
+pub(crate) const EXPECTED_PUBLIC_HEADER_SOURCE_BYTE_COUNT: usize = 635_278;
+pub(crate) const EXPECTED_PUBLIC_MACRO_DECLARATION_COUNT: usize = 1_106;
+pub(crate) const EXPECTED_PUBLIC_MACRO_NAME_COUNT: usize = 1_029;
+pub(crate) const EXPECTED_PUBLIC_MACRO_INACTIVE_COUNT: usize = 86;
+pub(crate) const EXPECTED_PUBLIC_MACRO_FUNCTION_COUNT: usize = 120;
+pub(crate) const EXPECTED_PUBLIC_MACRO_EMPTY_OBJECT_COUNT: usize = 126;
+pub(crate) const EXPECTED_PUBLIC_MACRO_SIGNED_INTEGER_COUNT: usize = 166;
+pub(crate) const EXPECTED_PUBLIC_MACRO_UNSIGNED_INTEGER_COUNT: usize = 315;
+pub(crate) const EXPECTED_PUBLIC_MACRO_NON_INTEGER_COUNT: usize = 216;
 pub(crate) const EXPECTED_PUBLIC_ENUM_HEADER_COUNT: usize = 30;
 
 pub(crate) const EXPECTED_DOMAIN_COUNTS: &[(&str, usize)] = &[

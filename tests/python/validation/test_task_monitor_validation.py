@@ -15,6 +15,7 @@ class CompiledTaskMonitorValidationTests(unittest.TestCase):
     def valid_report() -> dict[str, object]:
         return {
             **task_monitor.EXPECTED_VALIDATION_VALUES,
+            "public_header_source_fnv64": task_monitor.EXPECTED_PUBLIC_HEADER_SOURCE_FNV64,
             "snapshot_schema_fnv64": "0x7a1f54f8088b6ed9",
         }
 
@@ -88,6 +89,23 @@ class CompiledTaskMonitorValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "field ownership totals"):
             self.run_with(json.dumps(report))
 
+    def test_inconsistent_macro_classification_is_rejected(self):
+        report = self.valid_report()
+        report["public_macro_inactive"] -= 1
+        with self.assertRaisesRegex(AssertionError, "classification totals"):
+            self.run_with(json.dumps(report))
+
+    def test_inconsistent_or_unhandled_integer_macro_is_rejected(self):
+        report = self.valid_report()
+        report["public_macro_signed_integer"] -= 1
+        report["public_macro_not_integer_constant"] += 1
+        with self.assertRaisesRegex(AssertionError, "integer macro totals"):
+            self.run_with(json.dumps(report))
+        report = self.valid_report()
+        report["handled_public_integer_macros"] -= 1
+        with self.assertRaisesRegex(AssertionError, "omitted a LinuxCNC public integer macro"):
+            self.run_with(json.dumps(report))
+
     def test_invalid_or_zero_schema_fingerprint_is_rejected(self):
         report = self.valid_report()
         report["snapshot_schema_fnv64"] = "0x0000000000000000"
@@ -95,6 +113,18 @@ class CompiledTaskMonitorValidationTests(unittest.TestCase):
             self.run_with(json.dumps(report))
         report["snapshot_schema_fnv64"] = "not-a-fingerprint"
         with self.assertRaisesRegex(AssertionError, "invalid task-monitor snapshot"):
+            self.run_with(json.dumps(report))
+
+    def test_invalid_or_zero_public_header_fingerprint_is_rejected(self):
+        report = self.valid_report()
+        report["public_header_source_fnv64"] = "0x0000000000000000"
+        with self.assertRaisesRegex(AssertionError, "must not be zero"):
+            self.run_with(json.dumps(report))
+        report["public_header_source_fnv64"] = "not-a-fingerprint"
+        with self.assertRaisesRegex(AssertionError, "invalid LinuxCNC public header"):
+            self.run_with(json.dumps(report))
+        report["public_header_source_fnv64"] = "0x1111111111111111"
+        with self.assertRaisesRegex(AssertionError, "fingerprint changed"):
             self.run_with(json.dumps(report))
 
 

@@ -1,11 +1,15 @@
 use std::collections::BTreeSet;
 
 use dmc2_linuxcnc_interface::{
-    domain, error_message_contract, status_message_contract, DOMAINS, EMC_NML_MESSAGE_TYPE,
-    ENUM_CODE_COUNT, ENUM_DECLARATION_COUNT, ENUM_DOMAIN_CONTRACTS, ERROR_MESSAGE_CONTRACTS,
-    ERROR_MESSAGE_CONTRACT_COUNT, GENERATED_CODE_COUNT, INTERPRETER_ERROR_TEMPLATES,
-    LINUXCNC_SOURCE_COMMIT, LINUXCNC_VERSION, NML_OPERATOR_MESSAGE_TYPE, NON_ENUM_CODE_COUNT,
-    PUBLIC_ENUM_HEADERS, PUBLIC_ENUM_HEADER_COUNT, STATUS_MESSAGE_CONTRACTS,
+    domain, error_message_contract, public_integer_macro_names, public_integer_macro_names_i128,
+    public_macro, status_message_contract, PublicHeaderContract, PublicMacroContract,
+    PublicMacroKind, DOMAINS, EMC_NML_MESSAGE_TYPE, ENUM_CODE_COUNT, ENUM_DECLARATION_COUNT,
+    ENUM_DOMAIN_CONTRACTS, ERROR_MESSAGE_CONTRACTS, ERROR_MESSAGE_CONTRACT_COUNT,
+    GENERATED_CODE_COUNT, INTERPRETER_ERROR_TEMPLATES, LINUXCNC_SOURCE_COMMIT, LINUXCNC_VERSION,
+    NML_OPERATOR_MESSAGE_TYPE, NON_ENUM_CODE_COUNT, PUBLIC_ENUM_HEADERS, PUBLIC_ENUM_HEADER_COUNT,
+    PUBLIC_HEADERS, PUBLIC_HEADER_COUNT, PUBLIC_HEADER_SOURCE_BYTE_COUNT,
+    PUBLIC_HEADER_SOURCE_FNV64, PUBLIC_INTEGER_MACRO_COUNT, PUBLIC_MACROS,
+    PUBLIC_MACRO_DECLARATION_COUNT, PUBLIC_MACRO_NAME_COUNT, STATUS_MESSAGE_CONTRACTS,
     STATUS_MESSAGE_CONTRACT_COUNT,
 };
 
@@ -18,6 +22,13 @@ const AUDITED_ENUM_DECLARATION_COUNT: usize = 79;
 const AUDITED_INTERPRETER_ERROR_COUNT: usize = 198;
 const AUDITED_STATUS_MESSAGE_COUNT: usize = 12;
 const AUDITED_ERROR_MESSAGE_COUNT: usize = 6;
+const AUDITED_PUBLIC_HEADER_COUNT: usize = 120;
+const AUDITED_PUBLIC_HEADER_SOURCE_BYTE_COUNT: usize = 635_278;
+const AUDITED_PUBLIC_HEADER_SOURCE_FNV64: u64 = 0x8f2986fcf6b52329;
+const AUDITED_PUBLIC_MACRO_DECLARATION_COUNT: usize = 1_106;
+const AUDITED_PUBLIC_MACRO_NAME_COUNT: usize = 1_029;
+const AUDITED_PUBLIC_INTEGER_MACRO_COUNT: usize = 481;
+const AUDITED_PUBLIC_MACRO_KIND_COUNTS: [usize; 6] = [86, 120, 126, 166, 315, 216];
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct InterfaceCoverage {
@@ -32,6 +43,193 @@ pub(super) struct InterfaceCoverage {
     pub(super) handled_interpreter_error_count: usize,
     pub(super) status_message_count: usize,
     pub(super) error_message_count: usize,
+    pub(super) public_header_count: usize,
+    pub(super) public_header_source_byte_count: usize,
+    pub(super) public_header_source_fnv64: u64,
+    pub(super) public_macro_declaration_count: usize,
+    pub(super) public_macro_name_count: usize,
+    pub(super) public_macro_kind_counts: [usize; 6],
+    pub(super) public_integer_macro_count: usize,
+    pub(super) handled_public_integer_macro_count: usize,
+}
+
+fn validate_public_macros(
+    headers: &[PublicHeaderContract],
+    macros: &[PublicMacroContract],
+) -> Result<(usize, [usize; 6]), String> {
+    if PUBLIC_HEADER_COUNT != AUDITED_PUBLIC_HEADER_COUNT
+        || headers.len() != PUBLIC_HEADER_COUNT
+        || PUBLIC_HEADER_SOURCE_BYTE_COUNT != AUDITED_PUBLIC_HEADER_SOURCE_BYTE_COUNT
+        || PUBLIC_HEADER_SOURCE_FNV64 != AUDITED_PUBLIC_HEADER_SOURCE_FNV64
+    {
+        return Err(format!(
+            "LinuxCNC public header inventory changed: headers={}/{} bytes={} fingerprint=0x{:016x}",
+            headers.len(),
+            PUBLIC_HEADER_COUNT,
+            PUBLIC_HEADER_SOURCE_BYTE_COUNT,
+            PUBLIC_HEADER_SOURCE_FNV64
+        ));
+    }
+    let mut header_names = BTreeSet::new();
+    let mut source_paths = BTreeSet::new();
+    let mut source_byte_count = 0_usize;
+    let mut declaration_count = 0_usize;
+    let mut name_count = 0_usize;
+    for header in headers {
+        if header.header_name.is_empty()
+            || !header.source_relative_path.starts_with("src/")
+            || header.source_byte_count == 0
+            || header.source_fnv64 == 0
+            || !header_names.insert(header.header_name)
+            || !source_paths.insert(header.source_relative_path)
+        {
+            return Err(format!(
+                "invalid LinuxCNC public header contract: {}",
+                header.header_name
+            ));
+        }
+        source_byte_count = source_byte_count
+            .checked_add(header.source_byte_count)
+            .ok_or_else(|| "LinuxCNC public header byte total overflow".to_owned())?;
+        declaration_count = declaration_count
+            .checked_add(header.macro_declaration_count)
+            .ok_or_else(|| "LinuxCNC public macro declaration total overflow".to_owned())?;
+        name_count = name_count
+            .checked_add(header.macro_name_count)
+            .ok_or_else(|| "LinuxCNC public macro name total overflow".to_owned())?;
+    }
+    if source_byte_count != PUBLIC_HEADER_SOURCE_BYTE_COUNT
+        || declaration_count != PUBLIC_MACRO_DECLARATION_COUNT
+        || name_count != PUBLIC_MACRO_NAME_COUNT
+        || PUBLIC_MACRO_DECLARATION_COUNT != AUDITED_PUBLIC_MACRO_DECLARATION_COUNT
+        || PUBLIC_MACRO_NAME_COUNT != AUDITED_PUBLIC_MACRO_NAME_COUNT
+        || macros.len() != PUBLIC_MACRO_NAME_COUNT
+    {
+        return Err(format!(
+            "LinuxCNC public source totals changed: bytes={source_byte_count} declarations={declaration_count} names={name_count} contracts={}",
+            macros.len()
+        ));
+    }
+
+    let mut keys = BTreeSet::new();
+    let mut kind_counts = [0_usize; 6];
+    let mut handled_integer_count = 0_usize;
+    for contract in macros {
+        if !header_names.contains(contract.header_name)
+            || contract.name.is_empty()
+            || contract.declaration_count == 0
+            || contract.declaration_count
+                != contract.object_declaration_count + contract.function_declaration_count
+            || !keys.insert((contract.header_name, contract.name))
+            || public_macro(contract.header_name, contract.name) != Some(*contract)
+        {
+            return Err(format!(
+                "invalid or undispatchable LinuxCNC public macro: {}::{}",
+                contract.header_name, contract.name
+            ));
+        }
+        let index = match contract.kind {
+            PublicMacroKind::Inactive
+                if contract.active_replacement.is_none() && contract.value.is_none() =>
+            {
+                0
+            }
+            PublicMacroKind::FunctionLike
+                if contract.active_replacement.is_some() && contract.value.is_none() =>
+            {
+                1
+            }
+            PublicMacroKind::ObjectWithoutValue
+                if contract.active_replacement == Some("") && contract.value.is_none() =>
+            {
+                2
+            }
+            PublicMacroKind::SignedInteger
+                if matches!(
+                    contract.value,
+                    Some(dmc2_linuxcnc_interface::PublicInteger::Signed(_))
+                ) =>
+            {
+                3
+            }
+            PublicMacroKind::UnsignedInteger
+                if matches!(
+                    contract.value,
+                    Some(dmc2_linuxcnc_interface::PublicInteger::Unsigned(_))
+                ) =>
+            {
+                4
+            }
+            PublicMacroKind::ObjectNotIntegerConstant
+                if contract
+                    .active_replacement
+                    .is_some_and(|replacement| !replacement.is_empty())
+                    && contract.value.is_none() =>
+            {
+                5
+            }
+            _ => {
+                return Err(format!(
+                    "inconsistent LinuxCNC public macro classification: {}::{}",
+                    contract.header_name, contract.name
+                ));
+            }
+        };
+        kind_counts[index] += 1;
+        if let Some(value) = contract.value {
+            if !public_integer_macro_names(contract.header_name, value)
+                .any(|name| name == contract.name)
+            {
+                return Err(format!(
+                    "LinuxCNC integer macro dispatcher omitted {}::{}",
+                    contract.header_name, contract.name
+                ));
+            }
+            if let Some(value) = value.as_i128() {
+                if !public_integer_macro_names_i128(contract.header_name, value)
+                    .any(|name| name == contract.name)
+                {
+                    return Err(format!(
+                        "LinuxCNC runtime numeric dispatcher omitted {}::{}",
+                        contract.header_name, contract.name
+                    ));
+                }
+            }
+            handled_integer_count += 1;
+        }
+    }
+    for header in headers {
+        let header_macros = macros
+            .iter()
+            .filter(|contract| contract.header_name == header.header_name);
+        if header_macros.clone().count() != header.macro_name_count
+            || header_macros
+                .map(|contract| contract.declaration_count)
+                .sum::<usize>()
+                != header.macro_declaration_count
+        {
+            return Err(format!(
+                "LinuxCNC public header macro ownership changed: {}",
+                header.header_name
+            ));
+        }
+    }
+    if kind_counts != AUDITED_PUBLIC_MACRO_KIND_COUNTS
+        || PUBLIC_INTEGER_MACRO_COUNT != AUDITED_PUBLIC_INTEGER_MACRO_COUNT
+        || handled_integer_count != PUBLIC_INTEGER_MACRO_COUNT
+    {
+        return Err(format!(
+            "LinuxCNC public macro coverage changed: kinds={kind_counts:?} handled_integers={handled_integer_count} generated_integers={PUBLIC_INTEGER_MACRO_COUNT}"
+        ));
+    }
+    if public_macro("not-a-header", "not-a-macro").is_some()
+        || public_integer_macro_names_i128("not-a-header", i128::MAX)
+            .next()
+            .is_some()
+    {
+        return Err("LinuxCNC public macro dispatcher mislabeled an unknown value".to_owned());
+    }
+    Ok((handled_integer_count, kind_counts))
 }
 
 fn validate_codes() -> Result<usize, String> {
@@ -237,6 +435,8 @@ impl InterfaceCoverage {
         }
         let handled_code_count = validate_codes()?;
         validate_enum_inventory()?;
+        let (handled_public_integer_macro_count, public_macro_kind_counts) =
+            validate_public_macros(PUBLIC_HEADERS, PUBLIC_MACROS)?;
         let handled_interpreter_error_count = validate_interpreter_errors()?;
         validate_message_contracts()?;
         Ok(Self {
@@ -251,6 +451,55 @@ impl InterfaceCoverage {
             handled_interpreter_error_count,
             status_message_count: STATUS_MESSAGE_CONTRACTS.len(),
             error_message_count: ERROR_MESSAGE_CONTRACTS.len(),
+            public_header_count: PUBLIC_HEADERS.len(),
+            public_header_source_byte_count: PUBLIC_HEADER_SOURCE_BYTE_COUNT,
+            public_header_source_fnv64: PUBLIC_HEADER_SOURCE_FNV64,
+            public_macro_declaration_count: PUBLIC_MACRO_DECLARATION_COUNT,
+            public_macro_name_count: PUBLIC_MACRO_NAME_COUNT,
+            public_macro_kind_counts,
+            public_integer_macro_count: PUBLIC_INTEGER_MACRO_COUNT,
+            handled_public_integer_macro_count,
         })
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn valid_public_macro_inventory_is_fully_dispatched() {
+        let (handled, kinds) = validate_public_macros(PUBLIC_HEADERS, PUBLIC_MACROS).unwrap();
+        assert_eq!(handled, 481);
+        assert_eq!(kinds, [86, 120, 126, 166, 315, 216]);
+    }
+
+    #[test]
+    fn missing_or_duplicate_public_macro_contract_is_rejected() {
+        let mut missing = PUBLIC_MACROS.to_vec();
+        missing.pop();
+        assert!(validate_public_macros(PUBLIC_HEADERS, &missing).is_err());
+
+        let mut duplicate = PUBLIC_MACROS.to_vec();
+        duplicate[1] = duplicate[0];
+        assert!(validate_public_macros(PUBLIC_HEADERS, &duplicate).is_err());
+    }
+
+    #[test]
+    fn mutated_public_macro_classification_is_rejected() {
+        let mut macros = PUBLIC_MACROS.to_vec();
+        let contract = macros
+            .iter_mut()
+            .find(|contract| contract.header_name == "posemath.h" && contract.name == "PM_ERR")
+            .unwrap();
+        contract.kind = PublicMacroKind::FunctionLike;
+        assert!(validate_public_macros(PUBLIC_HEADERS, &macros).is_err());
+    }
+
+    #[test]
+    fn mutated_public_header_byte_ownership_is_rejected() {
+        let mut headers = PUBLIC_HEADERS.to_vec();
+        headers[0].source_byte_count += 1;
+        assert!(validate_public_macros(&headers, PUBLIC_MACROS).is_err());
     }
 }

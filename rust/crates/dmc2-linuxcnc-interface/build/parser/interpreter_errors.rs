@@ -1,21 +1,4 @@
-fn logical_preprocessor_lines(source: &str) -> Vec<String> {
-    let mut result = Vec::new();
-    let mut current = String::new();
-    for line in source.lines() {
-        let trimmed = line.trim_end();
-        if let Some(prefix) = trimmed.strip_suffix('\\') {
-            current.push_str(prefix);
-            current.push(' ');
-        } else if current.is_empty() {
-            result.push(trimmed.to_owned());
-        } else {
-            current.push_str(trimmed);
-            result.push(std::mem::take(&mut current));
-        }
-    }
-    assert!(current.is_empty(), "unterminated preprocessor continuation");
-    result
-}
+use super::preprocessor::logical_preprocessor_lines;
 
 fn c_string_literals(expression: &str) -> String {
     let bytes = expression.as_bytes();

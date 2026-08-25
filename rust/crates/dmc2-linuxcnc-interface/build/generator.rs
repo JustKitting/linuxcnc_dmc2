@@ -7,6 +7,7 @@ use super::config::{
     EXPECTED_LINUXCNC_VERSION, EXPECTED_PUBLIC_ENUM_HEADER_COUNT, STATUS_MESSAGE_CONTRACTS,
 };
 use super::domains::{self, Domain};
+use super::macro_inventory::{self, Inventory, MacroClassification};
 use super::parser::{enum_declarations, integer_macro, interpreter_error_templates};
 use super::probe::{self, Results};
 use super::source::{self, Headers, PublicEnumHeader};
@@ -61,8 +62,24 @@ fn preamble(
     generated_code_count: usize,
     enum_code_count: usize,
     enum_declaration_count: usize,
+    macro_inventory: &Inventory,
     limits: &MachineLimits,
 ) -> String {
+    let macro_declaration_count = macro_inventory
+        .macros
+        .iter()
+        .map(|contract| contract.declaration_count)
+        .sum::<usize>();
+    let integer_macro_count = macro_inventory
+        .macros
+        .iter()
+        .filter(|contract| {
+            matches!(
+                contract.classification,
+                MacroClassification::SignedInteger(_) | MacroClassification::UnsignedInteger(_)
+            )
+        })
+        .count();
     format!(
         "pub const LINUXCNC_VERSION: &str = \"{EXPECTED_LINUXCNC_VERSION}\";\n\
          pub const LINUXCNC_SOURCE_COMMIT: &str = \"{EXPECTED_LINUXCNC_COMMIT}\";\n\
@@ -71,6 +88,12 @@ fn preamble(
          pub const ENUM_CODE_COUNT: usize = {enum_code_count};\n\
          pub const NON_ENUM_CODE_COUNT: usize = {};\n\
          pub const PUBLIC_ENUM_HEADER_COUNT: usize = {EXPECTED_PUBLIC_ENUM_HEADER_COUNT};\n\
+         pub const PUBLIC_HEADER_COUNT: usize = {};\n\
+         pub const PUBLIC_HEADER_SOURCE_FNV64: u64 = 0x{:016x};\n\
+         pub const PUBLIC_HEADER_SOURCE_BYTE_COUNT: usize = {};\n\
+         pub const PUBLIC_MACRO_DECLARATION_COUNT: usize = {macro_declaration_count};\n\
+         pub const PUBLIC_MACRO_NAME_COUNT: usize = {};\n\
+         pub const PUBLIC_INTEGER_MACRO_COUNT: usize = {integer_macro_count};\n\
          pub const ENUM_DECLARATION_COUNT: usize = {enum_declaration_count};\n\
          pub const STATUS_MESSAGE_CONTRACT_COUNT: usize = {};\n\
          pub const ERROR_MESSAGE_CONTRACT_COUNT: usize = {};\n\
@@ -79,6 +102,14 @@ fn preamble(
          pub const EMCMOT_MAX_SPINDLES: usize = {};\n\
          pub const EMCMOT_MAX_MISC_ERROR: usize = {};\n",
         generated_code_count - enum_code_count,
+        macro_inventory.headers.len(),
+        macro_inventory.source_fnv64,
+        macro_inventory
+            .headers
+            .iter()
+            .map(|contract| contract.source_byte_count)
+            .sum::<usize>(),
+        macro_inventory.macros.len(),
         STATUS_MESSAGE_CONTRACTS.len(),
         ERROR_MESSAGE_CONTRACTS.len(),
         limits.joints,
@@ -86,6 +117,57 @@ fn preamble(
         limits.spindles,
         limits.misc_errors,
     )
+}
+
+fn append_public_headers(generated: &mut String, inventory: &Inventory) {
+    generated.push_str("pub static PUBLIC_HEADERS: &[PublicHeaderContract] = &[\n");
+    for header in &inventory.headers {
+        generated.push_str(&format!(
+            "PublicHeaderContract {{ header_name: {:?}, source_relative_path: {:?}, source_byte_count: {}, source_fnv64: 0x{:016x}, macro_declaration_count: {}, macro_name_count: {} }},\n",
+            header.header_name,
+            header.source_relative_path,
+            header.source_byte_count,
+            header.source_fnv64,
+            header.macro_declaration_count,
+            header.macro_name_count,
+        ));
+    }
+    generated.push_str("];\n");
+}
+
+fn append_public_macros(generated: &mut String, inventory: &Inventory) {
+    generated.push_str("pub static PUBLIC_MACROS: &[PublicMacroContract] = &[\n");
+    for contract in &inventory.macros {
+        let replacement = match &contract.active_replacement {
+            Some(value) => format!("Some({value:?})"),
+            None => "None".to_owned(),
+        };
+        let (kind, value) = match contract.classification {
+            MacroClassification::Inactive => ("Inactive", "None".to_owned()),
+            MacroClassification::FunctionLike => ("FunctionLike", "None".to_owned()),
+            MacroClassification::ObjectWithoutValue => ("ObjectWithoutValue", "None".to_owned()),
+            MacroClassification::SignedInteger(value) => (
+                "SignedInteger",
+                format!("Some(PublicInteger::Signed({value}))"),
+            ),
+            MacroClassification::UnsignedInteger(value) => (
+                "UnsignedInteger",
+                format!("Some(PublicInteger::Unsigned({value}))"),
+            ),
+            MacroClassification::ObjectNotIntegerConstant => {
+                ("ObjectNotIntegerConstant", "None".to_owned())
+            }
+        };
+        generated.push_str(&format!(
+            "PublicMacroContract {{ header_name: {:?}, name: {:?}, declaration_count: {}, object_declaration_count: {}, function_declaration_count: {}, active_replacement: {replacement}, kind: PublicMacroKind::{kind}, value: {value} }},\n",
+            contract.header_name,
+            contract.name,
+            contract.declaration_count,
+            contract.object_declaration_count,
+            contract.function_declaration_count,
+        ));
+    }
+    generated.push_str("];\n");
 }
 
 fn append_enum_domain_contracts(generated: &mut String, domains: &[Domain]) {
@@ -198,6 +280,7 @@ fn write_catalog(
     domains: &[Domain],
     templates: &[(String, String)],
     results: &Results,
+    macro_inventory: &Inventory,
     limits: &MachineLimits,
 ) {
     let fingerprint = header_fingerprint(headers);
@@ -223,8 +306,11 @@ fn write_catalog(
         generated_code_count,
         enum_code_count,
         enum_declaration_count,
+        macro_inventory,
         limits,
     );
+    append_public_headers(&mut generated, macro_inventory);
+    append_public_macros(&mut generated, macro_inventory);
     append_interpreter_errors(&mut generated, templates);
     append_status_contracts(&mut generated, results);
     append_error_contracts(&mut generated, results);
@@ -238,12 +324,15 @@ fn write_catalog(
 pub(crate) fn generate() {
     let source_root = source::verify_checkout();
     let headers = source::load_headers(&source_root);
-    let public_enum_headers = source::load_public_enum_headers(&source_root);
+    let public_headers = source::load_public_headers(&source_root);
+    let public_enum_headers = source::load_public_enum_headers(&public_headers);
     let templates = interpreter_error_templates(&source::read_interpreter_errors(&source_root));
     let domains = domains::collect(&headers, &public_enum_headers);
     let limits = machine_limits(&headers);
     let output_directory =
         PathBuf::from(env::var_os("OUT_DIR").expect("Cargo did not provide OUT_DIR"));
+    let macro_inventory =
+        macro_inventory::collect(&public_headers, &source_root, &output_directory);
     let results = probe::run(
         &output_directory,
         &domains,
@@ -257,6 +346,7 @@ pub(crate) fn generate() {
         &domains,
         &templates,
         &results,
+        &macro_inventory,
         &limits,
     );
 }

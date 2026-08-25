@@ -128,13 +128,26 @@ impl ValidationReport {
 
     fn print_human(&self) {
         println!(
-            "dmc2-task-monitor: program validation passed; linuxcnc_version={} source_commit={} interface_domains={} interface_codes={} handled_codes={} enum_declarations={} interpreter_errors={} handled_interpreter_errors={} status_contracts={} error_contracts={} snapshot_abi=0x{:08x} snapshot_size={} snapshot_fields={} native_copy_fields={} rust_derived_fields={} copy_rounds={} all_codes_accounted=1 all_bytes_accounted=1",
+            "dmc2-task-monitor: program validation passed; linuxcnc_version={} source_commit={} interface_domains={} interface_codes={} handled_codes={} enum_declarations={} public_headers={} public_header_bytes={} public_header_fnv64=0x{:016x} public_macros={} macro_declarations={} integer_macros={} handled_integer_macros={} macro_kinds={}/{}/{}/{}/{}/{} interpreter_errors={} handled_interpreter_errors={} status_contracts={} error_contracts={} snapshot_abi=0x{:08x} snapshot_size={} snapshot_fields={} native_copy_fields={} rust_derived_fields={} copy_rounds={} all_codes_accounted=1 all_bytes_accounted=1",
             LINUXCNC_VERSION,
             LINUXCNC_SOURCE_COMMIT,
             self.interface.domain_count,
             self.interface.code_count,
             self.interface.handled_code_count,
             self.interface.enum_declaration_count,
+            self.interface.public_header_count,
+            self.interface.public_header_source_byte_count,
+            self.interface.public_header_source_fnv64,
+            self.interface.public_macro_name_count,
+            self.interface.public_macro_declaration_count,
+            self.interface.public_integer_macro_count,
+            self.interface.handled_public_integer_macro_count,
+            self.interface.public_macro_kind_counts[0],
+            self.interface.public_macro_kind_counts[1],
+            self.interface.public_macro_kind_counts[2],
+            self.interface.public_macro_kind_counts[3],
+            self.interface.public_macro_kind_counts[4],
+            self.interface.public_macro_kind_counts[5],
             self.interface.interpreter_error_count,
             self.interface.handled_interpreter_error_count,
             self.interface.status_message_count,
@@ -152,7 +165,7 @@ impl ValidationReport {
         println!(
             concat!(
                 "{{",
-                "\"schema_version\":2,",
+                "\"schema_version\":3,",
                 "\"linuxcnc_version\":\"{}\",",
                 "\"linuxcnc_source_commit\":\"{}\",",
                 "\"interface_domains\":{},",
@@ -162,6 +175,19 @@ impl ValidationReport {
                 "\"interface_non_enum_codes\":{},",
                 "\"interface_enum_headers\":{},",
                 "\"interface_enum_declarations\":{},",
+                "\"public_headers\":{},",
+                "\"public_header_source_fnv64\":\"0x{:016x}\",",
+                "\"public_header_source_bytes\":{},",
+                "\"public_macro_declarations\":{},",
+                "\"public_macros\":{},",
+                "\"public_macro_inactive\":{},",
+                "\"public_macro_function_like\":{},",
+                "\"public_macro_object_without_value\":{},",
+                "\"public_macro_signed_integer\":{},",
+                "\"public_macro_unsigned_integer\":{},",
+                "\"public_macro_not_integer_constant\":{},",
+                "\"public_integer_macros\":{},",
+                "\"handled_public_integer_macros\":{},",
                 "\"interpreter_errors\":{},",
                 "\"handled_interpreter_errors\":{},",
                 "\"status_message_contracts\":{},",
@@ -176,6 +202,7 @@ impl ValidationReport {
                 "\"snapshot_padding_bytes\":{},",
                 "\"snapshot_copy_signature_rounds\":{},",
                 "\"interface_all_codes_accounted\":true,",
+                "\"interface_all_public_macros_classified\":true,",
                 "\"snapshot_copy_all_bytes\":true",
                 "}}"
             ),
@@ -188,6 +215,19 @@ impl ValidationReport {
             self.interface.non_enum_code_count,
             self.interface.enum_header_count,
             self.interface.enum_declaration_count,
+            self.interface.public_header_count,
+            self.interface.public_header_source_fnv64,
+            self.interface.public_header_source_byte_count,
+            self.interface.public_macro_declaration_count,
+            self.interface.public_macro_name_count,
+            self.interface.public_macro_kind_counts[0],
+            self.interface.public_macro_kind_counts[1],
+            self.interface.public_macro_kind_counts[2],
+            self.interface.public_macro_kind_counts[3],
+            self.interface.public_macro_kind_counts[4],
+            self.interface.public_macro_kind_counts[5],
+            self.interface.public_integer_macro_count,
+            self.interface.handled_public_integer_macro_count,
             self.interface.interpreter_error_count,
             self.interface.handled_interpreter_error_count,
             self.interface.status_message_count,
@@ -229,6 +269,20 @@ mod tests {
         assert_eq!(report.interface.non_enum_code_count, 209);
         assert_eq!(report.interface.enum_header_count, 30);
         assert_eq!(report.interface.enum_declaration_count, 79);
+        assert_eq!(report.interface.public_header_count, 120);
+        assert_eq!(report.interface.public_header_source_byte_count, 635_278);
+        assert_eq!(
+            report.interface.public_header_source_fnv64,
+            0x8f2986fcf6b52329
+        );
+        assert_eq!(report.interface.public_macro_declaration_count, 1_106);
+        assert_eq!(report.interface.public_macro_name_count, 1_029);
+        assert_eq!(
+            report.interface.public_macro_kind_counts,
+            [86, 120, 126, 166, 315, 216]
+        );
+        assert_eq!(report.interface.public_integer_macro_count, 481);
+        assert_eq!(report.interface.handled_public_integer_macro_count, 481);
         assert_eq!(report.interface.interpreter_error_count, 198);
         assert_eq!(report.interface.handled_interpreter_error_count, 198);
         assert_eq!(report.interface.status_message_count, 12);

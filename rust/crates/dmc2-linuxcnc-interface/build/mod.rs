@@ -1,6 +1,8 @@
 mod config;
 mod domains;
 mod generator;
+mod macro_inventory;
+mod macro_probe;
 mod parser;
 mod probe;
 mod process;

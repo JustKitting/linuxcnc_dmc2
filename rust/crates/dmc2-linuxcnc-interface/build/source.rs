@@ -4,9 +4,17 @@ use std::path::{Path, PathBuf};
 
 use super::config::{
     EXPECTED_LINUXCNC_COMMIT, EXPECTED_LINUXCNC_VERSION, EXPECTED_PUBLIC_ENUM_HEADER_COUNT,
-    INCLUDE_ROOT, SOURCE_ROOT_RELATIVE,
+    EXPECTED_PUBLIC_HEADER_COUNT, INCLUDE_ROOT, SOURCE_ROOT_RELATIVE,
 };
 use super::process;
+
+#[derive(Clone)]
+pub(crate) struct PublicHeader {
+    pub(crate) name: String,
+    pub(crate) installed_path: PathBuf,
+    pub(crate) source_path: PathBuf,
+    pub(crate) source: String,
+}
 
 pub(crate) struct PublicEnumHeader {
     pub(crate) name: String,
@@ -269,7 +277,7 @@ fn preprocess_public_header(installed_path: &Path, name: &str) -> String {
     target_lines(&preprocessed, installed)
 }
 
-pub(crate) fn load_public_enum_headers(source_root: &Path) -> Vec<PublicEnumHeader> {
+pub(crate) fn load_public_headers(source_root: &Path) -> Vec<PublicHeader> {
     let mut installed_paths = fs::read_dir(INCLUDE_ROOT)
         .unwrap_or_else(|error| panic!("failed to read {INCLUDE_ROOT}: {error}"))
         .filter_map(|entry| {
@@ -283,20 +291,14 @@ pub(crate) fn load_public_enum_headers(source_root: &Path) -> Vec<PublicEnumHead
             if !file_type.is_file() {
                 return None;
             }
-            let source = fs::read_to_string(&path).unwrap_or_else(|error| {
-                panic!(
-                    "failed to read installed header {}: {error}",
-                    path.display()
-                )
-            });
-            contains_enum_token(&source).then_some(path)
+            Some(path)
         })
         .collect::<Vec<_>>();
     installed_paths.sort();
     assert_eq!(
         installed_paths.len(),
-        EXPECTED_PUBLIC_ENUM_HEADER_COUNT,
-        "the installed LinuxCNC public-header enum inventory changed"
+        EXPECTED_PUBLIC_HEADER_COUNT,
+        "the installed LinuxCNC public-header inventory changed"
     );
 
     installed_paths
@@ -320,10 +322,31 @@ pub(crate) fn load_public_enum_headers(source_root: &Path) -> Vec<PublicEnumHead
                 source_bytes, installed_bytes,
                 "installed {name} does not exactly match pulled LinuxCNC v2.9.10 source"
             );
-            PublicEnumHeader {
-                source: preprocess_public_header(&installed_path, &name),
+            let source = String::from_utf8(installed_bytes)
+                .unwrap_or_else(|error| panic!("installed {name} is not UTF-8: {error}"));
+            PublicHeader {
                 name,
+                installed_path,
+                source_path,
+                source,
             }
         })
         .collect()
+}
+
+pub(crate) fn load_public_enum_headers(headers: &[PublicHeader]) -> Vec<PublicEnumHeader> {
+    let enum_headers = headers
+        .iter()
+        .filter(|header| contains_enum_token(&header.source))
+        .map(|header| PublicEnumHeader {
+            name: header.name.clone(),
+            source: preprocess_public_header(&header.installed_path, &header.name),
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(
+        enum_headers.len(),
+        EXPECTED_PUBLIC_ENUM_HEADER_COUNT,
+        "the installed LinuxCNC public-header enum inventory changed"
+    );
+    enum_headers
 }
