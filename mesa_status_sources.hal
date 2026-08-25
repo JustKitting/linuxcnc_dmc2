@@ -1,0 +1,56 @@
+# LIVE-HARDWARE INTEGRATION FRAGMENT -- DO NOT RUN AS A STANDALONE HAL FILE.
+#
+# Preconditions:
+#   * One LinuxCNC instance has already loaded hm2_eth as hm2_7i95.0.
+#   * Its servo-thread already exists.
+#   * No other process owns the Mesa 7I95T.
+#
+# USER-OBSERVED ACTUAL input mapping:
+#   X/left limit = IN11, Y/forward limit = IN9, Z/up limit = IN10
+#   puck contact = IN0, DMC2 continuity probe contact = IN1
+#
+# SOURCE-VERIFIED board pin classes and terminal map:
+#   Mesa 7I95T manual, PDF pages 16-21 (printed pages 13-18),
+#   https://www.mesanet.com/pdf/parallel/7i95tman.pdf
+#
+# IN0 is the accepted puck contact and now feeds LinuxCNC's realtime probe
+# input plus digital input 0 for the explicitly no-motion contact test.
+# OUT5 can be controlled by LinuxCNC digital output 0 through the separate
+# program-running gate or by the finite panel connectivity-test window in
+# machine.hal.  This file contains no probing motion.
+
+# Raw isolated inputs are used so that the realtime display latches see short
+# events before any userspace GUI polling.
+net dmc2-limit-x-live <= hm2_7i95.0.inmux.00.raw-input-11
+net dmc2-limit-y-live <= hm2_7i95.0.inmux.00.raw-input-09
+net dmc2-limit-z-live <= hm2_7i95.0.inmux.00.raw-input-10
+net dmc2-puck-live    <= hm2_7i95.0.inmux.00.raw-input-00
+net dmc2-probe-live   <= hm2_7i95.0.inmux.00.raw-input-01
+net dmc2-puck-live    => motion.probe-input motion.digital-in-00
+
+# M64/M65 P0 owns the program request.  The realtime AND gate prevents that
+# request from reaching the final OR unless LinuxCNC reports a running
+# program.  The second OR source is the finite panel connectivity test.
+# A real puck contact resets that test source immediately.
+setp hm2_7i95.0.ssr.00.invert-05 false
+net dmc2-probe-power-request motion.digital-out-00 => dmc2-probe-power-gate.in0
+net dmc2-probe-program-power-enabled dmc2-probe-power-gate.out => dmc2-probe-power-source-or.in0
+net dmc2-puck-test-active dmc2-puck-test-window.out => dmc2-probe-power-source-or.in1
+net dmc2-probe-power-enabled dmc2-probe-power-source-or.out => hm2_7i95.0.ssr.00.out-05 motion.digital-in-01
+net dmc2-puck-live => dmc2-puck-test-reset-or.in0
+net dmc2-puck-test-reset dmc2-puck-test-reset-or.out => dmc2-puck-test-window.reset
+net dmc2-puck-test-time-left dmc2-puck-test-window.time-left
+
+# Display generated pulse counts with the confirmed axis-to-stepgen mapping:
+# X=motor/stepgen 1, Y=motor/stepgen 0, Z=motor/stepgen 2.
+loadrt conv_s32_float names=dmc2-x-count-convert,dmc2-y-count-convert,dmc2-z-count-convert
+addf dmc2-x-count-convert servo-thread
+addf dmc2-y-count-convert servo-thread
+addf dmc2-z-count-convert servo-thread
+
+net dmc2-x-count-s32 hm2_7i95.0.stepgen.01.counts => dmc2-x-count-convert.in
+net dmc2-y-count-s32 hm2_7i95.0.stepgen.00.counts => dmc2-y-count-convert.in
+net dmc2-z-count-s32 hm2_7i95.0.stepgen.02.counts => dmc2-z-count-convert.in
+net dmc2-x-generated-pulses <= dmc2-x-count-convert.out
+net dmc2-y-generated-pulses <= dmc2-y-count-convert.out
+net dmc2-z-generated-pulses <= dmc2-z-count-convert.out

@@ -1,0 +1,154 @@
+%
+(DMC2 MINI - REMOVE EXACTLY 25.00 MM FROM HARDWOOD LOG TOP)
+(CONFIRMED CUT: 10 MM SINGLE-INSERT 10MM-60L, M3/CW, 18000 RPM)
+(LOG CUTTING RECTANGLE: X 34..262 MM, Y 0..173 MM)
+(PHYSICAL SIDE MARGINS: 34 MM RIGHT, 38 MM LEFT)
+(ROUGHING: 6 PASSES X 4.00 MM, 8.00 MM STEPOVER)
+(FINISHING: 1 PASS X 1.00 MM, 2.00 MM STEPOVER)
+(XY/RAMP/RETRACT FEED: 1500 MM/MIN)
+(START: EXACT MACHINE HOME X300 Y173 Z135)
+(END CUT PLANE: MACHINE Z110; THEN STRAIGHT Z RETRACT TO Z135)
+
+#<x_home> = 300.0
+#<x_min> = 34.0
+#<x_max> = 262.0
+#<y_min> = 0.0
+#<y_max> = 173.0
+#<z_start> = 135.0
+#<z_final> = 110.0
+#<total_depth> = 25.0
+#<rough_stepdown> = 4.0
+#<rough_passes> = 6
+#<rough_stepover> = 8.0
+#<finish_stepdown> = 1.0
+#<finish_stepover> = 2.0
+#<feed_mm_min> = 1500.0
+#<spindle_rpm> = 18000.0
+#<position_tolerance> = 0.010
+
+G21 G90 G94
+G17 G40 G49 G80
+G61
+M5
+
+(Refuse to start anywhere except the accepted machine home.)
+o<dmc2_log_start_x> if [ABS[#<_abs_x> - #<x_home>] GT #<position_tolerance>]
+    (DEBUG,DMC2 LOG CUT REFUSED: start X must be machine 300.000 mm)
+    M2
+o<dmc2_log_start_x> endif
+o<dmc2_log_start_y> if [ABS[#<_abs_y> - #<y_max>] GT #<position_tolerance>]
+    (DEBUG,DMC2 LOG CUT REFUSED: start Y must be machine 173.000 mm)
+    M2
+o<dmc2_log_start_y> endif
+o<dmc2_log_start_z> if [ABS[#<_abs_z> - #<z_start>] GT #<position_tolerance>]
+    (DEBUG,DMC2 LOG CUT REFUSED: start Z must be machine 135.000 mm)
+    M2
+o<dmc2_log_start_z> endif
+
+(Static geometry checks: refuse a changed or internally inconsistent file.)
+o<dmc2_log_final_z_check> if [ABS[[#<z_start> - #<total_depth>] - #<z_final>] GT 0.0001]
+    (DEBUG,DMC2 LOG CUT REFUSED: final Z does not equal start Z minus 25.00 mm)
+    M2
+o<dmc2_log_final_z_check> endif
+o<dmc2_log_pass_depth_check> if [ABS[[#<rough_passes> * #<rough_stepdown>] + #<finish_stepdown> - #<total_depth>] GT 0.0001]
+    (DEBUG,DMC2 LOG CUT REFUSED: pass depths do not total exactly 25.00 mm)
+    M2
+o<dmc2_log_pass_depth_check> endif
+
+#<pass_number> = 0
+#<depth_removed> = 0.0
+#<current_x> = #<x_home>
+#<current_y> = #<y_max>
+#<y_direction> = -1.0
+
+(M3 is the physically verified top-down clockwise mapping.)
+(LinuxCNC waits for spindle.0.at-speed before the first G1 cutting move.)
+S#<spindle_rpm> M3
+
+(At Z home, move 38 mm from physical left home to the log's left edge.)
+G53 G1 X#<x_max> F#<feed_mm_min>
+#<current_x> = #<x_max>
+
+o<dmc2_log_passes> while [#<pass_number> LT [#<rough_passes> + 1]]
+    #<pass_number> = [#<pass_number> + 1]
+
+    o<dmc2_log_rough_or_finish> if [#<pass_number> LE #<rough_passes>]
+        #<this_stepdown> = #<rough_stepdown>
+        #<this_stepover> = #<rough_stepover>
+    o<dmc2_log_rough_or_finish> else
+        #<this_stepdown> = #<finish_stepdown>
+        #<this_stepover> = #<finish_stepover>
+    o<dmc2_log_rough_or_finish> endif
+
+    #<depth_removed> = [#<depth_removed> + #<this_stepdown>]
+    #<target_z> = [#<z_start> - #<depth_removed>]
+
+    (Ramp the new depth across the current 228 mm log edge; do not plunge.)
+    o<dmc2_log_ramp_from_xmax> if [#<current_x> GT 150.0]
+        G53 G1 X#<x_min> Z#<target_z> F#<feed_mm_min>
+        G53 G1 X#<x_max> F#<feed_mm_min>
+        #<current_x> = #<x_max>
+    o<dmc2_log_ramp_from_xmax> else
+        G53 G1 X#<x_max> Z#<target_z> F#<feed_mm_min>
+        G53 G1 X#<x_min> F#<feed_mm_min>
+        #<current_x> = #<x_min>
+    o<dmc2_log_ramp_from_xmax> endif
+
+    #<distance_y> = ABS[#<y_max> - #<y_min>]
+    #<whole_y_steps> = FIX[#<distance_y> / #<this_stepover>]
+    #<row_number> = 0
+
+    (Full-width raster rows at the current pass depth.)
+    o<dmc2_log_rows> while [#<row_number> LT #<whole_y_steps>]
+        #<next_y> = [#<current_y> + [#<y_direction> * #<this_stepover>]]
+        G53 G1 Y#<next_y> F#<feed_mm_min>
+        #<current_y> = #<next_y>
+
+        o<dmc2_log_row_from_xmax> if [#<current_x> GT 150.0]
+            G53 G1 X#<x_min> F#<feed_mm_min>
+            #<current_x> = #<x_min>
+        o<dmc2_log_row_from_xmax> else
+            G53 G1 X#<x_max> F#<feed_mm_min>
+            #<current_x> = #<x_max>
+        o<dmc2_log_row_from_xmax> endif
+
+        #<row_number> = [#<row_number> + 1]
+    o<dmc2_log_rows> endwhile
+
+    (Close the final 1 mm remainder at the opposite Y edge.)
+    o<dmc2_log_y_negative_edge> if [#<y_direction> LT 0.0]
+        #<edge_y> = #<y_min>
+    o<dmc2_log_y_negative_edge> else
+        #<edge_y> = #<y_max>
+    o<dmc2_log_y_negative_edge> endif
+
+    o<dmc2_log_y_remainder> if [ABS[#<current_y> - #<edge_y>] GT 0.0001]
+        G53 G1 Y#<edge_y> F#<feed_mm_min>
+        #<current_y> = #<edge_y>
+
+        o<dmc2_log_remainder_from_xmax> if [#<current_x> GT 150.0]
+            G53 G1 X#<x_min> F#<feed_mm_min>
+            #<current_x> = #<x_min>
+        o<dmc2_log_remainder_from_xmax> else
+            G53 G1 X#<x_max> F#<feed_mm_min>
+            #<current_x> = #<x_max>
+        o<dmc2_log_remainder_from_xmax> endif
+    o<dmc2_log_y_remainder> endif
+
+    #<y_direction> = [0.0 - #<y_direction>]
+o<dmc2_log_passes> endwhile
+
+(Refuse completion if the executed depth accumulator is not exactly 25 mm.)
+o<dmc2_log_executed_depth_check> if [ABS[#<depth_removed> - #<total_depth>] GT 0.0001]
+    M5
+    (DEBUG,DMC2 LOG CUT FAILED: executed depth accumulator is not 25.00 mm)
+    M2
+o<dmc2_log_executed_depth_check> endif
+
+(Retract only Z, straight upward, while the spindle remains running.)
+G53 G1 Z#<z_start> F#<feed_mm_min>
+M5
+
+(DEBUG,DMC2 LOG CUT COMPLETE: 25.00 mm removed; final cut plane machine Z110.000)
+M2
+%

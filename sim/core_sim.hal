@@ -1,0 +1,34 @@
+# OFFLINE SIMULATION ONLY. No hm2_eth, serial device, or hardware output exists.
+loadrt [KINS]KINEMATICS
+loadrt [EMCMOT]EMCMOT base_period_nsec=[EMCMOT]BASE_PERIOD servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS
+loadrt flipflop names=dmc2-display-limit-x,dmc2-display-limit-y,dmc2-display-limit-z,dmc2-display-puck,dmc2-display-probe
+loadrt and2 names=dmc2-probe-power-gate
+loadrt or2 names=dmc2-probe-power-source-or,dmc2-puck-test-reset-or
+loadrt oneshot names=dmc2-puck-test-window
+
+addf motion-command-handler servo-thread
+addf motion-controller servo-thread
+addf dmc2-probe-power-gate servo-thread
+addf dmc2-puck-test-reset-or servo-thread
+addf dmc2-puck-test-window servo-thread
+addf dmc2-probe-power-source-or servo-thread
+
+setp dmc2-probe-power-gate.in0 false
+setp dmc2-puck-test-window.width 300.0
+setp dmc2-puck-test-window.retriggerable false
+setp dmc2-puck-test-window.rising true
+setp dmc2-puck-test-window.falling false
+
+net dmc2-probe-program-power-enabled dmc2-probe-power-gate.out => dmc2-probe-power-source-or.in0
+net dmc2-puck-test-active dmc2-puck-test-window.out => dmc2-probe-power-source-or.in1
+net dmc2-probe-power-enabled dmc2-probe-power-source-or.out
+net dmc2-puck-test-reset dmc2-puck-test-reset-or.out => dmc2-puck-test-window.reset
+net dmc2-puck-test-time-left dmc2-puck-test-window.time-left
+
+net sim-x-position joint.0.motor-pos-cmd => joint.0.motor-pos-fb
+net sim-y-position joint.1.motor-pos-cmd => joint.1.motor-pos-fb
+net sim-z-position joint.2.motor-pos-cmd => joint.2.motor-pos-fb
+
+net sim-estop-loop iocontrol.0.user-enable-out => iocontrol.0.emc-enable-in
+net sim-tool-prepare iocontrol.0.tool-prepare => iocontrol.0.tool-prepared
+net sim-tool-change iocontrol.0.tool-change => iocontrol.0.tool-changed

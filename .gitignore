@@ -1,0 +1,14 @@
+__pycache__/
+*.py[cod]
+
+/rust/target/
+/native/bin/
+
+*.o
+*.so
+*.core
+*.log
+linuxcnc.report
+
+/live/*.var
+/live/*.var.bak

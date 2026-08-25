@@ -1,0 +1,335 @@
+# LIVE DMC2 MINI / MESA 7I95T MACHINE HAL.
+# Loaded only by dmc2.ini. Do not source from halrun.
+
+loadrt [KINS]KINEMATICS
+loadrt [EMCMOT]EMCMOT base_period_nsec=[EMCMOT]BASE_PERIOD servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS num_spindles=[TRAJ]SPINDLES
+
+loadrt hostmot2
+loadrt hm2_eth board_ip=[DMC2]MESA_IP config="num_encoders=0 num_stepgens=3 num_pwmgens=0 num_3pwmgens=0 num_inmuxs=1 num_pktuarts=1"
+loadrt hm2_modbus ports="hm2_7i95.0.pktuart.0" mbccbs="/home/kit/h100_modbus/h100-spindle.mbccb"
+loadrt h100_spindle
+loadrt dmc2_rt
+
+loadrt flipflop names=dmc2-safety-limit-x,dmc2-safety-limit-y,dmc2-safety-limit-z,dmc2-display-limit-x,dmc2-display-limit-y,dmc2-display-limit-z,dmc2-display-puck,dmc2-display-probe
+loadrt watchdog num_inputs=1
+loadrt and2 names=dmc2-controller-watchdog-and,dmc2-own-toward-block-m0,dmc2-own-toward-block-m1,dmc2-own-toward-block-m2,dmc2-command-blocked-m0,dmc2-command-blocked-m1,dmc2-command-blocked-m2,dmc2-hard-limit-x-enabled,dmc2-hard-limit-y-enabled,dmc2-hard-limit-z-enabled,dmc2-probe-power-gate
+loadrt or2 names=dmc2-other-limit-block-m0,dmc2-other-limit-block-m1,dmc2-other-limit-block-m2,dmc2-blocked-m0,dmc2-blocked-m1,dmc2-blocked-m2,dmc2-jog-stop-01,dmc2-jog-stop-all,dmc2-jog-stop-immediate-all,dmc2-probe-power-source-or,dmc2-puck-test-reset-or
+loadrt not names=dmc2-pendant-jog-inactive
+loadrt mux2 names=dmc2-x-feedback-loss-guard,dmc2-y-feedback-loss-guard,dmc2-z-feedback-loss-guard
+loadrt estop_latch
+loadrt timedelay names=dmc2-servo-startup-delay
+loadrt oneshot names=dmc2-puck-test-window
+
+# Read the card before every realtime consumer.
+addf hm2_7i95.0.read servo-thread
+
+# Dedicated safety-event latches are separate from the GUI history latches.
+addf dmc2-safety-limit-x servo-thread
+addf dmc2-safety-limit-y servo-thread
+addf dmc2-safety-limit-z servo-thread
+
+# This source defines the verified raw IN11/IN9/IN10, IN0/IN1, OUT5, and
+# generated-count status signals. It also adds its count converters here,
+# after the Mesa read and before motion.
+source ../mesa_status_sources.hal
+
+# The compiled Rust policy executes in the LinuxCNC servo thread after the
+# current Mesa inputs, generated counts, and safety latches are available and
+# before any directional gate or motion command handler consumes its outputs.
+addf dmc2-pendant-control.update servo-thread
+
+net dmc2-limit-x-live => dmc2-safety-limit-x.set
+net dmc2-limit-y-live => dmc2-safety-limit-y.set
+net dmc2-limit-z-live => dmc2-safety-limit-z.set
+net dmc2-safety-limit-x-reset => dmc2-safety-limit-x.reset
+net dmc2-safety-limit-y-reset => dmc2-safety-limit-y.reset
+net dmc2-safety-limit-z-reset => dmc2-safety-limit-z.reset
+net dmc2-safety-limit-x-live <= dmc2-safety-limit-x.out
+net dmc2-safety-limit-y-live <= dmc2-safety-limit-y.out
+net dmc2-safety-limit-z-live <= dmc2-safety-limit-z.out
+
+# The display latches were included in the single flipflop module load above.
+source ../status_latches.hal
+
+# Exact port of the previously validated direct-stepgen directional gate:
+#   * own latched limit + toward-limit command blocks that motor;
+#   * either other latched limit blocks that motor in both directions;
+#   * the matching own-limit latch permits the negative bounce direction.
+# The result drives LinuxCNC's realtime immediate-jog-stop input before the
+# motion controller runs.  It does not turn the machine off.
+addf dmc2-own-toward-block-m0 servo-thread
+addf dmc2-own-toward-block-m1 servo-thread
+addf dmc2-own-toward-block-m2 servo-thread
+addf dmc2-other-limit-block-m0 servo-thread
+addf dmc2-other-limit-block-m1 servo-thread
+addf dmc2-other-limit-block-m2 servo-thread
+addf dmc2-blocked-m0 servo-thread
+addf dmc2-blocked-m1 servo-thread
+addf dmc2-blocked-m2 servo-thread
+addf dmc2-command-blocked-m0 servo-thread
+addf dmc2-command-blocked-m1 servo-thread
+addf dmc2-command-blocked-m2 servo-thread
+addf dmc2-jog-stop-01 servo-thread
+addf dmc2-jog-stop-all servo-thread
+addf dmc2-jog-stop-immediate-all servo-thread
+
+# During an attributed pendant jog/bounce, the directional gate above owns the
+# limit response.  At every other time the existing raw positive hard-limit
+# path remains connected.  Home-switch inputs always receive the raw signal.
+addf dmc2-pendant-jog-inactive servo-thread
+addf dmc2-hard-limit-x-enabled servo-thread
+addf dmc2-hard-limit-y-enabled servo-thread
+addf dmc2-hard-limit-z-enabled servo-thread
+
+# hm2_eth marks an individual failed transport cycle on packet-error before
+# motion evaluates following error.  In that one cycle, the FPGA position
+# feedback is stale.  The installed hm2_eth manual specifically recommends
+# substituting the matching motion command for stale feedback on pid-stepper
+# systems.  Normal FPGA feedback remains selected on every healthy cycle.
+addf dmc2-x-feedback-loss-guard servo-thread
+addf dmc2-y-feedback-loss-guard servo-thread
+addf dmc2-z-feedback-loss-guard servo-thread
+
+addf motion-command-handler servo-thread
+addf motion-controller servo-thread
+# Consume LinuxCNC's spindle command, enforce the H100 state machine, then
+# let hm2_modbus exchange the resulting STOP/RUN and frequency state. The
+# sequencer sees readback from the preceding scan and therefore cannot release
+# RUN in the same cycle that it first requests a frequency write.
+addf h100-spindle servo-thread
+addf hm2_modbus.0.process servo-thread
+# OUT5 can be requested by either the program-running-gated G-code path or the
+# finite, explicitly operator-started no-motion panel test.  A real IN0 puck
+# contact or the panel STOP button resets the panel test immediately.  All of
+# this executes before the Mesa write sends the resulting state to the card.
+addf dmc2-probe-power-gate servo-thread
+addf dmc2-puck-test-reset-or servo-thread
+addf dmc2-puck-test-window servo-thread
+addf dmc2-probe-power-source-or servo-thread
+addf watchdog.set-timeouts servo-thread
+addf watchdog.process servo-thread
+addf dmc2-controller-watchdog-and servo-thread
+addf estop-latch.0 servo-thread
+
+# Write all resulting step/output state only after motion and safety logic.
+addf hm2_7i95.0.write servo-thread
+addf dmc2-servo-startup-delay servo-thread
+
+# Preserve the previously specified exact 300-second maximum test window.
+# A contact or STOP request ends it sooner; a second START edge cannot extend
+# an already active window.
+setp dmc2-puck-test-window.width 300.0
+setp dmc2-puck-test-window.retriggerable false
+setp dmc2-puck-test-window.rising true
+setp dmc2-puck-test-window.falling false
+
+# USER-OBSERVED ACTUAL isolated input mapping and scan behavior.
+setp hm2_7i95.0.inmux.00.scan_rate 20000
+# HostMot2 requires at least one fast scan.  One scan at 20 kHz is 50 us and
+# is also the value to which the installed driver previously coerced zero.
+setp hm2_7i95.0.inmux.00.fast_scans 1
+setp hm2_7i95.0.inmux.00.input-00-slow false
+setp hm2_7i95.0.inmux.00.input-01-slow false
+setp hm2_7i95.0.inmux.00.input-09-slow false
+setp hm2_7i95.0.inmux.00.input-10-slow false
+setp hm2_7i95.0.inmux.00.input-11-slow false
+
+# The HostMot2 default is 5 ms. This Raspberry Pi has shown startup scheduling
+# excursions longer than that. Match the existing 100 ms fail-closed
+# controller watchdog so startup cannot immediately re-bite while preserving
+# automatic output removal if the realtime writer stops.
+setp hm2_7i95.0.watchdog.timeout_ns 100000000
+
+# The active official 7i95t_1pktv2d firmware contains one DPLL and StepGen v2.
+# LinuxCNC's HostMot2 manual says this latch should normally be enabled on
+# Ethernet cards to reduce step-position sampling jitter.  Timer 1 samples
+# 100 us before the nominal Mesa read, the documented conservative value.
+setp hm2_7i95.0.dpll.01.timer-us -100
+setp hm2_7i95.0.stepgen.timer-number 1
+
+# Prove that the servo thread, including hm2.write, has run continuously before
+# the userspace supervisor is allowed to interpret Mesa input state.
+setp dmc2-servo-startup-delay.in true
+setp dmc2-servo-startup-delay.on-delay 0.100
+setp dmc2-servo-startup-delay.off-delay 0.000
+net dmc2-servo-startup-ready dmc2-servo-startup-delay.out
+
+# Preserve the old per-motor limit truth table. Physical motor order is
+# motor 0=Y/IN9, motor 1=X/IN11, motor 2=Z/IN10.
+net dmc2-safety-limit-y-live => dmc2-own-toward-block-m0.in0 dmc2-other-limit-block-m1.in0 dmc2-other-limit-block-m2.in0
+net dmc2-safety-limit-x-live => dmc2-own-toward-block-m1.in0 dmc2-other-limit-block-m0.in0 dmc2-other-limit-block-m2.in1
+net dmc2-safety-limit-z-live => dmc2-own-toward-block-m2.in0 dmc2-other-limit-block-m0.in1 dmc2-other-limit-block-m1.in1
+
+net dmc2-controller-motor-0-toward-limit => dmc2-own-toward-block-m0.in1
+net dmc2-controller-motor-1-toward-limit => dmc2-own-toward-block-m1.in1
+net dmc2-controller-motor-2-toward-limit => dmc2-own-toward-block-m2.in1
+
+net dmc2-own-toward-blocked-m0 dmc2-own-toward-block-m0.out => dmc2-blocked-m0.in0
+net dmc2-own-toward-blocked-m1 dmc2-own-toward-block-m1.out => dmc2-blocked-m1.in0
+net dmc2-own-toward-blocked-m2 dmc2-own-toward-block-m2.out => dmc2-blocked-m2.in0
+net dmc2-other-limit-blocked-m0 dmc2-other-limit-block-m0.out => dmc2-blocked-m0.in1
+net dmc2-other-limit-blocked-m1 dmc2-other-limit-block-m1.out => dmc2-blocked-m1.in1
+net dmc2-other-limit-blocked-m2 dmc2-other-limit-block-m2.out => dmc2-blocked-m2.in1
+
+net dmc2-controller-motor-0-command-enable => dmc2-command-blocked-m0.in0
+net dmc2-controller-motor-1-command-enable => dmc2-command-blocked-m1.in0
+net dmc2-controller-motor-2-command-enable => dmc2-command-blocked-m2.in0
+net dmc2-motor-0-blocked dmc2-blocked-m0.out => dmc2-command-blocked-m0.in1
+net dmc2-motor-1-blocked dmc2-blocked-m1.out => dmc2-command-blocked-m1.in1
+net dmc2-motor-2-blocked dmc2-blocked-m2.out => dmc2-command-blocked-m2.in1
+
+net dmc2-command-stop-m0 dmc2-command-blocked-m0.out => dmc2-jog-stop-01.in0
+net dmc2-command-stop-m1 dmc2-command-blocked-m1.out => dmc2-jog-stop-01.in1
+net dmc2-command-stop-01 dmc2-jog-stop-01.out => dmc2-jog-stop-all.in0
+net dmc2-command-stop-m2 dmc2-command-blocked-m2.out => dmc2-jog-stop-all.in1
+net dmc2-controller-jog-stop dmc2-pendant-control.jog-stop => motion.jog-stop
+net dmc2-pendant-limit-jog-stop dmc2-jog-stop-all.out => dmc2-jog-stop-immediate-all.in0
+net dmc2-controller-jog-stop-immediate dmc2-pendant-control.jog-stop-immediate => dmc2-jog-stop-immediate-all.in1
+net dmc2-jog-stop-immediate-live dmc2-jog-stop-immediate-all.out => motion.jog-stop-immediate
+
+# Shared maximum home/limit inputs. HOME_IGNORE_LIMITS applies only while the
+# matching joint is executing LinuxCNC's homing state machine. The raw switch
+# always drives home; only the default hard-limit fault is masked while the
+# attributed pendant operation remains active.
+net dmc2-limit-x-live => joint.0.home-sw-in dmc2-hard-limit-x-enabled.in0
+net dmc2-limit-y-live => joint.1.home-sw-in dmc2-hard-limit-y-enabled.in0
+net dmc2-limit-z-live => joint.2.home-sw-in dmc2-hard-limit-z-enabled.in0
+net dmc2-controller-jog-active => dmc2-pendant-jog-inactive.in
+net dmc2-pendant-jog-inactive-live dmc2-pendant-jog-inactive.out => dmc2-hard-limit-x-enabled.in1 dmc2-hard-limit-y-enabled.in1 dmc2-hard-limit-z-enabled.in1
+net dmc2-hard-limit-x-live dmc2-hard-limit-x-enabled.out => joint.0.pos-lim-sw-in
+net dmc2-hard-limit-y-live dmc2-hard-limit-y-enabled.out => joint.1.pos-lim-sw-in
+net dmc2-hard-limit-z-live dmc2-hard-limit-z-enabled.out => joint.2.pos-lim-sw-in
+
+# X / JOINT_0 -> physical motor 1 / Mesa stepgen 01.
+setp hm2_7i95.0.stepgen.01.control-type 0
+setp hm2_7i95.0.stepgen.01.step_type 0
+setp hm2_7i95.0.stepgen.01.position-scale [JOINT_0]SCALE
+setp hm2_7i95.0.stepgen.01.maxvel [JOINT_0]STEPGEN_MAX_VEL
+setp hm2_7i95.0.stepgen.01.maxaccel [JOINT_0]STEPGEN_MAX_ACC
+setp hm2_7i95.0.stepgen.01.steplen [JOINT_0]STEPLEN
+setp hm2_7i95.0.stepgen.01.stepspace [JOINT_0]STEPSPACE
+setp hm2_7i95.0.stepgen.01.dirsetup [JOINT_0]DIRSETUP
+setp hm2_7i95.0.stepgen.01.dirhold [JOINT_0]DIRHOLD
+setp hm2_7i95.0.stepgen.01.direction.invert_output false
+net dmc2-x-enable joint.0.amp-enable-out => hm2_7i95.0.stepgen.01.enable
+net dmc2-x-position-command joint.0.motor-pos-cmd => hm2_7i95.0.stepgen.01.position-cmd dmc2-x-feedback-loss-guard.in1
+net dmc2-x-stepgen-position-feedback hm2_7i95.0.stepgen.01.position-fb => dmc2-x-feedback-loss-guard.in0
+net dmc2-x-position-feedback dmc2-x-feedback-loss-guard.out => joint.0.motor-pos-fb
+
+# Y / JOINT_1 -> physical motor 0 / Mesa stepgen 00.
+setp hm2_7i95.0.stepgen.00.control-type 0
+setp hm2_7i95.0.stepgen.00.step_type 0
+setp hm2_7i95.0.stepgen.00.position-scale [JOINT_1]SCALE
+setp hm2_7i95.0.stepgen.00.maxvel [JOINT_1]STEPGEN_MAX_VEL
+setp hm2_7i95.0.stepgen.00.maxaccel [JOINT_1]STEPGEN_MAX_ACC
+setp hm2_7i95.0.stepgen.00.steplen [JOINT_1]STEPLEN
+setp hm2_7i95.0.stepgen.00.stepspace [JOINT_1]STEPSPACE
+setp hm2_7i95.0.stepgen.00.dirsetup [JOINT_1]DIRSETUP
+setp hm2_7i95.0.stepgen.00.dirhold [JOINT_1]DIRHOLD
+setp hm2_7i95.0.stepgen.00.direction.invert_output false
+net dmc2-y-enable joint.1.amp-enable-out => hm2_7i95.0.stepgen.00.enable
+net dmc2-y-position-command joint.1.motor-pos-cmd => hm2_7i95.0.stepgen.00.position-cmd dmc2-y-feedback-loss-guard.in1
+net dmc2-y-stepgen-position-feedback hm2_7i95.0.stepgen.00.position-fb => dmc2-y-feedback-loss-guard.in0
+net dmc2-y-position-feedback dmc2-y-feedback-loss-guard.out => joint.1.motor-pos-fb
+
+# Z / JOINT_2 -> physical motor 2 / Mesa stepgen 02.
+setp hm2_7i95.0.stepgen.02.control-type 0
+setp hm2_7i95.0.stepgen.02.step_type 0
+setp hm2_7i95.0.stepgen.02.position-scale [JOINT_2]SCALE
+setp hm2_7i95.0.stepgen.02.maxvel [JOINT_2]STEPGEN_MAX_VEL
+setp hm2_7i95.0.stepgen.02.maxaccel [JOINT_2]STEPGEN_MAX_ACC
+setp hm2_7i95.0.stepgen.02.steplen [JOINT_2]STEPLEN
+setp hm2_7i95.0.stepgen.02.stepspace [JOINT_2]STEPSPACE
+setp hm2_7i95.0.stepgen.02.dirsetup [JOINT_2]DIRSETUP
+setp hm2_7i95.0.stepgen.02.dirhold [JOINT_2]DIRHOLD
+setp hm2_7i95.0.stepgen.02.direction.invert_output false
+net dmc2-z-enable joint.2.amp-enable-out => hm2_7i95.0.stepgen.02.enable
+net dmc2-z-position-command joint.2.motor-pos-cmd => hm2_7i95.0.stepgen.02.position-cmd dmc2-z-feedback-loss-guard.in1
+net dmc2-z-stepgen-position-feedback hm2_7i95.0.stepgen.02.position-fb => dmc2-z-feedback-loss-guard.in0
+net dmc2-z-position-feedback dmc2-z-feedback-loss-guard.out => joint.2.motor-pos-fb
+
+# A failed current Ethernet cycle selects command-matched feedback for all
+# three open-loop hardware step generators.  No motion command or output is
+# altered by this signal.
+net dmc2-mesa-packet-error hm2_7i95.0.packet-error => dmc2-x-feedback-loss-guard.sel dmc2-y-feedback-loss-guard.sel dmc2-z-feedback-loss-guard.sel
+
+# Fail-closed software E-stop chain. The pendant supervisor and its realtime
+# heartbeat must both be healthy; a Mesa watchdog bite is a separate latched
+# fault. No SSR is used as a drive-enable output in this configuration.
+setp watchdog.timeout-0 0.100
+net dmc2-controller-heartbeat => watchdog.input-0
+net dmc2-controller-watchdog-enable => watchdog.enable-in
+net dmc2-controller-external-enable => dmc2-controller-watchdog-and.in0
+net dmc2-controller-watchdog-ok watchdog.ok-out => dmc2-controller-watchdog-and.in1
+net dmc2-external-estop-ok dmc2-controller-watchdog-and.out => estop-latch.0.ok-in
+net dmc2-user-estop-reset iocontrol.0.user-request-enable => estop-latch.0.reset h100-spindle.reset hm2_modbus.0.reset
+net dmc2-estop-latched-ok estop-latch.0.ok-out => iocontrol.0.emc-enable-in
+net dmc2-mesa-watchdog-fault hm2_7i95.0.watchdog.has_bit => estop-latch.0.fault-in
+
+# H100 spindle control over the already verified Mesa PktUART channel 1 link.
+# The exact expected F004/F005 and permitted minimum RPM are explicit INI
+# values. Live stopped readback on 2026-08-24 verified raw F004=4000 and
+# F005=4000 (400.0 Hz on this four-digit H100); 24000 RPM maps to 400.0 Hz and
+# the software minimum is 6000 RPM.
+setp h100-spindle.rated-rpm [DMC2]SPINDLE_RATED_RPM
+setp h100-spindle.minimum-rpm [DMC2]SPINDLE_MINIMUM_RPM
+setp h100-spindle.maximum-rpm [DMC2]SPINDLE_MAXIMUM_RPM
+setp h100-spindle.expected-reference-f004-centihz [DMC2]SPINDLE_EXPECTED_F004_CENTIHZ
+setp h100-spindle.expected-maximum-f005-centihz [DMC2]SPINDLE_EXPECTED_F005_CENTIHZ
+setp h100-spindle.at-speed-tolerance-hz [DMC2]SPINDLE_AT_SPEED_TOLERANCE_HZ
+
+net dmc2-spindle-machine-enabled motion.motion-enabled => h100-spindle.machine-enabled
+net dmc2-spindle-run-request spindle.0.on => h100-spindle.run-request
+net dmc2-spindle-forward-request spindle.0.forward => h100-spindle.forward-request
+net dmc2-spindle-reverse-request spindle.0.reverse => h100-spindle.reverse-request
+net dmc2-spindle-speed-command spindle.0.speed-out-abs => h100-spindle.speed-command-rpm
+
+net dmc2-h100-link-fault hm2_modbus.0.fault => h100-spindle.link-fault
+net dmc2-h100-command-00-disabled hm2_modbus.0.command.00.disabled => h100-spindle.command-disabled0
+net dmc2-h100-command-01-disabled hm2_modbus.0.command.01.disabled => h100-spindle.command-disabled1
+net dmc2-h100-command-02-disabled hm2_modbus.0.command.02.disabled => h100-spindle.command-disabled2
+net dmc2-h100-command-03-disabled hm2_modbus.0.command.03.disabled => h100-spindle.command-disabled3
+net dmc2-h100-command-04-disabled hm2_modbus.0.command.04.disabled => h100-spindle.command-disabled4
+net dmc2-h100-command-05-disabled hm2_modbus.0.command.05.disabled => h100-spindle.command-disabled5
+net dmc2-h100-command-06-disabled hm2_modbus.0.command.06.disabled => h100-spindle.command-disabled6
+net dmc2-h100-command-07-disabled hm2_modbus.0.command.07.disabled => h100-spindle.command-disabled7
+net dmc2-h100-command-08-disabled hm2_modbus.0.command.08.disabled => h100-spindle.command-disabled8
+net dmc2-h100-command-09-disabled hm2_modbus.0.command.09.disabled => h100-spindle.command-disabled9
+net dmc2-h100-command-10-disabled hm2_modbus.0.command.10.disabled => h100-spindle.command-disabled10
+net dmc2-h100-command-11-disabled hm2_modbus.0.command.11.disabled => h100-spindle.command-disabled11
+net dmc2-h100-command-12-disabled hm2_modbus.0.command.12.disabled => h100-spindle.command-disabled12
+net dmc2-h100-f001 hm2_modbus.0.h100.control-mode-f001 => h100-spindle.control-mode-f001
+net dmc2-h100-f002 hm2_modbus.0.h100.frequency-source-f002 => h100-spindle.frequency-source-f002
+net dmc2-h100-f004 hm2_modbus.0.h100.reference-f004-centihz => h100-spindle.reference-f004-centihz
+net dmc2-h100-f005 hm2_modbus.0.h100.maximum-f005-centihz => h100-spindle.maximum-f005-centihz
+net dmc2-h100-f011 hm2_modbus.0.h100.lower-limit-f011-centihz => h100-spindle.lower-limit-f011-centihz
+net dmc2-h100-f024 hm2_modbus.0.h100.panel-stop-f024 => h100-spindle.panel-stop-f024
+net dmc2-h100-f163 hm2_modbus.0.h100.slave-address-f163 => h100-spindle.slave-address-f163
+net dmc2-h100-f164 hm2_modbus.0.h100.baud-selector-f164 => h100-spindle.baud-selector-f164
+net dmc2-h100-f165 hm2_modbus.0.h100.data-mode-f165 => h100-spindle.data-mode-f165
+net dmc2-h100-f169 hm2_modbus.0.h100.frequency-decimals-f169 => h100-spindle.frequency-decimals-f169
+net dmc2-h100-output-frequency hm2_modbus.0.h100.output-frequency => h100-spindle.output-frequency-decihz
+net dmc2-h100-current-fault hm2_modbus.0.h100.current-fault => h100-spindle.current-fault
+net dmc2-h100-main-status hm2_modbus.0.h100.main-status => h100-spindle.main-status
+net dmc2-h100-frequency-readback hm2_modbus.0.h100.given-frequency-readback => h100-spindle.given-frequency-readback
+
+# Control is listed before frequency in the MBCCB. The realtime sequencer holds
+# STOP while arming, verifies 0201H, then changes control to RUN. On M5 it
+# changes control to STOP first, waits for zero output, and only then clears
+# the given-frequency register.
+net dmc2-h100-main-control h100-spindle.main-control => hm2_modbus.0.h100.main-control
+net dmc2-h100-given-frequency h100-spindle.given-frequency => hm2_modbus.0.h100.given-frequency
+
+net dmc2-spindle-at-speed h100-spindle.at-speed => spindle.0.at-speed motion.digital-in-02
+net dmc2-spindle-running h100-spindle.running => motion.digital-in-03
+net dmc2-spindle-speed-feedback h100-spindle.speed-feedback-rpm => spindle.0.speed-in
+net dmc2-spindle-amplifier-fault h100-spindle.fault-latched => spindle.0.amp-fault-in
+
+# Manual tool-change loopback only.
+net dmc2-tool-prepare iocontrol.0.tool-prepare => iocontrol.0.tool-prepared
+net dmc2-tool-change iocontrol.0.tool-change => iocontrol.0.tool-changed
+
+# Communication starts suspended in the MBCCB, so every command pin and
+# safety net above is established first. The first transmitted write state is
+# STOP (0008H), followed by zero given frequency; no RUN value is configured.
+setp hm2_modbus.0.suspend false

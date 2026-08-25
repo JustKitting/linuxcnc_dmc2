@@ -1,0 +1,47 @@
+(DMC2 PARAMETERIZED CLOCKWISE SPINDLE TEST)
+(Direct call: o<dmc2_spindle_test> call [requested_rpm])
+(No axis motion is commanded.)
+
+o<dmc2_spindle_test> sub
+    #<test_rpm> = #1
+    #<transition_timeout_seconds> = #<_ini[dmc2]spindle_test_transition_timeout_seconds>
+
+    M5
+
+    o<dmc2_spindle_test_minimum> if [#<test_rpm> LT #<_ini[dmc2]spindle_minimum_rpm>]
+        (abort,DMC2 SPINDLE TEST REFUSED: requested RPM is below the configured minimum)
+    o<dmc2_spindle_test_minimum> endif
+    o<dmc2_spindle_test_maximum> if [#<test_rpm> GT #<_ini[dmc2]spindle_maximum_rpm>]
+        (abort,DMC2 SPINDLE TEST REFUSED: requested RPM is above the configured maximum)
+    o<dmc2_spindle_test_maximum> endif
+
+    (Start each test from confirmed H100 stopped feedback.)
+    M66 P3 L4 Q#<transition_timeout_seconds>
+    o<dmc2_spindle_test_initial_stop> if [#5399 LT 0]
+        (abort,DMC2 SPINDLE TEST FAILED: spindle did not report stopped before the test)
+    o<dmc2_spindle_test_initial_stop> endif
+
+    (M3 is the physically verified top-down clockwise mapping.)
+    S#<test_rpm> M3
+
+    M66 P3 L3 Q#<transition_timeout_seconds>
+    o<dmc2_spindle_test_running> if [#5399 LT 0]
+        M5
+        (abort,DMC2 SPINDLE TEST FAILED: spindle did not report running)
+    o<dmc2_spindle_test_running> endif
+
+    M66 P2 L3 Q#<transition_timeout_seconds>
+    o<dmc2_spindle_test_at_speed> if [#5399 LT 0]
+        M5
+        (abort,DMC2 SPINDLE TEST FAILED: spindle did not reach the requested RPM)
+    o<dmc2_spindle_test_at_speed> endif
+
+    M5
+    M66 P3 L4 Q#<transition_timeout_seconds>
+    o<dmc2_spindle_test_final_stop> if [#5399 LT 0]
+        (abort,DMC2 SPINDLE TEST FAILED: spindle did not report stopped after M5)
+    o<dmc2_spindle_test_final_stop> endif
+
+    (debug,DMC2 SPINDLE TEST PASSED: #<test_rpm> RPM reached, then stopped)
+o<dmc2_spindle_test> endsub
+M2

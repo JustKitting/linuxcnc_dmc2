@@ -1,0 +1,99 @@
+%
+(DMC2 FIRST MOVING TOOL-HEIGHT CONTACT TEST)
+(FIRST-RUN VALUES APPROVED BY THE USER ON 2026-08-24.)
+(X/Y are the recorded puck station.  This first test does not move X or Y.)
+(The spindle remains off.  Only Z moves after the operator resumes.)
+
+#<puck_machine_x> = 288.125
+#<puck_machine_y> = 152.955
+#<puck_height_mm> = 19.40
+#<z_home_machine> = 135.0
+#<probe_target_z> = 0.0
+#<probe_feed_mm_min> = 6.0
+#<xy_tolerance_mm> = 0.010
+
+G21 G90 G94
+G17 G40 G49 G80
+M5
+
+(The first test must start at the recorded puck X/Y.  Do not reposition it.)
+o<dmc2_tool_check_x_position> if [ABS[#<_abs_x> - #<puck_machine_x>] GT #<xy_tolerance_mm>]
+    (DEBUG,DMC2 TOOL CHECK REFUSED: X is not at the recorded puck position)
+    M2
+o<dmc2_tool_check_x_position> endif
+o<dmc2_tool_check_y_position> if [ABS[#<_abs_y> - #<puck_machine_y>] GT #<xy_tolerance_mm>]
+    (DEBUG,DMC2 TOOL CHECK REFUSED: Y is not at the recorded puck position)
+    M2
+o<dmc2_tool_check_y_position> endif
+
+(Start with probe power off and the puck input open.)
+M65 P0
+M66 P1 L4 Q1.0
+o<dmc2_tool_check_initial_power_off> if [#5399 LT 0]
+    (DEBUG,DMC2 TOOL CHECK REFUSED: OUT5 gate did not report off)
+    M2
+o<dmc2_tool_check_initial_power_off> endif
+M66 P0 L0
+o<dmc2_tool_check_initial_probe_open> if [#5399 NE 0]
+    (DEBUG,DMC2 TOOL CHECK REFUSED: puck input is already active)
+    M2
+o<dmc2_tool_check_initial_probe_open> endif
+
+(MSG,DMC2 CONNECTIVITY TEST GATE: place the puck and clip, then resume only when ready for immediate slow Z-down motion)
+M0
+
+(Recheck the locked position and open input after operator confirmation.)
+o<dmc2_tool_check_confirmed_x> if [ABS[#<_abs_x> - #<puck_machine_x>] GT #<xy_tolerance_mm>]
+    (DEBUG,DMC2 TOOL CHECK REFUSED AFTER CONFIRMATION: X changed)
+    M2
+o<dmc2_tool_check_confirmed_x> endif
+o<dmc2_tool_check_confirmed_y> if [ABS[#<_abs_y> - #<puck_machine_y>] GT #<xy_tolerance_mm>]
+    (DEBUG,DMC2 TOOL CHECK REFUSED AFTER CONFIRMATION: Y changed)
+    M2
+o<dmc2_tool_check_confirmed_y> endif
+M66 P0 L0
+o<dmc2_tool_check_confirmed_probe_open> if [#5399 NE 0]
+    (DEBUG,DMC2 TOOL CHECK REFUSED AFTER CONFIRMATION: puck input is already active)
+    M2
+o<dmc2_tool_check_confirmed_probe_open> endif
+
+(Enable the accepted OUT5 probe-power path only while this program is running.)
+M64 P0
+M66 P1 L3 Q1.0
+o<dmc2_tool_check_power_on> if [#5399 LT 0]
+    M65 P0
+    (DEBUG,DMC2 TOOL CHECK FAILED: OUT5 gate did not report on)
+    M2
+o<dmc2_tool_check_power_on> endif
+M66 P0 L0
+o<dmc2_tool_check_powered_probe_open> if [#5399 NE 0]
+    M65 P0
+    (DEBUG,DMC2 TOOL CHECK FAILED: puck input was active before Z motion)
+    M2
+o<dmc2_tool_check_powered_probe_open> endif
+
+(FIRST RUN: straight down at exactly 6 mm/min = 0.1 mm/s.)
+(G38.2 stops on IN0 contact and faults if no contact occurs by machine Z zero.)
+G38.2 Z#<probe_target_z> F#<probe_feed_mm_min>
+
+#<probe_work_z> = #5063
+#<probe_machine_z> = #5063
+#<plate_contact_machine_z> = [#<probe_machine_z> - #<puck_height_mm>]
+#<tool_tip_height_at_home> = [#<z_home_machine> - #<plate_contact_machine_z>]
+
+(Remove probe power before any return movement.)
+M65 P0
+M66 P1 L4 Q1.0
+o<dmc2_tool_check_final_power_off> if [#5399 LT 0]
+    (DEBUG,DMC2 TOOL CHECK FAILED: OUT5 gate did not report off)
+    M2
+o<dmc2_tool_check_final_power_off> endif
+
+(Conventional acceleration-limited rapid return to the known Z home.)
+G53 G0 Z#<z_home_machine>
+
+(DEBUG,DMC2 TOOL CHECK PASSED: probe machine Z = #<probe_machine_z> mm)
+(DEBUG,DMC2 TOOL CHECK: derived plate-contact machine Z = #<plate_contact_machine_z> mm)
+(DEBUG,DMC2 TOOL CHECK: tool-tip height at Z home = #<tool_tip_height_at_home> mm)
+M2
+%

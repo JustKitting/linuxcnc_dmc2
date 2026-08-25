@@ -1,0 +1,306 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<pyvcp>
+  <vbox>
+    <boxexpand expand="no"/>
+    <boxfill fill="x"/>
+    <boxanchor anchor="n"/>
+
+    <label text='"DMC2 MACHINE STATUS"'
+           font='("Helvetica", 12, "bold")' anchor='"w"' padx="8" pady="6"/>
+
+    <labelframe text="CONTROL STATE" font='("Helvetica", 10, "bold")'
+                padx="8" pady="5">
+      <table flexible_columns="[1,2,3,4,5,6,7,8]">
+        <tablesticky sticky="w"/>
+        <tablerow/>
+        <label text='"Control ready"' font='("Helvetica", 10, "bold")'
+               width="13" anchor='"w"'/>
+        <rectled halpin='"controller-ready"' height="16" width="24"
+                 on_color='"green"' off_color='"red"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"Fault"' font='("Helvetica", 10, "bold")'
+               width="8" anchor='"w"'/>
+        <rectled halpin='"controller-fault"' height="16" width="24"
+                 on_color='"red"' off_color='"gray35"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"Recovery"' font='("Helvetica", 10, "bold")'
+               width="10" anchor='"w"'/>
+        <led halpin='"controller-recovery"' size="16"
+             on_color='"yellow"' off_color='"gray35"'/>
+        <tablerow/>
+        <label text='"Jog active"' font='("Helvetica", 10)'
+               width="13" anchor='"w"'/>
+        <led halpin='"controller-jog-active"' size="16"
+             on_color='"deepskyblue"' off_color='"gray35"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"Limit backoff"' font='("Helvetica", 10)'
+               width="13" anchor='"w"'/>
+        <led halpin='"controller-bounce-active"' size="16"
+             on_color='"orange"' off_color='"gray35"'/>
+      </table>
+    </labelframe>
+
+    <labelframe text="POSITION AND HOMING" font='("Helvetica", 10, "bold")'
+                padx="8" pady="4">
+      <hbox>
+        <boxexpand expand="no"/>
+        <boxfill fill="none"/>
+        <boxanchor anchor="w"/>
+        <button halpin='"home-all"' text='"HOME ALL"'
+                font='("Helvetica", 10, "bold")' width="12" padx="8" pady="2"/>
+        <label text='"      "' font='("Helvetica", 10)' width="6" anchor='"w"'/>
+        <label text='"KNOWN"' font='("Helvetica", 10, "bold")'
+               width="8" anchor='"w"'/>
+        <rectled halpin='"position-known"' height="16" width="22"
+                 on_color='"green"' off_color='"gray35"'/>
+        <label text='"      "' font='("Helvetica", 10)' width="6" anchor='"w"'/>
+        <label text='"UNKNOWN"' font='("Helvetica", 10, "bold")'
+               width="10" anchor='"w"'/>
+        <rectled halpin='"position-unknown"' height="16" width="22"
+                 on_color='"red"' off_color='"gray35"'/>
+      </hbox>
+    </labelframe>
+
+    <hbox>
+      <boxfill fill="both"/>
+      <labelframe text="MACHINE COORDINATES (mm)" font='("Helvetica", 10, "bold")'
+                  padx="8" pady="5">
+        <table flexible_columns="[1,2]">
+          <tablesticky sticky="w"/>
+          <tablerow/>
+          <label text='"X"' font='("Helvetica", 10, "bold")' width="5" anchor='"w"'/>
+          <number halpin='"x-position"' format='"+10.4f"'
+                  font='("Helvetica", 10, "bold")' width="13" anchor='"w"'/>
+          <tablerow/>
+          <label text='"Y"' font='("Helvetica", 10, "bold")' width="5" anchor='"w"'/>
+          <number halpin='"y-position"' format='"+10.4f"'
+                  font='("Helvetica", 10, "bold")' width="13" anchor='"w"'/>
+          <tablerow/>
+          <label text='"Z"' font='("Helvetica", 10, "bold")' width="5" anchor='"w"'/>
+          <number halpin='"z-position"' format='"+10.4f"'
+                  font='("Helvetica", 10, "bold")' width="13" anchor='"w"'/>
+        </table>
+      </labelframe>
+
+      <labelframe text="MESA GENERATED PULSES" font='("Helvetica", 10, "bold")'
+                  padx="8" pady="5">
+        <table flexible_columns="[1,2]">
+          <tablesticky sticky="w"/>
+          <tablerow/>
+          <label text='"X / M1"' font='("Helvetica", 10, "bold")' width="8" anchor='"w"'/>
+          <number halpin='"x-generated-pulses"' format='"+12.0f"'
+                  font='("Helvetica", 10, "bold")' width="13" anchor='"w"'/>
+          <tablerow/>
+          <label text='"Y / M0"' font='("Helvetica", 10, "bold")' width="8" anchor='"w"'/>
+          <number halpin='"y-generated-pulses"' format='"+12.0f"'
+                  font='("Helvetica", 10, "bold")' width="13" anchor='"w"'/>
+          <tablerow/>
+          <label text='"Z / M2"' font='("Helvetica", 10, "bold")' width="8" anchor='"w"'/>
+          <number halpin='"z-generated-pulses"' format='"+12.0f"'
+                  font='("Helvetica", 10, "bold")' width="13" anchor='"w"'/>
+        </table>
+      </labelframe>
+    </hbox>
+
+    <hbox>
+      <boxfill fill="both"/>
+      <labelframe text="LIMIT SWITCHES" font='("Helvetica", 10, "bold")'
+                  padx="8" pady="5">
+        <table flexible_columns="[1,2,3]">
+          <tablesticky sticky="w"/>
+          <tablerow/>
+          <label text='"Input"' font='("Helvetica", 10, "bold")'
+                 width="17" anchor='"w"'/>
+          <label text='"LIVE"' font='("Helvetica", 10, "bold")'
+                 width="7" anchor='"w"'/>
+          <label text='"SEEN"' font='("Helvetica", 10, "bold")'
+                 width="7" anchor='"w"'/>
+          <tablerow/>
+          <label text='"X left / IN11"' font='("Helvetica", 10)'
+                 width="17" anchor='"w"'/>
+          <led halpin='"limit-x-live"' size="16"
+               on_color='"red"' off_color='"gray35"'/>
+          <led halpin='"limit-x-latched"' size="16"
+               on_color='"orange"' off_color='"gray35"'/>
+          <tablerow/>
+          <label text='"Y forward / IN9"' font='("Helvetica", 10)'
+                 width="17" anchor='"w"'/>
+          <led halpin='"limit-y-live"' size="16"
+               on_color='"red"' off_color='"gray35"'/>
+          <led halpin='"limit-y-latched"' size="16"
+               on_color='"orange"' off_color='"gray35"'/>
+          <tablerow/>
+          <label text='"Z up / IN10"' font='("Helvetica", 10)'
+                 width="17" anchor='"w"'/>
+          <led halpin='"limit-z-live"' size="16"
+               on_color='"red"' off_color='"gray35"'/>
+          <led halpin='"limit-z-latched"' size="16"
+               on_color='"orange"' off_color='"gray35"'/>
+        </table>
+      </labelframe>
+
+      <labelframe text="CONTACT SENSORS" font='("Helvetica", 10, "bold")'
+                  padx="8" pady="5">
+        <table flexible_columns="[1,2,3]">
+          <tablesticky sticky="w"/>
+          <tablerow/>
+          <label text='"Input"' font='("Helvetica", 10, "bold")'
+                 width="17" anchor='"w"'/>
+          <label text='"LIVE"' font='("Helvetica", 10, "bold")'
+                 width="7" anchor='"w"'/>
+          <label text='"SEEN"' font='("Helvetica", 10, "bold")'
+                 width="7" anchor='"w"'/>
+          <tablerow/>
+          <label text='"Puck / IN0"' font='("Helvetica", 10)'
+                 width="17" anchor='"w"'/>
+          <led halpin='"puck-live"' size="16"
+               on_color='"green"' off_color='"gray35"'/>
+          <led halpin='"puck-latched"' size="16"
+               on_color='"orange"' off_color='"gray35"'/>
+          <tablerow/>
+          <label text='"DMC2 probe / IN1"' font='("Helvetica", 10)'
+                 width="17" anchor='"w"'/>
+          <led halpin='"probe-live"' size="16"
+               on_color='"green"' off_color='"gray35"'/>
+          <led halpin='"probe-latched"' size="16"
+               on_color='"orange"' off_color='"gray35"'/>
+          <tablerow/>
+          <label text='"OUT5 probe power"' font='("Helvetica", 10)'
+                 width="17" anchor='"w"'/>
+          <led halpin='"probe-power-enabled"' size="16"
+               on_color='"yellow"' off_color='"gray35"'/>
+          <label text='"—"' font='("Helvetica", 10)' width="7" anchor='"w"'/>
+        </table>
+      </labelframe>
+    </hbox>
+
+    <labelframe text="PUCK CONNECTIVITY TEST - NO MOTION"
+                font='("Helvetica", 10, "bold")' padx="8" pady="5">
+      <hbox>
+        <boxexpand expand="no"/>
+        <boxfill fill="none"/>
+        <boxanchor anchor="w"/>
+        <button halpin='"puck-test-start"' text='"START TEST"'
+                font='("Helvetica", 10, "bold")' width="12" padx="8" pady="2"/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <button halpin='"puck-test-stop"' text='"STOP TEST"'
+                font='("Helvetica", 10, "bold")' width="12" padx="8" pady="2"/>
+        <label text='"      "' font='("Helvetica", 10)' width="6" anchor='"w"'/>
+        <label text='"ACTIVE"' font='("Helvetica", 10, "bold")'
+               width="8" anchor='"w"'/>
+        <led halpin='"puck-test-active"' size="16"
+             on_color='"yellow"' off_color='"gray35"'/>
+        <label text='"      "' font='("Helvetica", 10)' width="6" anchor='"w"'/>
+        <label text='"Seconds left"' font='("Helvetica", 10)'
+               width="12" anchor='"w"'/>
+        <number halpin='"puck-test-time-left"' format='"6.1f"'
+                font='("Helvetica", 10, "bold")' width="8" anchor='"w"'/>
+        <label text='"      PASS = Puck / IN0 SEEN"' font='("Helvetica", 10, "bold")'
+               width="29" anchor='"w"'/>
+      </hbox>
+    </labelframe>
+
+    <labelframe text="DISPLAY HISTORY" font='("Helvetica", 10, "bold")'
+                padx="8" pady="5">
+      <hbox>
+        <boxexpand expand="no"/>
+        <boxfill fill="none"/>
+        <boxanchor anchor="w"/>
+        <label text='"Clear the orange SEEN indicators only"'
+               font='("Helvetica", 10)' width="38" anchor='"w"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <button halpin='"clear-display-latches"' text='"CLEAR SEEN"'
+                font='("Helvetica", 10, "bold")' padx="10" pady="2"/>
+      </hbox>
+    </labelframe>
+
+    <labelframe text="PENDANT STATUS" font='("Helvetica", 10, "bold")'
+                padx="8" pady="5">
+      <table flexible_columns="[1,2,3,4,5,6,7,8]">
+        <tablesticky sticky="w"/>
+        <tablerow/>
+        <label text='"Connected"' font='("Helvetica", 10)'
+               width="10" anchor='"w"'/>
+        <led halpin='"pendant-connected"' size="16"
+             on_color='"green"' off_color='"red"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"Link"' font='("Helvetica", 10)'
+               width="6" anchor='"w"'/>
+        <led halpin='"pendant-link-healthy"' size="16"
+             on_color='"green"' off_color='"red"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"Serial data"' font='("Helvetica", 10)'
+               width="11" anchor='"w"'/>
+        <led halpin='"pendant-link-fault"' size="16"
+             on_color='"red"' off_color='"green"'/>
+        <tablerow/>
+        <label text='"Wheel decoder"' font='("Helvetica", 10)'
+               width="14" anchor='"w"'/>
+        <led halpin='"pendant-quadrature-fault"' size="16"
+             on_color='"red"' off_color='"green"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"E-stop"' font='("Helvetica", 10)'
+               width="7" anchor='"w"'/>
+        <led halpin='"pendant-estop"' size="16"
+             on_color='"red"' off_color='"green"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"Deadman"' font='("Helvetica", 10)'
+               width="9" anchor='"w"'/>
+        <led halpin='"pendant-deadman"' size="16"
+             on_color='"deepskyblue"' off_color='"gray35"'/>
+        <tablerow/>
+        <label text='"Selectors decoded"' font='("Helvetica", 10)'
+               width="17" anchor='"w"'/>
+        <led halpin='"pendant-selector-valid"' size="16"
+             on_color='"green"' off_color='"red"'/>
+      </table>
+    </labelframe>
+
+    <labelframe text="PENDANT SELECTORS" font='("Helvetica", 10, "bold")'
+                padx="8" pady="5">
+      <table flexible_columns="[1,2,3,4,5,6,7,8,9,10,11,12,13,14,15,16,17,18,19]">
+        <tablesticky sticky="w"/>
+        <tablerow/>
+        <label text='"Axis"' font='("Helvetica", 10, "bold")'
+               width="7" anchor='"w"'/>
+        <label text='"X"' font='("Helvetica", 10)' width="5" anchor='"w"'/>
+        <led halpin='"pendant-axis-x"' size="16"
+             on_color='"deepskyblue"' off_color='"gray35"'/>
+        <label text='"   "' font='("Helvetica", 10)' width="3" anchor='"w"'/>
+        <label text='"Y"' font='("Helvetica", 10)' width="5" anchor='"w"'/>
+        <led halpin='"pendant-axis-y"' size="16"
+             on_color='"deepskyblue"' off_color='"gray35"'/>
+        <label text='"   "' font='("Helvetica", 10)' width="3" anchor='"w"'/>
+        <label text='"Z"' font='("Helvetica", 10)' width="5" anchor='"w"'/>
+        <led halpin='"pendant-axis-z"' size="16"
+             on_color='"deepskyblue"' off_color='"gray35"'/>
+        <label text='"   "' font='("Helvetica", 10)' width="3" anchor='"w"'/>
+        <label text='"4"' font='("Helvetica", 10)' width="5" anchor='"w"'/>
+        <led halpin='"pendant-axis-4"' size="16"
+             on_color='"deepskyblue"' off_color='"gray35"'/>
+        <label text='"   "' font='("Helvetica", 10)' width="3" anchor='"w"'/>
+        <label text='"5"' font='("Helvetica", 10)' width="5" anchor='"w"'/>
+        <led halpin='"pendant-axis-5"' size="16"
+             on_color='"deepskyblue"' off_color='"gray35"'/>
+        <label text='"   "' font='("Helvetica", 10)' width="3" anchor='"w"'/>
+        <label text='"OFF"' font='("Helvetica", 10)' width="5" anchor='"w"'/>
+        <led halpin='"pendant-axis-off"' size="16"
+             on_color='"yellow"' off_color='"gray35"'/>
+        <tablerow/>
+        <label text='"Scale"' font='("Helvetica", 10, "bold")'
+               width="7" anchor='"w"'/>
+        <label text='"X1"' font='("Helvetica", 10)' width="5" anchor='"w"'/>
+        <led halpin='"pendant-multiplier-x1"' size="16"
+             on_color='"deepskyblue"' off_color='"gray35"'/>
+        <label text='"   "' font='("Helvetica", 10)' width="3" anchor='"w"'/>
+        <label text='"X10"' font='("Helvetica", 10)' width="5" anchor='"w"'/>
+        <led halpin='"pendant-multiplier-x10"' size="16"
+             on_color='"deepskyblue"' off_color='"gray35"'/>
+        <label text='"   "' font='("Helvetica", 10)' width="3" anchor='"w"'/>
+        <label text='"X100"' font='("Helvetica", 10)' width="5" anchor='"w"'/>
+        <led halpin='"pendant-multiplier-x100"' size="16"
+             on_color='"deepskyblue"' off_color='"gray35"'/>
+      </table>
+    </labelframe>
+  </vbox>
+</pyvcp>

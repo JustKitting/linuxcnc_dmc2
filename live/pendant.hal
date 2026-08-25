@@ -1,0 +1,128 @@
+# The two userspace processes below are bounded adapters only: one parses the
+# Nano serial protocol and one reads LinuxCNC's native status channel. The
+# compiled dmc2-pendant-control realtime component owns all policy and emits
+# only native HALUI/motion requests from the servo thread.
+
+loadusr -Wn dmc2-pendant /home/kit/linuxcnc_dmc2/native/bin/dmc2-serial-bridge --component dmc2-pendant --port [DMC2]PENDANT_PORT --baud [DMC2]PENDANT_BAUD --packet-timeout-ms [DMC2]PENDANT_TIMEOUT_MS
+loadusr -Wn dmc2-task-monitor /home/kit/linuxcnc_dmc2/native/bin/dmc2-task-monitor --component dmc2-task-monitor
+
+net dmc2-pendant-connected dmc2-pendant.connected => dmc2-pendant-control.connected
+net dmc2-pendant-snapshot-generation dmc2-pendant.snapshot-generation => dmc2-pendant-control.snapshot-generation
+net dmc2-pendant-link-fault dmc2-pendant.serial-fault => dmc2-pendant-control.serial-fault
+net dmc2-pendant-quadrature-fault dmc2-pendant.quadrature-fault => dmc2-pendant-control.quadrature-fault
+net dmc2-pendant-estop dmc2-pendant.estop-pressed => dmc2-pendant-control.estop-pressed
+net dmc2-pendant-deadman dmc2-pendant.deadman-held => dmc2-pendant-control.deadman-held
+net dmc2-pendant-selector-valid dmc2-pendant.selector-valid => dmc2-pendant-control.selector-valid
+net dmc2-pendant-axis-code dmc2-pendant.axis-code => dmc2-pendant-control.axis-code
+net dmc2-pendant-multiplier-code dmc2-pendant.multiplier-code => dmc2-pendant-control.multiplier-code
+net dmc2-pendant-latest-detent dmc2-pendant.latest-detent => dmc2-pendant-control.latest-detent
+net dmc2-pendant-detent-count dmc2-pendant.detent-count => dmc2-pendant-control.detent-count
+net dmc2-pendant-transition-count dmc2-pendant.transition-count => dmc2-pendant-control.transition-count
+net dmc2-pendant-quadrature-errors dmc2-pendant.quadrature-errors => dmc2-pendant-control.quadrature-errors
+net dmc2-pendant-sequence dmc2-pendant.sequence => dmc2-pendant-control.sequence
+net dmc2-pendant-milliseconds dmc2-pendant.milliseconds => dmc2-pendant-control.milliseconds
+
+# Coherent native task status. The monitor publishes odd/even generations;
+# the realtime component accepts only a complete, matching even snapshot and
+# independently ages the real milltask heartbeat.
+net dmc2-task-snapshot-generation dmc2-task-monitor.snapshot-generation => dmc2-pendant-control.task-snapshot-generation
+net dmc2-task-monitor-connected dmc2-task-monitor.connected => dmc2-pendant-control.task-monitor-connected
+net dmc2-task-monitor-fault dmc2-task-monitor.fault => dmc2-pendant-control.task-monitor-fault
+net dmc2-task-heartbeat dmc2-task-monitor.task-heartbeat => dmc2-pendant-control.task-heartbeat
+net dmc2-task-machine-on dmc2-task-monitor.machine-on => dmc2-pendant-control.machine-on
+net dmc2-task-estopped dmc2-task-monitor.estopped => dmc2-pendant-control.estopped
+net dmc2-task-manual-mode dmc2-task-monitor.manual-mode => dmc2-pendant-control.manual-mode
+net dmc2-task-joint-mode dmc2-task-monitor.joint-mode => dmc2-pendant-control.joint-mode
+net dmc2-task-teleop-mode dmc2-task-monitor.teleop-mode => dmc2-pendant-control.teleop-mode
+net dmc2-task-interp-idle dmc2-task-monitor.interp-idle => dmc2-pendant-control.interp-idle
+net dmc2-task-joint-0-homed dmc2-task-monitor.joint-0-homed => dmc2-pendant-control.joint-0-homed
+net dmc2-task-joint-1-homed dmc2-task-monitor.joint-1-homed => dmc2-pendant-control.joint-1-homed
+net dmc2-task-joint-2-homed dmc2-task-monitor.joint-2-homed => dmc2-pendant-control.joint-2-homed
+net dmc2-task-joint-0-homing dmc2-task-monitor.joint-0-homing => dmc2-pendant-control.joint-0-homing
+net dmc2-task-joint-1-homing dmc2-task-monitor.joint-1-homing => dmc2-pendant-control.joint-1-homing
+net dmc2-task-joint-2-homing dmc2-task-monitor.joint-2-homing => dmc2-pendant-control.joint-2-homing
+net dmc2-task-axis-0-stopped dmc2-task-monitor.axis-0-stopped => dmc2-pendant-control.axis-0-stopped
+net dmc2-task-axis-1-stopped dmc2-task-monitor.axis-1-stopped => dmc2-pendant-control.axis-1-stopped
+net dmc2-task-axis-2-stopped dmc2-task-monitor.axis-2-stopped => dmc2-pendant-control.axis-2-stopped
+
+# Generated counts preserve the confirmed physical motor numbering.
+net dmc2-y-count-s32 => dmc2-pendant-control.motor-0-count
+net dmc2-x-count-s32 => dmc2-pendant-control.motor-1-count
+net dmc2-z-count-s32 => dmc2-pendant-control.motor-2-count
+net dmc2-y-stepgen-position-feedback => dmc2-pendant-control.motor-0-position-feedback
+net dmc2-x-stepgen-position-feedback => dmc2-pendant-control.motor-1-position-feedback
+net dmc2-z-stepgen-position-feedback => dmc2-pendant-control.motor-2-position-feedback
+
+# Raw and dedicated realtime-latched limits use motor order 0=Y, 1=X, 2=Z.
+net dmc2-limit-y-live => dmc2-pendant-control.motor-0-limit-raw
+net dmc2-limit-x-live => dmc2-pendant-control.motor-1-limit-raw
+net dmc2-limit-z-live => dmc2-pendant-control.motor-2-limit-raw
+net dmc2-safety-limit-y-live => dmc2-pendant-control.motor-0-limit-latched
+net dmc2-safety-limit-x-live => dmc2-pendant-control.motor-1-limit-latched
+net dmc2-safety-limit-z-live => dmc2-pendant-control.motor-2-limit-latched
+net dmc2-safety-limit-y-reset dmc2-pendant-control.motor-0-limit-reset
+net dmc2-safety-limit-x-reset dmc2-pendant-control.motor-1-limit-reset
+net dmc2-safety-limit-z-reset dmc2-pendant-control.motor-2-limit-reset
+
+# During startup only, the controller shares HostMot2's bidirectional
+# watchdog status signal. It clears a stale bite before interpreting the
+# pulled-high Mesa inputs; a watchdog bite after startup remains a fault.
+net dmc2-mesa-watchdog-fault dmc2-pendant-control.mesa-watchdog-has-bit
+net dmc2-servo-startup-ready => dmc2-pendant-control.servo-thread-ready
+net dmc2-mesa-packet-error => dmc2-pendant-control.mesa-packet-error
+net dmc2-mesa-packet-error-total hm2_7i95.0.packet-error-total => dmc2-pendant-control.mesa-packet-error-total
+net dmc2-mesa-packet-error-exceeded hm2_7i95.0.packet-error-exceeded => dmc2-pendant-control.mesa-packet-error-exceeded
+
+# Exact old-controller realtime gate commands. These pins describe only the
+# already-attributed active pendant motion; all are false while stopped.
+net dmc2-controller-motor-0-command-enable dmc2-pendant-control.motor-0-command-enable
+net dmc2-controller-motor-1-command-enable dmc2-pendant-control.motor-1-command-enable
+net dmc2-controller-motor-2-command-enable dmc2-pendant-control.motor-2-command-enable
+net dmc2-controller-motor-0-toward-limit dmc2-pendant-control.motor-0-toward-limit
+net dmc2-controller-motor-1-toward-limit dmc2-pendant-control.motor-1-toward-limit
+net dmc2-controller-motor-2-toward-limit dmc2-pendant-control.motor-2-toward-limit
+
+# Supervisor liveness and E-stop permission feed the realtime chain in
+# machine.hal. Removing or freezing this process therefore fails closed.
+net dmc2-controller-external-enable dmc2-pendant-control.external-enable
+net dmc2-controller-watchdog-enable dmc2-pendant-control.watchdog-enable
+net dmc2-controller-heartbeat dmc2-pendant-control.heartbeat
+net dmc2-controller-watchdog-ok => dmc2-pendant-control.software-watchdog-ok
+
+# Named status signals are consumed by the post-GUI panel.
+net dmc2-controller-available dmc2-pendant-control.control-available
+net dmc2-controller-ready dmc2-pendant-control.control-ready
+net dmc2-controller-fault dmc2-pendant-control.fault
+net dmc2-controller-recovery dmc2-pendant-control.recovery-active
+net dmc2-controller-jog-active dmc2-pendant-control.jog-active
+net dmc2-controller-bounce-active dmc2-pendant-control.bounce-active
+
+# State requests are published as HAL levels so HALUI, rather than the
+# heartbeat-owning supervisor loop, performs the potentially blocking NML
+# calls.  The supervisor clears each request only after status acknowledges it.
+net dmc2-controller-estop-reset-request dmc2-pendant-control.estop-reset-request
+net dmc2-controller-machine-on-request dmc2-pendant-control.machine-on-request
+
+# Finite increments use LinuxCNC's official HALUI interfaces. Axis pins are
+# used after all joints are homed; joint pins are used in free/joint mode.
+net dmc2-axis-x-increment-plus dmc2-pendant-control.axis-0-increment-plus => halui.axis.x.increment-plus
+net dmc2-axis-y-increment-plus dmc2-pendant-control.axis-1-increment-plus => halui.axis.y.increment-plus
+net dmc2-axis-z-increment-plus dmc2-pendant-control.axis-2-increment-plus => halui.axis.z.increment-plus
+net dmc2-axis-x-increment-minus dmc2-pendant-control.axis-0-increment-minus => halui.axis.x.increment-minus
+net dmc2-axis-y-increment-minus dmc2-pendant-control.axis-1-increment-minus => halui.axis.y.increment-minus
+net dmc2-axis-z-increment-minus dmc2-pendant-control.axis-2-increment-minus => halui.axis.z.increment-minus
+net dmc2-axis-x-increment dmc2-pendant-control.axis-0-increment => halui.axis.x.increment
+net dmc2-axis-y-increment dmc2-pendant-control.axis-1-increment => halui.axis.y.increment
+net dmc2-axis-z-increment dmc2-pendant-control.axis-2-increment => halui.axis.z.increment
+net dmc2-axis-jog-speed dmc2-pendant-control.axis-jog-speed => halui.axis.jog-speed
+
+net dmc2-joint-0-increment-plus dmc2-pendant-control.joint-0-increment-plus => halui.joint.0.increment-plus
+net dmc2-joint-1-increment-plus dmc2-pendant-control.joint-1-increment-plus => halui.joint.1.increment-plus
+net dmc2-joint-2-increment-plus dmc2-pendant-control.joint-2-increment-plus => halui.joint.2.increment-plus
+net dmc2-joint-0-increment-minus dmc2-pendant-control.joint-0-increment-minus => halui.joint.0.increment-minus
+net dmc2-joint-1-increment-minus dmc2-pendant-control.joint-1-increment-minus => halui.joint.1.increment-minus
+net dmc2-joint-2-increment-minus dmc2-pendant-control.joint-2-increment-minus => halui.joint.2.increment-minus
+net dmc2-joint-0-increment dmc2-pendant-control.joint-0-increment => halui.joint.0.increment
+net dmc2-joint-1-increment dmc2-pendant-control.joint-1-increment => halui.joint.1.increment
+net dmc2-joint-2-increment dmc2-pendant-control.joint-2-increment => halui.joint.2.increment
+net dmc2-joint-jog-speed dmc2-pendant-control.joint-jog-speed => halui.joint.jog-speed

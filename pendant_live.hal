@@ -1,0 +1,6 @@
+# Legacy Nano status-only fragment, retained for the offline monitor baseline.
+# The accepted live profile uses live/pendant.hal instead.
+#
+# This userspace component owns only the Nano USB serial port. It does not load
+# hm2_eth, address the Mesa card, or expose any machine-command output.
+loadusr -Wn dmc2-pendant python3 ./nano_hal_bridge.py --component dmc2-pendant --port [DMC2]PENDANT_PORT --baud [DMC2]PENDANT_BAUD --packet-timeout-ms [DMC2]PENDANT_TIMEOUT_MS

@@ -1,0 +1,83 @@
+# AXIS/PyVCP wiring. This runs only after the PyVCP component exists.
+
+# LinuxCNC-owned pendant motion supervisor.
+net dmc2-pendant-mode-enabled axisui.pendant-mode-enabled => dmc2-pendant-control.pendant-mode-enabled
+net dmc2-controller-available     => axisui.controller-available
+net dmc2-position-known           dmc2-pendant-control.position-known   => pyvcp.position-known
+net dmc2-position-unknown         dmc2-pendant-control.position-unknown => pyvcp.position-unknown
+net dmc2-controller-ready         => axisui.controller-ready pyvcp.controller-ready
+net dmc2-controller-fault         => pyvcp.controller-fault
+net dmc2-controller-recovery      => pyvcp.controller-recovery
+net dmc2-controller-jog-active    => pyvcp.controller-jog-active
+net dmc2-controller-bounce-active => pyvcp.controller-bounce-active
+
+# HALUI performs the NML state changes outside the controller's 100 ms
+# heartbeat loop.  Both requests are held until LinuxCNC status acknowledges
+# the corresponding state and are forced low by every fail-closed path.
+net dmc2-controller-estop-reset-request => halui.estop.reset
+net dmc2-controller-machine-on-request  => halui.machine.on
+
+# Momentary operator request for LinuxCNC's configured HOME_SEQUENCE order:
+# joint 0 / X, then joint 1 / Y, then joint 2 / Z.
+net dmc2-home-all-request pyvcp.home-all => halui.home-all
+
+# LinuxCNC machine-coordinate feedback (units are supplied by the final INI).
+net dmc2-x-position halui.axis.x.pos-feedback => pyvcp.x-position
+net dmc2-y-position halui.axis.y.pos-feedback => pyvcp.y-position
+net dmc2-z-position halui.axis.z.pos-feedback => pyvcp.z-position
+
+# Mesa-generated pulse counts, converted to floats for PyVCP number widgets.
+net dmc2-x-generated-pulses => pyvcp.x-generated-pulses
+net dmc2-y-generated-pulses => pyvcp.y-generated-pulses
+net dmc2-z-generated-pulses => pyvcp.z-generated-pulses
+
+# Realtime live and display-only latched machine inputs.
+net dmc2-limit-x-live    => pyvcp.limit-x-live
+net dmc2-limit-y-live    => pyvcp.limit-y-live
+net dmc2-limit-z-live    => pyvcp.limit-z-live
+net dmc2-limit-x-latched => pyvcp.limit-x-latched
+net dmc2-limit-y-latched => pyvcp.limit-y-latched
+net dmc2-limit-z-latched => pyvcp.limit-z-latched
+net dmc2-puck-live       => pyvcp.puck-live
+net dmc2-probe-live      => pyvcp.probe-live
+net dmc2-puck-latched    => pyvcp.puck-latched
+net dmc2-probe-latched   => pyvcp.probe-latched
+net dmc2-probe-power-enabled => pyvcp.probe-power-enabled
+
+# This no-motion connectivity test is available while unhomed. START opens
+# the already configured OUT5 power path for no more than 300 seconds. A real
+# IN0 contact or STOP resets the realtime window immediately.
+net dmc2-puck-test-start pyvcp.puck-test-start => dmc2-puck-test-window.in
+net dmc2-puck-test-stop pyvcp.puck-test-stop => dmc2-puck-test-reset-or.in1
+net dmc2-puck-test-active => pyvcp.puck-test-active
+net dmc2-puck-test-time-left => pyvcp.puck-test-time-left
+
+# The separate G-code source remains false while LinuxCNC is idle or aborted;
+# the finite panel-test source above intentionally remains available unhomed.
+net dmc2-probe-program-running halui.program.is-running => dmc2-probe-power-gate.in1
+
+# Clearing these five latches has no effect on a safety latch or motion state.
+net dmc2-display-latch-reset pyvcp.clear-display-latches => dmc2-display-limit-x.reset dmc2-display-limit-y.reset dmc2-display-limit-z.reset dmc2-display-puck.reset dmc2-display-probe.reset
+
+# Nano link and selector status. No pin below is connected to motion here.
+net dmc2-pendant-connected        dmc2-pendant.connected        => pyvcp.pendant-connected
+net dmc2-pendant-link-fault       dmc2-pendant.serial-fault     => pyvcp.pendant-link-fault
+net dmc2-pendant-quadrature-fault dmc2-pendant.quadrature-fault => pyvcp.pendant-quadrature-fault
+net dmc2-pendant-link-healthy     dmc2-pendant.link-healthy     => pyvcp.pendant-link-healthy
+net dmc2-pendant-estop            dmc2-pendant.estop-pressed     => pyvcp.pendant-estop
+net dmc2-pendant-deadman          dmc2-pendant.deadman-held      => pyvcp.pendant-deadman
+net dmc2-pendant-selector-valid   dmc2-pendant.selector-valid    => pyvcp.pendant-selector-valid
+net dmc2-pendant-axis-x           dmc2-pendant.axis-x            => pyvcp.pendant-axis-x
+net dmc2-pendant-axis-y           dmc2-pendant.axis-y            => pyvcp.pendant-axis-y
+net dmc2-pendant-axis-z           dmc2-pendant.axis-z            => pyvcp.pendant-axis-z
+net dmc2-pendant-axis-4           dmc2-pendant.axis-4            => pyvcp.pendant-axis-4
+net dmc2-pendant-axis-5           dmc2-pendant.axis-5            => pyvcp.pendant-axis-5
+net dmc2-pendant-axis-off         dmc2-pendant.axis-off          => pyvcp.pendant-axis-off
+net dmc2-pendant-multiplier-x1    dmc2-pendant.multiplier-x1     => pyvcp.pendant-multiplier-x1
+net dmc2-pendant-multiplier-x10   dmc2-pendant.multiplier-x10    => pyvcp.pendant-multiplier-x10
+net dmc2-pendant-multiplier-x100  dmc2-pendant.multiplier-x100   => pyvcp.pendant-multiplier-x100
+
+# This is deliberately the final post-GUI operation. The controller keeps its
+# external gate closed and its heartbeat watchdog in startup-rearm mode until
+# AXIS/PyVCP wiring has completed.
+setp dmc2-pendant-control.ui-ready true

@@ -1,0 +1,32 @@
+# OFFLINE SIMULATION ONLY. These unwritten signals can be toggled with
+# `halcmd sets SIGNAL true/false` while the simulator is running.
+newsig dmc2-limit-x-live bit
+newsig dmc2-limit-y-live bit
+newsig dmc2-limit-z-live bit
+newsig dmc2-puck-live bit
+newsig dmc2-probe-live bit
+newsig dmc2-x-generated-pulses float
+newsig dmc2-y-generated-pulses float
+newsig dmc2-z-generated-pulses float
+newsig dmc2-controller-ready bit
+newsig dmc2-controller-fault bit
+newsig dmc2-controller-recovery bit
+newsig dmc2-controller-jog-active bit
+newsig dmc2-controller-bounce-active bit
+
+sets dmc2-limit-x-live false
+sets dmc2-limit-y-live false
+sets dmc2-limit-z-live false
+sets dmc2-puck-live false
+sets dmc2-probe-live false
+sets dmc2-x-generated-pulses 0
+sets dmc2-y-generated-pulses 0
+sets dmc2-z-generated-pulses 0
+sets dmc2-controller-ready false
+sets dmc2-controller-fault false
+sets dmc2-controller-recovery false
+sets dmc2-controller-jog-active false
+sets dmc2-controller-bounce-active false
+
+# Exercise the same unhomed panel-test reset path without any hardware output.
+net dmc2-puck-live => dmc2-puck-test-reset-or.in0
