@@ -11,17 +11,25 @@ use super::registration::create_hal;
 pub(in crate::application) struct HalPublisher {
     component_id: c_int,
     pins: *mut HalPins,
+    publication_generation: AtomicU32,
 }
 
 impl HalPublisher {
     pub(in crate::application) fn new(component: &str) -> Result<Self, String> {
         let (component_id, pins) = unsafe { create_hal(component)? };
-        Ok(Self { component_id, pins })
+        Ok(Self {
+            component_id,
+            pins,
+            publication_generation: AtomicU32::new(0),
+        })
     }
 
     pub(in crate::application) fn publish(&self, snapshot: Snapshot, packet_age_ms: f64) {
         let pins = unsafe { &*self.pins };
-        let generation = (snapshot.sequence & 0x7fff_ffff) << 1;
+        let generation = self
+            .publication_generation
+            .fetch_add(2, Ordering::Relaxed)
+            .wrapping_add(2);
         let generation_pin = unsafe { &*(pins.snapshot_generation.cast::<AtomicU32>()) };
         unsafe {
             generation_pin.store(generation | 1, Ordering::SeqCst);
@@ -67,6 +75,11 @@ impl HalPublisher {
             write(pins.packet_age_ms, packet_age_ms);
             generation_pin.store(generation, Ordering::SeqCst);
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_pins(&self) -> &HalPins {
+        unsafe { &*self.pins }
     }
 }
 

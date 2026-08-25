@@ -5,6 +5,14 @@ use std::sync::Mutex;
 use std::vec::Vec;
 
 use dmc2_hal_sys as hal;
+use dmc2_linuxcnc_interface::{
+    GENERATED_CODE_COUNT, HEADER_SOURCE_FNV64, TASK_INTERP, TASK_MODE, TRAJ_MODE,
+};
+
+use crate::application::diagnostic_state::DiagnosticState;
+use crate::application::nml::required_nml_error;
+use crate::diagnostics;
+use crate::snapshot::{NativeSnapshot, SNAPSHOT_ABI_VERSION};
 
 use super::publisher::HalPublisher;
 use super::registration::create_hal;
@@ -17,6 +25,7 @@ struct Arena([u8; 32_768]);
 
 static mut ARENA: Arena = Arena([0; 32_768]);
 static mut ARENA_OFFSET: usize = 0;
+static TEST_LOCK: Mutex<()> = Mutex::new(());
 static PLAN: Mutex<Plan> = Mutex::new(Plan::success());
 static CALLS: Mutex<Calls> = Mutex::new(Calls::new());
 static PIN_CALLS: Mutex<Vec<PinCall>> = Mutex::new(Vec::new());
@@ -218,8 +227,24 @@ extern "C" fn hal_pin_u32_new(
     unsafe { register(name, direction, pointer, component_id, PinKind::U32) }
 }
 
+unsafe fn value<T: Copy>(pointer: *mut T) -> T {
+    unsafe { ptr::read_volatile(pointer) }
+}
+
+fn code(domain: dmc2_linuxcnc_interface::CodeDomain, name: &str) -> i32 {
+    domain
+        .codes
+        .iter()
+        .find(|entry| entry.name == name)
+        .expect("required LinuxCNC code exists")
+        .code
+        .try_into()
+        .expect("required LinuxCNC code fits i32")
+}
+
 #[test]
 fn every_hal_registration_and_lifecycle_failure_is_exact_and_cleaned_up() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     for init_result in [-19, 0] {
         reset();
         PLAN.lock().expect("plan lock").init_result = init_result;
@@ -313,4 +338,176 @@ fn every_hal_registration_and_lifecycle_failure_is_exact_and_cleaned_up() {
         drop(publisher);
     }
     assert_eq!(CALLS.lock().expect("call lock").exit, 1);
+}
+
+#[test]
+fn every_hal_output_has_the_exact_status_and_diagnostic_value() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    reset();
+    let publisher = HalPublisher::new("task-test").unwrap();
+    let pins = publisher.test_pins();
+    let mut snapshot = NativeSnapshot::safe();
+    snapshot.task.heartbeat = 123_456;
+    snapshot.task.mode = code(TASK_MODE, "EMC_TASK_MODE_MANUAL");
+    snapshot.task.interp_state = code(TASK_INTERP, "EMC_TASK_INTERP_IDLE");
+    snapshot.trajectory.enabled = 1;
+    snapshot.trajectory.mode = code(TRAJ_MODE, "EMC_TRAJ_MODE_TELEOP");
+    snapshot.io.aux.estop = 0;
+    for index in 0..3 {
+        snapshot.joints[index].homed = u32::from(index != 1);
+        snapshot.joints[index].homing = u32::from(index == 1);
+        snapshot.axes[index].stopped = u32::from(index != 2);
+    }
+    let nml_error = i32::MAX;
+    let report = diagnostics::disconnected(nml_error);
+    let mut diagnostic_state = DiagnosticState::new();
+
+    publisher.publish(
+        snapshot,
+        true,
+        false,
+        nml_error,
+        &report,
+        &mut diagnostic_state,
+    );
+
+    unsafe {
+        assert_eq!(value(pins.snapshot_generation), 2);
+        assert!(value(pins.connected));
+        assert!(!value(pins.fault));
+        assert_eq!(value(pins.task_heartbeat), 123_456);
+        assert_eq!(value(pins.publications), 1);
+        assert_eq!(value(pins.poll_errors), 0);
+        assert_eq!(value(pins.nml_error_code), nml_error);
+        assert!(!value(pins.nml_error_known));
+        assert_eq!(value(pins.linuxcnc_error_active), report.error_active());
+        assert_eq!(value(pins.linuxcnc_warning_active), report.warning_active());
+        assert_eq!(
+            value(pins.unknown_code_active),
+            report.unknown_code_active()
+        );
+        assert_eq!(
+            value(pins.active_error_mask_low),
+            report.active_error_mask as u32
+        );
+        assert_eq!(
+            value(pins.active_error_mask_high),
+            (report.active_error_mask >> 32) as u32
+        );
+        assert_eq!(
+            value(pins.active_warning_mask_low),
+            report.active_warning_mask as u32
+        );
+        assert_eq!(
+            value(pins.active_warning_mask_high),
+            (report.active_warning_mask >> 32) as u32
+        );
+        assert_eq!(
+            value(pins.latched_error_mask_low),
+            diagnostic_state.latched_error_mask as u32
+        );
+        assert_eq!(
+            value(pins.latched_error_mask_high),
+            (diagnostic_state.latched_error_mask >> 32) as u32
+        );
+        assert_eq!(
+            value(pins.latched_warning_mask_low),
+            diagnostic_state.latched_warning_mask as u32
+        );
+        assert_eq!(
+            value(pins.latched_warning_mask_high),
+            (diagnostic_state.latched_warning_mask >> 32) as u32
+        );
+        assert_eq!(
+            value(pins.unknown_domain_mask_low),
+            report.unknown_domain_mask as u32
+        );
+        assert_eq!(
+            value(pins.unknown_domain_mask_high),
+            (report.unknown_domain_mask >> 32) as u32
+        );
+        assert_eq!(value(pins.diagnostic_count), report.issues.len() as u32);
+        assert_eq!(value(pins.unknown_code_count), report.unknown_code_count());
+        assert_eq!(
+            value(pins.diagnostic_transitions),
+            diagnostic_state.transitions
+        );
+        assert_eq!(
+            value(pins.latest_code_domain),
+            diagnostic_state.latest_code_domain
+        );
+        assert_eq!(
+            value(pins.latest_code_low),
+            diagnostic_state.latest_code_low
+        );
+        assert_eq!(
+            value(pins.latest_code_high),
+            diagnostic_state.latest_code_high
+        );
+        assert_eq!(
+            value(pins.latest_severity),
+            diagnostic_state.latest_severity
+        );
+        assert_eq!(value(pins.latest_action), diagnostic_state.latest_action);
+        assert!(!value(pins.clear_latched));
+        assert_eq!(value(pins.catalog_code_count), GENERATED_CODE_COUNT as u32);
+        assert_eq!(
+            value(pins.catalog_fingerprint_low),
+            HEADER_SOURCE_FNV64 as u32
+        );
+        assert_eq!(
+            value(pins.catalog_fingerprint_high),
+            (HEADER_SOURCE_FNV64 >> 32) as u32
+        );
+        assert_eq!(value(pins.snapshot_abi_version), SNAPSHOT_ABI_VERSION);
+        assert_eq!(
+            value(pins.snapshot_struct_size),
+            core::mem::size_of::<NativeSnapshot>() as u32
+        );
+        assert!(value(pins.machine_on));
+        assert!(!value(pins.estopped));
+        assert!(value(pins.manual_mode));
+        assert!(!value(pins.joint_mode));
+        assert!(value(pins.teleop_mode));
+        assert!(value(pins.interp_idle));
+        assert_eq!(
+            pins.homed.map(|pointer| value(pointer)),
+            [true, false, true]
+        );
+        assert_eq!(
+            pins.homing.map(|pointer| value(pointer)),
+            [false, true, false]
+        );
+        assert_eq!(
+            pins.axis_stopped.map(|pointer| value(pointer)),
+            [true, true, false]
+        );
+    }
+
+    publisher.publish(
+        snapshot,
+        true,
+        false,
+        required_nml_error("NML_NO_ERROR"),
+        &diagnostics::DiagnosticReport::default(),
+        &mut diagnostic_state,
+    );
+    assert_eq!(unsafe { value(pins.snapshot_generation) }, 4);
+    assert_eq!(unsafe { value(pins.publications) }, 2);
+
+    unsafe { ptr::write_volatile(pins.publications, u32::MAX) };
+    publisher.publish(
+        snapshot,
+        true,
+        false,
+        required_nml_error("NML_NO_ERROR"),
+        &diagnostics::DiagnosticReport::default(),
+        &mut diagnostic_state,
+    );
+    assert_eq!(unsafe { value(pins.snapshot_generation) }, 6);
+    assert_eq!(unsafe { value(pins.publications) }, 3);
+
+    unsafe { ptr::write_volatile(pins.poll_errors, u32::MAX) };
+    publisher.increment_poll_errors();
+    assert_eq!(unsafe { value(pins.poll_errors) }, 0);
 }

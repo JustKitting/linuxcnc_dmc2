@@ -5,6 +5,7 @@ use std::sync::Mutex;
 use std::vec::Vec;
 
 use dmc2_hal_sys as hal;
+use dmc2_serial_bridge::{AxisCode, MultiplierCode, Snapshot};
 
 use super::publisher::HalPublisher;
 use super::registration::create_hal;
@@ -17,6 +18,7 @@ struct Arena([u8; 16_384]);
 
 static mut ARENA: Arena = Arena([0; 16_384]);
 static mut ARENA_OFFSET: usize = 0;
+static TEST_LOCK: Mutex<()> = Mutex::new(());
 static PLAN: Mutex<Plan> = Mutex::new(Plan::success());
 static CALLS: Mutex<Calls> = Mutex::new(Calls::new());
 static PIN_CALLS: Mutex<Vec<PinCall>> = Mutex::new(Vec::new());
@@ -223,8 +225,13 @@ extern "C" fn hal_pin_float_new(
     unsafe { register(name, direction, pointer, component_id, PinKind::Float) }
 }
 
+unsafe fn value<T: Copy>(pointer: *mut T) -> T {
+    unsafe { ptr::read_volatile(pointer) }
+}
+
 #[test]
 fn every_hal_registration_and_lifecycle_failure_is_exact_and_cleaned_up() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
     for init_result in [-19, 0] {
         reset();
         PLAN.lock().expect("plan lock").init_result = init_result;
@@ -317,4 +324,78 @@ fn every_hal_registration_and_lifecycle_failure_is_exact_and_cleaned_up() {
         drop(publisher);
     }
     assert_eq!(CALLS.lock().expect("call lock").exit, 1);
+}
+
+#[test]
+fn every_hal_output_has_the_exact_snapshot_value_and_local_generation() {
+    let _guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
+    reset();
+    let publisher = HalPublisher::new("serial-test").unwrap();
+    let snapshot = Snapshot {
+        connected: true,
+        serial_fault: false,
+        quadrature_fault: true,
+        link_healthy: false,
+        heartbeat: true,
+        estop_pressed: false,
+        deadman_held: true,
+        selector_valid: true,
+        axis: AxisCode::Y,
+        multiplier: MultiplierCode::X100,
+        latest_detent: -1,
+        detent_count: -123_456,
+        transition_count: 654_321,
+        quadrature_errors: 7,
+        sequence: 99,
+        milliseconds: 1_234_567,
+        protocol_errors: 8,
+        dropped_packets: 9,
+        timeouts: 10,
+    };
+
+    publisher.publish(snapshot, 12.5);
+    let pins = publisher.test_pins();
+    unsafe {
+        assert_eq!(value(pins.snapshot_generation), 2);
+        assert!(value(pins.connected));
+        assert!(!value(pins.serial_fault));
+        assert!(value(pins.quadrature_fault));
+        assert!(!value(pins.link_healthy));
+        assert!(value(pins.heartbeat));
+        assert!(!value(pins.estop_pressed));
+        assert!(value(pins.deadman_held));
+        assert!(value(pins.selector_valid));
+        assert_eq!(
+            pins.axis.map(|pointer| value(pointer)),
+            [false, true, false, false, false, false, false]
+        );
+        assert_eq!(
+            pins.multiplier.map(|pointer| value(pointer)),
+            [false, false, true, false, false]
+        );
+        assert_eq!(value(pins.axis_code), AxisCode::Y as i32);
+        assert_eq!(value(pins.multiplier_code), MultiplierCode::X100 as i32);
+        assert_eq!(value(pins.latest_detent), -1);
+        assert_eq!(value(pins.detent_count), -123_456);
+        assert_eq!(value(pins.transition_count), 654_321);
+        assert_eq!(value(pins.quadrature_errors), 7);
+        assert_eq!(value(pins.sequence), 99);
+        assert_eq!(value(pins.milliseconds), 1_234_567);
+        assert_eq!(value(pins.protocol_errors), 8);
+        assert_eq!(value(pins.dropped_packets), 9);
+        assert_eq!(value(pins.timeouts), 10);
+        assert_eq!(value(pins.packet_age_ms), 12.5);
+    }
+
+    publisher.publish(snapshot, 13.5);
+    assert_eq!(unsafe { value(pins.snapshot_generation) }, 4);
+    publisher.publish(
+        Snapshot {
+            sequence: 0,
+            ..snapshot
+        },
+        14.5,
+    );
+    assert_eq!(unsafe { value(pins.snapshot_generation) }, 6);
+    assert_eq!(unsafe { value(pins.sequence) }, 0);
 }

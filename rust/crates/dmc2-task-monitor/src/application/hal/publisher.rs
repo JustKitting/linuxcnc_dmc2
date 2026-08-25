@@ -15,12 +15,17 @@ use super::registration::create_hal;
 pub(in crate::application) struct HalPublisher {
     component_id: c_int,
     pins: *mut HalPins,
+    publications: AtomicU32,
 }
 
 impl HalPublisher {
     pub(in crate::application) fn new(component: &str) -> Result<Self, String> {
         let (component_id, pins) = unsafe { create_hal(component)? };
-        Ok(Self { component_id, pins })
+        Ok(Self {
+            component_id,
+            pins,
+            publications: AtomicU32::new(0),
+        })
     }
 
     pub(in crate::application) fn increment_poll_errors(&self) {
@@ -43,7 +48,10 @@ impl HalPublisher {
         let pins = unsafe { &*self.pins };
         let clear_latched = unsafe { ptr::read_volatile(pins.clear_latched) };
         diagnostic_state.update(diagnostics, clear_latched);
-        let publications = unsafe { ptr::read_volatile(pins.publications) }.wrapping_add(1);
+        let publications = self
+            .publications
+            .fetch_add(1, Ordering::Relaxed)
+            .wrapping_add(1);
         let generation = publications.wrapping_shl(1);
         let generation_pin = unsafe { &*(pins.snapshot_generation.cast::<AtomicU32>()) };
         unsafe {
@@ -138,6 +146,11 @@ impl HalPublisher {
             ptr::write_volatile(pins.publications, publications);
             generation_pin.store(generation, Ordering::SeqCst);
         }
+    }
+
+    #[cfg(test)]
+    pub(super) fn test_pins(&self) -> &HalPins {
+        unsafe { &*self.pins }
     }
 }
 
