@@ -31,10 +31,13 @@ limit, E-stop, watchdog, or spindle-command loop.
   classification, transition diagnostics, and coherent status HAL publication.
 - `rust/crates/dmc2-linuxcnc-interface`: generated, version-locked LinuxCNC
   2.9.10 numeric catalogs. It is the only source of numeric interface codes.
+- `rust/crates/dmc2-launcher`: the standard compiled live-launch boundary;
+  byte-exact profile/deployment checks, process-owner exclusion, persistent
+  service creation, and direct LinuxCNC process replacement.
 - `rust/crates/dmc2-hal-sys`: generated LinuxCNC HAL FFI declarations.
 - `config`: reviewed machine constants shared by compiled production code and
   offline compatibility tests.
-- `python/dmc2_axis`: presentation-only AXIS integration. Its modules own
+- `python/dmc2_axis`: presentation-only AXIS integration required by AXIS. Its modules own
   notification handling, pendant-mode visibility, and the special AXIS entry
   point as separate responsibilities.
 - `live`: the single accepted hardware profile and its NC programs.
@@ -67,5 +70,7 @@ limit, E-stop, watchdog, or spindle-command loop.
 The offline build must format and compile every Rust target, execute the full
 workspace tests, validate the LinuxCNC source/header fingerprint and status
 ABI, validate every live HAL/INI/UI connection, and enforce the source-layout
-limits. Hardware motion or a LinuxCNC restart is a separate explicitly ordered
+limits. The launcher is additionally instrumented with the matching LLVM 19
+tools and must have zero missed production regions, functions, or lines.
+Hardware motion or a LinuxCNC restart is a separate explicitly ordered
 operation and is never part of an offline verification command.

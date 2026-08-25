@@ -1,0 +1,56 @@
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Root {
+    Project,
+    H100,
+}
+
+#[derive(Debug, Clone, Copy)]
+pub struct File {
+    pub root: Root,
+    pub relative: &'static str,
+    pub bytes: &'static [u8],
+}
+
+macro_rules! project_file {
+    ($path:literal) => {
+        File {
+            root: Root::Project,
+            relative: $path,
+            bytes: include_bytes!(concat!(env!("CARGO_MANIFEST_DIR"), "/../../../", $path)),
+        }
+    };
+}
+
+macro_rules! h100_file {
+    ($path:literal) => {
+        File {
+            root: Root::H100,
+            relative: $path,
+            bytes: include_bytes!(concat!(
+                env!("CARGO_MANIFEST_DIR"),
+                "/../../../../h100_modbus/",
+                $path
+            )),
+        }
+    };
+}
+
+pub const FILES: &[File] = &[
+    project_file!("live_requirements.json"),
+    project_file!("live/dmc2.ini"),
+    project_file!("live/machine.hal"),
+    project_file!("live/pendant.hal"),
+    project_file!("live/hal/mesa_status_sources.hal"),
+    project_file!("live/hal/status_latches.hal"),
+    project_file!("live/hal/status_postgui.hal"),
+    project_file!("live/ui/status_panel.xml"),
+    project_file!("live/nc_files/dmc2_abort.ngc"),
+    project_file!("python/dmc2_axis/__init__.py"),
+    project_file!("python/dmc2_axis/axis_user_command.py"),
+    project_file!("python/dmc2_axis/constants.py"),
+    project_file!("python/dmc2_axis/notifications.py"),
+    project_file!("python/dmc2_axis/pendant_mode.py"),
+    project_file!("python/dmc2_axis/pendant_icon.xbm"),
+    h100_file!("maps/live/h100-spindle.mbccb"),
+    h100_file!("maps/live/h100-spindle.mbccs"),
+];

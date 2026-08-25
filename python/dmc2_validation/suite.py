@@ -167,28 +167,43 @@ def validate() -> list[str]:
         raise AssertionError("deferred integrations are not explicitly preserved")
     checks.append("accepted profile has no blocker; unapproved integrations remain deferred")
 
-    launcher = source_tree_text(ROOT / "python" / "dmc2_runtime", ".py")
-    if "if not args.live:" not in launcher or 'os.execvp("linuxcnc"' not in launcher:
-        raise AssertionError("live launcher does not require its explicit --live gate")
-    if launcher.index("if not args.live:") > launcher.index('os.execvp("linuxcnc"'):
-        raise AssertionError("live launcher gate occurs after LinuxCNC execution")
+    launcher_root = ROOT / "rust" / "crates" / "dmc2-launcher"
+    launcher = source_tree_text(launcher_root / "src", ".rs")
+    if (ROOT / "scripts" / "launch_live.py").exists() or (
+        ROOT / "python" / "dmc2_runtime"
+    ).exists():
+        raise AssertionError("Python live-launch wrapper still exists")
+    required_launcher_tokens = (
+        'pub enum Mode {',
+        '"--live" if !live => live = true',
+        'Mode::Validate => Action::Validate',
+        'Mode::Direct =>',
+        'Mode::Persistent =>',
+        'replace_process(&self, command:',
+        'layout.project.join("native/bin/dmc2-linuxcnc")',
+        'validate_embedded_inputs(platform, layout)?',
+        'validate_deployments(platform, layout)?',
+    )
+    missing = [token for token in required_launcher_tokens if token not in launcher]
+    if missing:
+        raise AssertionError(f"compiled live-launch boundary is incomplete: {missing}")
     if shutil.which("linuxcnc") is None:
         raise AssertionError("LinuxCNC executable is unavailable")
     version_tokens = (
-        'EXPECTED_LINUXCNC_VERSION = "2.9.10"',
-        '["linuxcnc_var", "LINUXCNCVERSION"]',
-        "installed_version != EXPECTED_LINUXCNC_VERSION",
+        'EXPECTED_LINUXCNC_VERSION: &[u8] = b"2.9.10\\n"',
+        'OsString::from("LINUXCNCVERSION")',
+        'output.stdout != EXPECTED_LINUXCNC_VERSION',
     )
     if any(token not in launcher for token in version_tokens):
         raise AssertionError("live launcher is not locked to LinuxCNC 2.9.10")
     checks.append(
-        "launcher defaults to validation, requires explicit --live, and locks LinuxCNC 2.9.10"
+        "compiled launcher defaults to validation, requires explicit --live, and locks LinuxCNC 2.9.10"
     )
 
     realtime_tokens = (
-        'REALTIME_ENVIRONMENT = "LINUXCNC_FORCE_REALTIME=1"',
-        'f"--setenv={REALTIME_ENVIRONMENT}"',
-        'os.environ["LINUXCNC_FORCE_REALTIME"] = "1"',
+        'pub const REALTIME_ENVIRONMENT_NAME: &str = "LINUXCNC_FORCE_REALTIME"',
+        '"--setenv=LINUXCNC_FORCE_REALTIME=1"',
+        'OsString::from(REALTIME_ENVIRONMENT_VALUE)',
     )
     if any(token not in launcher for token in realtime_tokens):
         raise AssertionError(

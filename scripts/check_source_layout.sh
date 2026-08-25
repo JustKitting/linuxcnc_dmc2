@@ -37,6 +37,12 @@ if grep -RInE '^[[:space:]]*loadusr([^#]*[[:space:]])python(3)?([[:space:]]|$)' 
     failures=1
 fi
 
+if [[ -e "${project_dir}/scripts/launch_live.py" ||
+      -e "${project_dir}/python/dmc2_runtime" ]]; then
+    echo "Python live-launch wrapper exists; the Rust binary must own launch" >&2
+    failures=1
+fi
+
 if grep -RInE '(archive/|reference/|var/tmp/)' \
     "${project_dir}/live"; then
     echo "live configuration depends on a reference, archive, or temporary file" >&2

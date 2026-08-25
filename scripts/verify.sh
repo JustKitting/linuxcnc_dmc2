@@ -20,8 +20,10 @@ fi
 
 cargo fmt --manifest-path "${rust_dir}/Cargo.toml" --all -- --check
 env RUSTFLAGS=-Dwarnings cargo test --manifest-path "${rust_dir}/Cargo.toml" --workspace
+"${project_dir}/scripts/verify_launcher_coverage.sh"
 env RUSTFLAGS=-Dwarnings cargo build --manifest-path "${rust_dir}/Cargo.toml" --workspace --release
 "${rust_dir}/target/release/dmc2-task-monitor" --validate
+"${rust_dir}/target/release/dmc2-linuxcnc" --help
 
 for script in "${project_dir}"/scripts/*.sh; do
     bash -n "${script}"

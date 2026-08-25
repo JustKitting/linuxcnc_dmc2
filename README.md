@@ -19,8 +19,8 @@ the same time as this LinuxCNC profile.
 - `live/`: the accepted LinuxCNC profile, HAL, UI, and NC programs.
 - `rust/crates/`: realtime policy, LinuxCNC interfaces, serial bridge, and task
   diagnostics split into independent crates and responsibility modules.
-- `python/`: presentation, launch, and offline-validation packages; never the
-  live motion loop.
+- `python/`: AXIS-required presentation and offline-validation packages; never
+  the live launch or motion-control boundary.
 - `firmware/`: Nano source and Mesa firmware images.
 - `tests/`: configuration, UI, operation, and preserved-behavior suites.
 - `scripts/`: build, verification, installation, readiness, and launch entry
@@ -368,24 +368,31 @@ That command also runs the sibling H100 project's complete hardware-free gate:
 100% of the realtime sequencer's 215 compiler-observed branch outcomes, 100%
 of the pure Modbus protocol's executable lines, exact recompilation of every
 Mesa Modbus map, and two byte-identical normalized realtime-module builds.
+The compiled launcher has its own LLVM 19 instrumentation gate requiring zero
+missed production regions, functions, or lines, including its real
+filesystem/process adapter and standard executable entry point.
 
-Individual validation, readiness, and launcher entry points remain under
-`scripts/`. `scripts/launch_live.py` is validation-only unless the literal
-`--live` flag is present. It checks for a conflicting LinuxCNC, HAL, or legacy
-direct-Mesa owner before its explicit live path.
+`native/bin/dmc2-linuxcnc` is the standard compiled launcher. With no argument
+it performs validation only. The literal `--live` flag is required before it
+can replace itself with LinuxCNC, and it checks for a conflicting LinuxCNC,
+HAL, or legacy direct-Mesa owner first. No Python launcher or Python subprocess
+exists in either live-launch path.
 
 The realtime-module installer refuses to run while `rtapi_app` is active,
 stages and byte-checks both `dmc2_rt.so` and `h100_spindle.so` beside their
-installed targets, and uses atomic same-filesystem renames. The launcher then
-byte-compares both installed modules against the exact offline-tested release
-artifacts. Abnormal process-probe results fail installation instead of being
-treated as proof that LinuxCNC is stopped.
+installed targets, takes byte-verified rollback copies, and uses atomic
+same-filesystem renames. Both replacements form one transaction: any commit,
+verification, host-state, exit, or signal failure restores every changed
+target, while an incomplete rollback preserves its recovery files. The
+launcher then byte-compares both installed modules against the exact
+offline-tested release artifacts. Abnormal process-probe results fail
+installation instead of being treated as proof that LinuxCNC is stopped.
 
 For a live GUI/controller that is owned by the user service manager instead of
 the initiating terminal, use the explicit persistent form:
 
 ```bash
-scripts/launch_live.py --live --persistent
+native/bin/dmc2-linuxcnc --live --persistent
 ```
 
 This creates the transient `dmc2-linuxcnc.service` unit with no automatic

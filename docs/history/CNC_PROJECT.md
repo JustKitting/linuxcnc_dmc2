@@ -68,7 +68,7 @@
 - `live_requirements.json` separates the accepted
   provisional motion profile from explicitly deferred probing, alarm,
   physical-drive-enable, spindle, and integrated-hardware-validation work.
-- `scripts/launch_live.py` defaults to validation only. The
+- `native/bin/dmc2-linuxcnc` defaults to validation only. The
   literal `--live` flag is required to start LinuxCNC, and that live path has
   not been run.
 - OUT5 remains false, IN0/IN1 remain status-only, no spindle command is routed,

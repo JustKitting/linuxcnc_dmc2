@@ -14,12 +14,18 @@ install -D -m 0755 \
 install -D -m 0755 \
     "${rust_dir}/target/release/dmc2-task-monitor" \
     "${native_bin_dir}/dmc2-task-monitor"
+install -D -m 0755 \
+    "${rust_dir}/target/release/dmc2-linuxcnc" \
+    "${native_bin_dir}/dmc2-linuxcnc"
 cmp --silent \
     "${rust_dir}/target/release/dmc2-serial-bridge" \
     "${native_bin_dir}/dmc2-serial-bridge"
 cmp --silent \
     "${rust_dir}/target/release/dmc2-task-monitor" \
     "${native_bin_dir}/dmc2-task-monitor"
+cmp --silent \
+    "${rust_dir}/target/release/dmc2-linuxcnc" \
+    "${native_bin_dir}/dmc2-linuxcnc"
 
 echo "native build and offline ABI tests passed"
 echo "userspace adapters installed in ${native_bin_dir}"
