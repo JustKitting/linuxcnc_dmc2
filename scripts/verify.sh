@@ -12,9 +12,13 @@ if [[ "${installed_version}" != "2.9.10" ]]; then
 fi
 
 cargo fmt --manifest-path "${rust_dir}/Cargo.toml" --all -- --check
-cargo test --manifest-path "${rust_dir}/Cargo.toml" --workspace
-cargo build --manifest-path "${rust_dir}/Cargo.toml" --workspace --release
+env RUSTFLAGS=-Dwarnings cargo test --manifest-path "${rust_dir}/Cargo.toml" --workspace
+env RUSTFLAGS=-Dwarnings cargo build --manifest-path "${rust_dir}/Cargo.toml" --workspace --release
 "${rust_dir}/target/release/dmc2-task-monitor" --validate
+
+for script in "${project_dir}"/scripts/*.sh; do
+    bash -n "${script}"
+done
 
 for symbol in rtapi_app_main rtapi_app_exit; do
     if ! readelf -Ws "${module}" | grep -q " ${symbol}$"; then

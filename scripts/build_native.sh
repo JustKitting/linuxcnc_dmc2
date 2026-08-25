@@ -4,6 +4,7 @@ set -euo pipefail
 project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 rust_dir="${project_dir}/rust"
 native_bin_dir="${project_dir}/native/bin"
+module="${rust_dir}/target/release/libdmc2_rt.so"
 
 "${project_dir}/scripts/verify.sh"
 
