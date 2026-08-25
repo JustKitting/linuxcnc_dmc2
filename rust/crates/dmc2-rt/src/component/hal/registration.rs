@@ -10,7 +10,7 @@ unsafe fn bit_pin(
     name: &'static [u8],
     direction: hal::hal_pin_dir_t,
     component_id: c_int,
-) -> Result<(), c_int> {
+) -> Result<(), hal::HalError> {
     let result = unsafe {
         hal::hal_pin_bit_new(
             name.as_ptr().cast::<c_char>(),
@@ -19,11 +19,7 @@ unsafe fn bit_pin(
             component_id,
         )
     };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(result)
-    }
+    hal::HalCall::PinBitNew.classify(result).map(|_| ())
 }
 
 unsafe fn s32_pin(
@@ -31,7 +27,7 @@ unsafe fn s32_pin(
     name: &'static [u8],
     direction: hal::hal_pin_dir_t,
     component_id: c_int,
-) -> Result<(), c_int> {
+) -> Result<(), hal::HalError> {
     let result = unsafe {
         hal::hal_pin_s32_new(
             name.as_ptr().cast::<c_char>(),
@@ -40,11 +36,7 @@ unsafe fn s32_pin(
             component_id,
         )
     };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(result)
-    }
+    hal::HalCall::PinS32New.classify(result).map(|_| ())
 }
 
 unsafe fn u32_pin(
@@ -52,7 +44,7 @@ unsafe fn u32_pin(
     name: &'static [u8],
     direction: hal::hal_pin_dir_t,
     component_id: c_int,
-) -> Result<(), c_int> {
+) -> Result<(), hal::HalError> {
     let result = unsafe {
         hal::hal_pin_u32_new(
             name.as_ptr().cast::<c_char>(),
@@ -61,11 +53,7 @@ unsafe fn u32_pin(
             component_id,
         )
     };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(result)
-    }
+    hal::HalCall::PinU32New.classify(result).map(|_| ())
 }
 
 unsafe fn float_pin(
@@ -73,7 +61,7 @@ unsafe fn float_pin(
     name: &'static [u8],
     direction: hal::hal_pin_dir_t,
     component_id: c_int,
-) -> Result<(), c_int> {
+) -> Result<(), hal::HalError> {
     let result = unsafe {
         hal::hal_pin_float_new(
             name.as_ptr().cast::<c_char>(),
@@ -82,11 +70,7 @@ unsafe fn float_pin(
             component_id,
         )
     };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(result)
-    }
+    hal::HalCall::PinFloatNew.classify(result).map(|_| ())
 }
 
 macro_rules! scalar_pins {
@@ -118,7 +102,7 @@ macro_rules! indexed_pins {
 pub(in crate::component) unsafe fn register_pins(
     pins: *mut Pins,
     component_id: c_int,
-) -> Result<(), c_int> {
+) -> Result<(), hal::HalError> {
     let input = hal::hal_pin_dir_t_HAL_IN;
     let output = hal::hal_pin_dir_t_HAL_OUT;
     let io = hal::hal_pin_dir_t_HAL_IO;

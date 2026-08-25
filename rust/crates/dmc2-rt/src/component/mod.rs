@@ -18,14 +18,38 @@ use self::state::ComponentState;
 const COMPONENT_NAME: &[u8] = b"dmc2_rt\0";
 const FUNCTION_NAME: &[u8] = b"dmc2-pendant-control.update\0";
 const HAL_EXIT_FAILURE_MESSAGE: &[u8] = b"dmc2_rt: ERROR: hal_exit() failed\n\0";
-const ENOMEM: c_int = -12;
-const EINVAL: c_int = -22;
+const ENOMEM: c_int = linuxcnc_hal::HalKnownErrno::OutOfMemory.raw();
+#[cfg(test)]
+const EINVAL: c_int = linuxcnc_hal::HalKnownErrno::InvalidArgument.raw();
 
 static mut COMPONENT_ID: c_int = -1;
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StartupFailure {
+    Hal(linuxcnc_hal::HalError),
+    Allocation,
+}
+
+impl StartupFailure {
+    const fn safe_return_code(self) -> c_int {
+        match self {
+            Self::Hal(error) => error.safe_return_code(),
+            Self::Allocation => ENOMEM,
+        }
+    }
+}
+
+impl From<linuxcnc_hal::HalError> for StartupFailure {
+    fn from(error: linuxcnc_hal::HalError) -> Self {
+        Self::Hal(error)
+    }
+}
+
 unsafe fn exit_component(component_id: c_int) {
-    let result = unsafe { linuxcnc_hal::hal_exit(component_id) };
-    if result != 0 {
+    if linuxcnc_hal::HalCall::Exit
+        .classify(unsafe { linuxcnc_hal::hal_exit(component_id) })
+        .is_err()
+    {
         unsafe {
             linuxcnc_hal::rtapi_print_msg(
                 linuxcnc_hal::msg_level_t_RTAPI_MSG_ERR,
@@ -46,21 +70,19 @@ fn panic(_info: &core::panic::PanicInfo<'_>) -> ! {
 
 #[no_mangle]
 pub extern "C" fn rtapi_app_main() -> c_int {
-    let component_id = unsafe { linuxcnc_hal::hal_init(COMPONENT_NAME.as_ptr().cast::<c_char>()) };
-    if component_id <= 0 {
-        return if component_id == 0 {
-            EINVAL
-        } else {
-            component_id
-        };
-    }
+    let component_id = match linuxcnc_hal::HalCall::Init
+        .classify(unsafe { linuxcnc_hal::hal_init(COMPONENT_NAME.as_ptr().cast::<c_char>()) })
+    {
+        Ok(component_id) => component_id,
+        Err(error) => return error.safe_return_code(),
+    };
     unsafe { COMPONENT_ID = component_id };
 
-    let result = (|| -> Result<(), c_int> {
+    let result = (|| -> Result<(), StartupFailure> {
         let pins =
             unsafe { linuxcnc_hal::hal_malloc(mem::size_of::<Pins>() as c_long) }.cast::<Pins>();
         if pins.is_null() {
-            return Err(ENOMEM);
+            return Err(StartupFailure::Allocation);
         }
         unsafe {
             ptr::write_bytes(pins, 0, 1);
@@ -71,7 +93,7 @@ pub extern "C" fn rtapi_app_main() -> c_int {
         let state = unsafe { linuxcnc_hal::hal_malloc(mem::size_of::<ComponentState>() as c_long) }
             .cast::<ComponentState>();
         if state.is_null() {
-            return Err(ENOMEM);
+            return Err(StartupFailure::Allocation);
         }
         unsafe { ptr::write(state, ComponentState::new(pins)) };
 
@@ -85,13 +107,8 @@ pub extern "C" fn rtapi_app_main() -> c_int {
                 component_id,
             )
         };
-        if exported != 0 {
-            return Err(exported);
-        }
-        let ready = unsafe { linuxcnc_hal::hal_ready(component_id) };
-        if ready != 0 {
-            return Err(ready);
-        }
+        linuxcnc_hal::HalCall::ExportFunct.classify(exported)?;
+        linuxcnc_hal::HalCall::Ready.classify(unsafe { linuxcnc_hal::hal_ready(component_id) })?;
         Ok(())
     })();
 
@@ -102,11 +119,7 @@ pub extern "C" fn rtapi_app_main() -> c_int {
                 exit_component(component_id);
                 COMPONENT_ID = -1;
             }
-            if error == 0 {
-                EINVAL
-            } else {
-                error
-            }
+            error.safe_return_code()
         }
     }
 }

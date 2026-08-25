@@ -6,7 +6,7 @@ use crate::{
     hal_param_dir_t_HAL_RW, hal_param_float_new, hal_param_u32_new, hal_pin_bit_new,
     hal_pin_dir_t_HAL_IN, hal_pin_dir_t_HAL_IO, hal_pin_dir_t_HAL_OUT, hal_pin_float_new,
     hal_pin_s32_new, hal_pin_u32_new, hal_ready, hal_s32_t, hal_u32_t, msg_level_t,
-    msg_level_t_RTAPI_MSG_ERR, real_t, rtapi_print_msg,
+    msg_level_t_RTAPI_MSG_ERR, real_t, rtapi_print_msg, EINVAL, ENOMEM, EPERM,
 };
 
 const _: unsafe extern "C" fn(*const c_char) -> c_int = hal_init;
@@ -49,6 +49,9 @@ const _: [(); 32] = [(); hal_pin_dir_t_HAL_OUT as usize];
 const _: [(); 48] = [(); hal_pin_dir_t_HAL_IO as usize];
 const _: [(); 192] = [(); hal_param_dir_t_HAL_RW as usize];
 const _: [(); 1] = [(); msg_level_t_RTAPI_MSG_ERR as usize];
+const _: [(); 1] = [(); EPERM as usize];
+const _: [(); 12] = [(); ENOMEM as usize];
+const _: [(); 22] = [(); EINVAL as usize];
 
 #[cfg(test)]
 mod tests {
@@ -61,6 +64,9 @@ mod tests {
         assert_eq!(hal_pin_dir_t_HAL_IO, 48);
         assert_eq!(hal_param_dir_t_HAL_RW, 192);
         assert_eq!(msg_level_t_RTAPI_MSG_ERR, 1);
+        assert_eq!(EPERM, 1);
+        assert_eq!(ENOMEM, 12);
+        assert_eq!(EINVAL, 22);
         assert_eq!(size_of::<hal_bit_t>(), size_of::<bool>());
         assert_eq!(size_of::<real_t>(), size_of::<f64>());
         assert_eq!(size_of::<hal_s32_t>(), size_of::<i32>());

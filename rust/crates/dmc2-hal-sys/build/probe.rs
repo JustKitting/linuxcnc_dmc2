@@ -71,6 +71,9 @@ _Static_assert(HAL_OUT == 32, "HAL_OUT value changed");
 _Static_assert(HAL_IO == 48, "HAL_IO value changed");
 _Static_assert(HAL_RW == 192, "HAL_RW value changed");
 _Static_assert(RTAPI_MSG_ERR == 1, "RTAPI_MSG_ERR value changed");
+_Static_assert(EPERM == 1, "EPERM value changed");
+_Static_assert(ENOMEM == 12, "ENOMEM value changed");
+_Static_assert(EINVAL == 22, "EINVAL value changed");
 "#;
 
 pub(crate) fn compile_c_abi_contract(output_directory: &Path) {

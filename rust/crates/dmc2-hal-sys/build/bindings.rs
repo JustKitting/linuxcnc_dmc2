@@ -15,7 +15,7 @@ pub(crate) fn generate(output_directory: &Path) {
                 "--allowlist-type",
                 "(hal_(bit|float|s32|u32|pin_dir|param_dir)_t|msg_level_t)",
                 "--allowlist-var",
-                "(HAL_(IN|OUT|IO|RW)|RTAPI_MSG_ERR)",
+                "(HAL_(IN|OUT|IO|RW)|RTAPI_MSG_ERR|EPERM|ENOMEM|EINVAL)",
                 "--use-core",
                 "--no-layout-tests",
                 "--output",

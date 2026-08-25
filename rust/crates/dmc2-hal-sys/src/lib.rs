@@ -9,3 +9,8 @@
 include!(concat!(env!("OUT_DIR"), "/hal_bindings.rs"));
 
 mod abi;
+mod return_code;
+
+pub use return_code::{
+    HalCall, HalError, HalFailureKind, HalKnownErrno, HAL_CALLS, HAL_KNOWN_ERRNOS,
+};

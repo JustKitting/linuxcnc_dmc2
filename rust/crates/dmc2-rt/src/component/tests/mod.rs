@@ -522,6 +522,12 @@ fn every_hal_lifecycle_failure_is_returned_and_cleanup_runs_exactly_once() {
     }
 
     reset_mock_hal();
+    FAILURE_PLAN.lock().expect("failure plan lock").pin_failure = Some((0, 7));
+    assert_eq!(rtapi_app_main(), EINVAL);
+    assert_eq!(HAL_CALLS.lock().expect("HAL call lock").pin, 1);
+    assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+
+    reset_mock_hal();
     FAILURE_PLAN
         .lock()
         .expect("failure plan lock")
@@ -542,6 +548,15 @@ fn every_hal_lifecycle_failure_is_returned_and_cleanup_runs_exactly_once() {
     assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
 
     reset_mock_hal();
+    FAILURE_PLAN
+        .lock()
+        .expect("failure plan lock")
+        .export_result = 7;
+    assert_eq!(rtapi_app_main(), EINVAL);
+    assert_eq!(HAL_CALLS.lock().expect("HAL call lock").export, 1);
+    assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+
+    reset_mock_hal();
     FAILURE_PLAN.lock().expect("failure plan lock").ready_result = -2_002;
     assert_eq!(rtapi_app_main(), -2_002);
     assert_eq!(
@@ -556,6 +571,12 @@ fn every_hal_lifecycle_failure_is_returned_and_cleanup_runs_exactly_once() {
         }
     );
     rtapi_app_exit();
+    assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
+
+    reset_mock_hal();
+    FAILURE_PLAN.lock().expect("failure plan lock").ready_result = 7;
+    assert_eq!(rtapi_app_main(), EINVAL);
+    assert_eq!(HAL_CALLS.lock().expect("HAL call lock").ready, 1);
     assert_eq!(HAL_CALLS.lock().expect("HAL call lock").exit, 1);
 
     reset_mock_hal();

@@ -243,11 +243,17 @@ fn code(domain: dmc2_linuxcnc_interface::CodeDomain, name: &str) -> i32 {
 #[test]
 fn every_hal_registration_and_lifecycle_failure_is_exact_and_cleaned_up() {
     let _guard = TEST_LOCK.lock().unwrap_or_else(|error| error.into_inner());
-    for init_result in [-19, 0] {
+    for (init_result, expected) in [
+        (-19, "hal_init failed: UNKNOWN_ERRNO (-19)"),
+        (
+            0,
+            "hal_init failed: INVALID_ZERO (0; hal_init requires a nonzero failure or documented success)",
+        ),
+    ] {
         reset();
         PLAN.lock().expect("plan lock").init_result = init_result;
         let error = unsafe { create_hal("task-test") }.unwrap_err();
-        assert_eq!(error, format!("hal_init failed: {init_result}"));
+        assert_eq!(error, expected);
         assert_eq!(
             *CALLS.lock().expect("call lock"),
             Calls {
@@ -290,7 +296,10 @@ fn every_hal_registration_and_lifecycle_failure_is_exact_and_cleaned_up() {
             .expect("component prefix was exact");
         assert_eq!(
             error,
-            format!("{}({suffix}) failed: {code}", failed.kind.function())
+            format!(
+                "{}({suffix}) failed: UNKNOWN_ERRNO ({code})",
+                failed.kind.function()
+            )
         );
         assert_eq!(calls.len(), failure_call + 1);
         let hal_calls = *CALLS.lock().expect("call lock");
@@ -302,9 +311,18 @@ fn every_hal_registration_and_lifecycle_failure_is_exact_and_cleaned_up() {
     }
 
     reset();
+    PLAN.lock().expect("plan lock").pin_failure = Some((0, 7));
+    let error = unsafe { create_hal("task-test") }.unwrap_err();
+    assert_eq!(
+        error,
+        "hal_pin_u32_new(snapshot-generation) failed: UNEXPECTED_POSITIVE (7; hal_pin_u32_new documents no positive status)"
+    );
+    assert_eq!(CALLS.lock().expect("call lock").exit, 1);
+
+    reset();
     PLAN.lock().expect("plan lock").ready_result = -4_001;
     let error = unsafe { create_hal("task-test") }.unwrap_err();
-    assert_eq!(error, "hal_ready failed: -4001");
+    assert_eq!(error, "hal_ready failed: UNKNOWN_ERRNO (-4001)");
     assert_eq!(
         *CALLS.lock().expect("call lock"),
         Calls {
@@ -317,6 +335,15 @@ fn every_hal_registration_and_lifecycle_failure_is_exact_and_cleaned_up() {
     );
 
     reset();
+    PLAN.lock().expect("plan lock").ready_result = 7;
+    let error = unsafe { create_hal("task-test") }.unwrap_err();
+    assert_eq!(
+        error,
+        "hal_ready failed: UNEXPECTED_POSITIVE (7; hal_ready documents no positive status)"
+    );
+    assert_eq!(CALLS.lock().expect("call lock").exit, 1);
+
+    reset();
     {
         let mut plan = PLAN.lock().expect("plan lock");
         plan.malloc_fails = true;
@@ -325,7 +352,7 @@ fn every_hal_registration_and_lifecycle_failure_is_exact_and_cleaned_up() {
     let error = unsafe { create_hal("task-test") }.unwrap_err();
     assert_eq!(
         error,
-        "hal_malloc for pin-pointer storage failed; hal_exit cleanup failed: -4002"
+        "hal_malloc for pin-pointer storage failed; hal_exit cleanup failed: UNKNOWN_ERRNO (-4002)"
     );
 
     reset();

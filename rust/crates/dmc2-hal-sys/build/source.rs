@@ -3,13 +3,14 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::config::{
-    EXPECTED_LINUXCNC_COMMIT, EXPECTED_LINUXCNC_VERSION, HAL_HEADER, RTAPI_HEADER,
-    SOURCE_HAL_HEADER_RELATIVE, SOURCE_ROOT_RELATIVE, SOURCE_RTAPI_HEADER_RELATIVE,
+    EXPECTED_LINUXCNC_COMMIT, EXPECTED_LINUXCNC_VERSION, HAL_HEADER, RTAPI_ERRNO_HEADER,
+    RTAPI_HEADER, SOURCE_HAL_HEADER_RELATIVE, SOURCE_HAL_LIBRARY_RELATIVE, SOURCE_ROOT_RELATIVE,
+    SOURCE_RTAPI_ERRNO_HEADER_RELATIVE, SOURCE_RTAPI_HEADER_RELATIVE,
 };
 use super::process;
 
 pub(crate) fn verify_audited_source() {
-    for installed_header in [HAL_HEADER, RTAPI_HEADER] {
+    for installed_header in [HAL_HEADER, RTAPI_HEADER, RTAPI_ERRNO_HEADER] {
         assert!(
             Path::new(installed_header).is_file(),
             "the installed LinuxCNC interface header is missing: {installed_header}"
@@ -25,7 +26,15 @@ pub(crate) fn verify_audited_source() {
     let audited_headers = [
         (HAL_HEADER, source_root.join(SOURCE_HAL_HEADER_RELATIVE)),
         (RTAPI_HEADER, source_root.join(SOURCE_RTAPI_HEADER_RELATIVE)),
+        (
+            RTAPI_ERRNO_HEADER,
+            source_root.join(SOURCE_RTAPI_ERRNO_HEADER_RELATIVE),
+        ),
     ];
+    println!(
+        "cargo:rerun-if-changed={}",
+        source_root.join(SOURCE_HAL_LIBRARY_RELATIVE).display()
+    );
     for (installed, authoritative) in &audited_headers {
         println!("cargo:rerun-if-changed={installed}");
         println!("cargo:rerun-if-changed={}", authoritative.display());

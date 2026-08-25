@@ -11,6 +11,13 @@ use super::pins::{
     RUNTIME_U32_OUTPUT_PINS, SNAPSHOT_GENERATION_PIN,
 };
 
+fn checked_call(call: hal::HalCall, suffix: Option<&str>, raw: c_int) -> Result<c_int, String> {
+    call.classify(raw).map_err(|error| match suffix {
+        Some(suffix) => format!("{}({suffix}) failed: {error}", call.name()),
+        None => format!("{} failed: {error}", call.name()),
+    })
+}
+
 unsafe fn new_bit_pin(
     component: &str,
     suffix: &str,
@@ -21,11 +28,7 @@ unsafe fn new_bit_pin(
     let name = CString::new(format!("{component}.{suffix}"))
         .map_err(|_| "HAL pin name contained a NUL byte".to_owned())?;
     let result = unsafe { hal::hal_pin_bit_new(name.as_ptr(), direction, pointer, component_id) };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(format!("hal_pin_bit_new({suffix}) failed: {result}"))
-    }
+    checked_call(hal::HalCall::PinBitNew, Some(suffix), result).map(|_| ())
 }
 
 unsafe fn new_s32_pin(
@@ -44,11 +47,7 @@ unsafe fn new_s32_pin(
             component_id,
         )
     };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(format!("hal_pin_s32_new({suffix}) failed: {result}"))
-    }
+    checked_call(hal::HalCall::PinS32New, Some(suffix), result).map(|_| ())
 }
 
 unsafe fn new_u32_pin(
@@ -67,11 +66,7 @@ unsafe fn new_u32_pin(
             component_id,
         )
     };
-    if result == 0 {
-        Ok(())
-    } else {
-        Err(format!("hal_pin_u32_new({suffix}) failed: {result}"))
-    }
+    checked_call(hal::HalCall::PinU32New, Some(suffix), result).map(|_| ())
 }
 
 unsafe fn register_pins(
@@ -244,10 +239,9 @@ unsafe fn publish_initial_safe(pins: &HalPins) {
 pub(super) unsafe fn create_hal(component: &str) -> Result<(c_int, *mut HalPins), String> {
     let component_name = CString::new(component)
         .map_err(|_| "HAL component name contained a NUL byte".to_owned())?;
-    let component_id = unsafe { hal::hal_init(component_name.as_ptr()) };
-    if component_id <= 0 {
-        return Err(format!("hal_init failed: {component_id}"));
-    }
+    let component_id = checked_call(hal::HalCall::Init, None, unsafe {
+        hal::hal_init(component_name.as_ptr())
+    })?;
 
     let result = (|| {
         let pins = unsafe { hal::hal_malloc(mem::size_of::<HalPins>() as _) } as *mut HalPins;
@@ -259,22 +253,17 @@ pub(super) unsafe fn create_hal(component: &str) -> Result<(c_int, *mut HalPins)
             register_pins(component, &mut *pins, component_id)?;
             publish_initial_safe(&*pins);
         }
-        let ready = unsafe { hal::hal_ready(component_id) };
-        if ready != 0 {
-            return Err(format!("hal_ready failed: {ready}"));
-        }
+        checked_call(hal::HalCall::Ready, None, unsafe {
+            hal::hal_ready(component_id)
+        })?;
         Ok((component_id, pins))
     })();
 
     match result {
         Ok(value) => Ok(value),
-        Err(error) => {
-            let cleanup = unsafe { hal::hal_exit(component_id) };
-            if cleanup == 0 {
-                Err(error)
-            } else {
-                Err(format!("{error}; hal_exit cleanup failed: {cleanup}"))
-            }
-        }
+        Err(error) => match hal::HalCall::Exit.classify(unsafe { hal::hal_exit(component_id) }) {
+            Ok(_) => Err(error),
+            Err(cleanup) => Err(format!("{error}; hal_exit cleanup failed: {cleanup}")),
+        },
     }
 }
