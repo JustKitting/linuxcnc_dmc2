@@ -212,6 +212,35 @@ class ConfigurationTests(unittest.TestCase):
         execvp.assert_not_called()
         self.assertIn("VALIDATION ONLY", output.getvalue())
 
+    def test_process_owner_probe_handles_every_documented_pgrep_result(self):
+        for returncode, expected in ((0, True), (1, False)):
+            completed = subprocess.CompletedProcess(
+                args=["pgrep", "-f", "owner"],
+                returncode=returncode,
+            )
+            with mock.patch.object(
+                launch_live.subprocess,
+                "run",
+                return_value=completed,
+            ):
+                self.assertIs(launch_live.running_process("owner"), expected)
+
+        for returncode in (2, 3, -9, 127):
+            completed = subprocess.CompletedProcess(
+                args=["pgrep", "-f", "owner"],
+                returncode=returncode,
+            )
+            with mock.patch.object(
+                launch_live.subprocess,
+                "run",
+                return_value=completed,
+            ):
+                with self.assertRaisesRegex(
+                    RuntimeError,
+                    f"pgrep exited {returncode}",
+                ):
+                    launch_live.running_process("owner")
+
     def test_launcher_refuses_when_exact_profile_validation_fails(self):
         with mock.patch.object(
             launch_live,

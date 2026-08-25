@@ -38,15 +38,11 @@ EXPECTED_AUDIT_KEYS = frozenset((*EXPECTED_AUDIT_VALUES, "snapshot_schema_fnv64"
 
 
 def _compiled_task_monitor() -> Path:
-    candidates = (
-        ROOT / "rust" / "target" / "release" / "dmc2-task-monitor",
-        ROOT / "rust" / "target" / "debug" / "dmc2-task-monitor",
-    )
-    available = [candidate for candidate in candidates if candidate.is_file()]
-    if available:
-        return max(available, key=lambda candidate: candidate.stat().st_mtime_ns)
+    binary = ROOT / "rust" / "target" / "release" / "dmc2-task-monitor"
+    if binary.is_file():
+        return binary
     raise AssertionError(
-        "compiled dmc2-task-monitor is missing; run the Rust build before validation"
+        "release dmc2-task-monitor is missing; run the verified release build before validation"
     )
 
 

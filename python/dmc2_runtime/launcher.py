@@ -46,7 +46,14 @@ def running_process(pattern: str) -> bool:
         stderr=subprocess.DEVNULL,
         check=False,
     )
-    return completed.returncode == 0
+    if completed.returncode == 0:
+        return True
+    if completed.returncode == 1:
+        return False
+    raise RuntimeError(
+        f"cannot prove process-owner exclusivity: pgrep exited "
+        f"{completed.returncode} for {pattern!r}"
+    )
 
 
 def validate_realtime_module_deployment() -> None:

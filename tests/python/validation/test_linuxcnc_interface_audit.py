@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import subprocess
+import tempfile
 import unittest
 from pathlib import Path
 from unittest import mock
@@ -39,6 +40,23 @@ class CompiledLinuxCncAuditTests(unittest.TestCase):
     def test_exact_compiled_report_is_accepted(self):
         report = self.valid_report()
         self.assertEqual(self.run_with(json.dumps(report)), report)
+
+    def test_only_the_release_audit_binary_is_accepted(self):
+        with tempfile.TemporaryDirectory() as directory:
+            root = Path(directory)
+            debug = root / "rust" / "target" / "debug" / "dmc2-task-monitor"
+            debug.parent.mkdir(parents=True)
+            debug.write_bytes(b"debug")
+            with mock.patch.object(linuxcnc_interface, "ROOT", root):
+                with self.assertRaisesRegex(AssertionError, "release dmc2-task-monitor"):
+                    linuxcnc_interface._compiled_task_monitor()
+
+                release = (
+                    root / "rust" / "target" / "release" / "dmc2-task-monitor"
+                )
+                release.parent.mkdir(parents=True)
+                release.write_bytes(b"release")
+                self.assertEqual(linuxcnc_interface._compiled_task_monitor(), release)
 
     def test_nonzero_binary_exit_is_rejected(self):
         with self.assertRaisesRegex(AssertionError, "exit=7"):
