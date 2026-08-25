@@ -50,11 +50,15 @@ pub(super) fn run() -> Result<(), String> {
     hal.publish(state.snapshot, -1.0);
 
     loop {
-        let Some(serial) = SerialPort::open(&port, args.baud) else {
-            state.note_serial_fault();
-            hal.publish(state.snapshot, -1.0);
-            thread::sleep(RECONNECT_PERIOD);
-            continue;
+        let serial = match SerialPort::open(&port, args.baud) {
+            Ok(serial) => serial,
+            Err(error) => {
+                eprintln!("dmc2-serial-bridge: serial open failed: {error}");
+                state.note_serial_fault();
+                hal.publish(state.snapshot, -1.0);
+                thread::sleep(RECONNECT_PERIOD);
+                continue;
+            }
         };
 
         let mut assembler = LineAssembler::new();
@@ -62,7 +66,8 @@ pub(super) fn run() -> Result<(), String> {
         loop {
             let count = match serial.read(&mut buffer) {
                 Ok(value) => value,
-                Err(()) => {
+                Err(error) => {
+                    eprintln!("dmc2-serial-bridge: serial read failed: {error}");
                     state.note_serial_fault();
                     hal.publish(state.snapshot, -1.0);
                     break;

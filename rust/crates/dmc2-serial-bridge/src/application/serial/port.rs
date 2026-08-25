@@ -1,19 +1,65 @@
 use std::ffi::{c_int, CString};
+use std::fmt;
 
 use super::native;
 
 pub(in crate::application) struct SerialPort(c_int);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::application) enum SerialError {
+    OperatingSystem(c_int),
+    NativeContract {
+        operation: &'static str,
+        result: c_int,
+    },
+}
+
+impl SerialError {
+    fn from_failure(operation: &'static str, result: c_int) -> Self {
+        match result.checked_neg().filter(|errno| *errno > 0) {
+            Some(errno) => Self::OperatingSystem(errno),
+            None => Self::NativeContract { operation, result },
+        }
+    }
+}
+
+impl fmt::Display for SerialError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OperatingSystem(errno) => write!(
+                formatter,
+                "{} (errno {errno})",
+                std::io::Error::from_raw_os_error(*errno)
+            ),
+            Self::NativeContract { operation, result } => {
+                write!(
+                    formatter,
+                    "native {operation} returned invalid result {result}"
+                )
+            }
+        }
+    }
+}
+
 impl SerialPort {
-    pub(in crate::application) fn open(path: &CString, baud: u32) -> Option<Self> {
+    pub(in crate::application) fn open(path: &CString, baud: u32) -> Result<Self, SerialError> {
         let descriptor = unsafe { native::dmc2_serial_open(path.as_ptr(), baud) };
-        (descriptor >= 0).then_some(Self(descriptor))
+        if descriptor < 0 {
+            Err(SerialError::from_failure("open", descriptor))
+        } else {
+            Ok(Self(descriptor))
+        }
     }
 
-    pub(in crate::application) fn read(&self, buffer: &mut [u8]) -> Result<usize, ()> {
+    pub(in crate::application) fn read(&self, buffer: &mut [u8]) -> Result<usize, SerialError> {
         let count = unsafe { native::dmc2_serial_read(self.0, buffer.as_mut_ptr(), buffer.len()) };
-        if count < 0 || count as usize > buffer.len() {
-            Err(())
+        if count < 0 {
+            Err(SerialError::from_failure("read", count))
+        } else if count as usize > buffer.len() {
+            Err(SerialError::NativeContract {
+                operation: "read",
+                result: count,
+            })
         } else {
             Ok(count as usize)
         }
@@ -22,7 +68,11 @@ impl SerialPort {
 
 impl Drop for SerialPort {
     fn drop(&mut self) {
-        unsafe { native::dmc2_serial_close(self.0) };
+        let result = unsafe { native::dmc2_serial_close(self.0) };
+        if result != 0 {
+            let error = SerialError::from_failure("close", result);
+            eprintln!("dmc2-serial-bridge: serial close failed: {error}");
+        }
     }
 }
 
@@ -31,6 +81,7 @@ mod tests {
     use std::ffi::{c_char, c_void, CStr};
     use std::fs::File;
     use std::io::Write;
+    use std::mem::ManuallyDrop;
     use std::os::fd::FromRawFd;
     use std::ptr;
 
@@ -79,31 +130,52 @@ mod tests {
     #[test]
     fn invalid_paths_bauds_descriptors_and_capacities_fail_closed() {
         let missing = CString::new("/definitely/not/a/dmc2/serial/device").unwrap();
-        assert!(SerialPort::open(&missing, 115_200).is_none());
+        assert_eq!(
+            SerialPort::open(&missing, 115_200).err(),
+            Some(SerialError::OperatingSystem(2))
+        );
         let not_a_terminal = CString::new("/dev/null").unwrap();
-        assert!(SerialPort::open(&not_a_terminal, 115_200).is_none());
+        assert_eq!(
+            SerialPort::open(&not_a_terminal, 115_200).err(),
+            Some(SerialError::OperatingSystem(25))
+        );
 
         let (_master, terminal) = pseudo_terminal();
-        assert!(SerialPort::open(&terminal, 9_600).is_none());
+        assert_eq!(
+            SerialPort::open(&terminal, 9_600).err(),
+            Some(SerialError::OperatingSystem(22))
+        );
         let empty = CString::new("").unwrap();
         assert_eq!(
             unsafe { native::dmc2_serial_open(ptr::null(), 115_200) },
-            -1
+            -22
         );
         assert_eq!(
             unsafe { native::dmc2_serial_open(empty.as_ptr(), 115_200) },
-            -1
+            -22
         );
 
-        let invalid = SerialPort(-1);
+        let invalid = ManuallyDrop::new(SerialPort(-1));
         let mut byte = [0_u8; 1];
-        assert_eq!(invalid.read(&mut byte), Err(()));
-        assert_eq!(invalid.read(&mut []), Err(()));
+        assert_eq!(
+            invalid.read(&mut byte),
+            Err(SerialError::OperatingSystem(22))
+        );
+        assert_eq!(invalid.read(&mut []), Err(SerialError::OperatingSystem(22)));
         assert_eq!(
             unsafe { native::dmc2_serial_read(0, ptr::null_mut(), 1) },
-            -1
+            -22
         );
-        unsafe { native::dmc2_serial_close(-1) };
+        assert_eq!(unsafe { native::dmc2_serial_close(-1) }, -22);
+    }
+
+    #[test]
+    fn native_close_reports_success_and_the_exact_repeat_close_failure() {
+        let (_master, terminal) = pseudo_terminal();
+        let descriptor = unsafe { native::dmc2_serial_open(terminal.as_ptr(), 115_200) };
+        assert!(descriptor >= 0);
+        assert_eq!(unsafe { native::dmc2_serial_close(descriptor) }, 0);
+        assert_eq!(unsafe { native::dmc2_serial_close(descriptor) }, -9);
     }
 
     #[test]

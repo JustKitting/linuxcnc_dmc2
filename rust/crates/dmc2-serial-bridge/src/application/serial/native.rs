@@ -8,4 +8,4 @@ include!(concat!(env!("OUT_DIR"), "/serial_shim_bindings.rs"));
 
 const _: unsafe extern "C" fn(*const c_char, c_uint) -> c_int = dmc2_serial_open;
 const _: unsafe extern "C" fn(c_int, *mut u8, usize) -> c_int = dmc2_serial_read;
-const _: unsafe extern "C" fn(c_int) = dmc2_serial_close;
+const _: unsafe extern "C" fn(c_int) -> c_int = dmc2_serial_close;

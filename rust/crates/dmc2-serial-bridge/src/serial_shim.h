@@ -5,6 +5,6 @@
 
 int dmc2_serial_open(const char *path, unsigned int baud);
 int dmc2_serial_read(int fd, unsigned char *buffer, size_t capacity);
-void dmc2_serial_close(int fd);
+int dmc2_serial_close(int fd);
 
 #endif

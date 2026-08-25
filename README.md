@@ -101,7 +101,9 @@ Raw reads use fixed 256-byte chunks. The separate framing state retains at most
 frame is provably overlong, and discards through the next LF. Every 8-bit input
 value, CR/LF boundary, and 127/128/129-byte boundary is covered by the compiled
 serial tests, including a native pseudo-terminal pass through the C/termios
-adapter.
+adapter. The native serial boundary preserves Linux errno values for open,
+read, configuration-cleanup, and close failures; the bridge reports each
+failure instead of collapsing or discarding it.
 
 - The side button must be held to jog.
 - x1 requests 10 pulses at 5000 pulses/s (the preceding 2500 rate x2).
