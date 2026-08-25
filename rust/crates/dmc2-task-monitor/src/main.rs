@@ -23,6 +23,26 @@ const DEFAULT_COMPONENT: &str = "dmc2-task-monitor";
 const DEFAULT_NML_FILE: &str = "/usr/share/linuxcnc/linuxcnc.nml";
 const POLL_PERIOD: Duration = Duration::from_millis(10);
 const RECONNECT_PERIOD: Duration = Duration::from_secs(1);
+const TASK_STATUS_POLL_OK: c_int = 0;
+const TASK_STATUS_POLL_NOT_READY: c_int = 1;
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PollDisposition {
+    Snapshot,
+    WaitingForFirstStatus,
+    Fault,
+}
+
+fn poll_disposition(result: c_int, nml_error: i32, no_nml_error: i32) -> PollDisposition {
+    if nml_error != no_nml_error {
+        return PollDisposition::Fault;
+    }
+    match result {
+        TASK_STATUS_POLL_OK => PollDisposition::Snapshot,
+        TASK_STATUS_POLL_NOT_READY => PollDisposition::WaitingForFirstStatus,
+        _ => PollDisposition::Fault,
+    }
+}
 
 #[repr(C)]
 struct TaskStatusChannel {
@@ -726,7 +746,12 @@ fn run() -> Result<(), String> {
         let mut snapshot = NativeSnapshot::safe();
         let mut nml_error = invalid_nml_configuration;
         let result = unsafe { dmc2_task_status_poll(channel, &mut snapshot, &mut nml_error) };
-        let transport_ok = result == 0 && nml_error == no_nml_error;
+        let disposition = poll_disposition(result, nml_error, no_nml_error);
+        if disposition == PollDisposition::WaitingForFirstStatus {
+            thread::sleep(POLL_PERIOD);
+            continue;
+        }
+        let transport_ok = disposition == PollDisposition::Snapshot;
         let snapshot_ok = snapshot.valid_abi();
         unsafe {
             if transport_ok && snapshot_ok {
@@ -782,5 +807,31 @@ fn main() {
     if let Err(error) = run() {
         eprintln!("dmc2-task-monitor: {error}");
         std::process::exit(1);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn first_status_startup_latency_is_not_a_fault_or_snapshot() {
+        let no_error = 0;
+        assert_eq!(
+            poll_disposition(TASK_STATUS_POLL_NOT_READY, no_error, no_error),
+            PollDisposition::WaitingForFirstStatus
+        );
+        assert_eq!(
+            poll_disposition(TASK_STATUS_POLL_OK, no_error, no_error),
+            PollDisposition::Snapshot
+        );
+        assert_eq!(
+            poll_disposition(TASK_STATUS_POLL_NOT_READY, 3, no_error),
+            PollDisposition::Fault
+        );
+        assert_eq!(
+            poll_disposition(-1, no_error, no_error),
+            PollDisposition::Fault
+        );
     }
 }

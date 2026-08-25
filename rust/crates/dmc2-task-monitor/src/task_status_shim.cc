@@ -8,6 +8,9 @@
 namespace {
 
 constexpr std::uint32_t DMC2_SNAPSHOT_ABI_VERSION = 0x00020910U;
+// LinuxCNC 2.9.10's installed linuxcnc.nml grants read access to emcStatus
+// through the standard UI client identity used by AXIS, HALUI, and linuxcnc.stat.
+constexpr const char *LINUXCNC_STATUS_CLIENT = "xemc";
 
 struct dmc2_rcs_status_snapshot {
     std::int64_t command_type;
@@ -147,6 +150,7 @@ void set_nml_error(std::int32_t *destination, NML_ERROR_TYPE error) noexcept {
 struct dmc2_task_status_channel {
     RCS_STAT_CHANNEL *channel;
     EMC_STAT *status;
+    bool received_status;
 };
 
 extern "C" std::uint32_t dmc2_task_status_snapshot_abi_version() noexcept {
@@ -164,14 +168,15 @@ extern "C" dmc2_task_status_channel *dmc2_task_status_open(
         return nullptr;
     }
 
-    auto *holder = new (std::nothrow) dmc2_task_status_channel{nullptr, nullptr};
+    auto *holder =
+        new (std::nothrow) dmc2_task_status_channel{nullptr, nullptr, false};
     if (holder == nullptr) {
         set_nml_error(nml_error, NML_INTERNAL_CMS_ERROR);
         return nullptr;
     }
     try {
-        holder->channel =
-            new RCS_STAT_CHANNEL(emcFormat, "emcStatus", "dmc2-task-monitor", nml_file);
+        holder->channel = new RCS_STAT_CHANNEL(
+            emcFormat, "emcStatus", LINUXCNC_STATUS_CLIENT, nml_file);
     } catch (...) {
         set_nml_error(nml_error, NML_INTERNAL_CMS_ERROR);
         delete holder;
@@ -210,7 +215,14 @@ extern "C" int dmc2_task_status_poll(
         set_nml_error(nml_error, holder->channel->error_type);
         return -1;
     }
-    if (type != 0 && type != EMC_STAT_TYPE) {
+    if (type == EMC_STAT_TYPE) {
+        holder->received_status = true;
+    } else if (type == 0 && !holder->received_status) {
+        // The channel exists, but LinuxCNC has not published its first status
+        // frame.  This is startup latency, not a zero-valued machine status.
+        set_nml_error(nml_error, NML_NO_ERROR);
+        return 1;
+    } else if (type != 0) {
         set_nml_error(nml_error, NML_INVALID_MESSAGE_ERROR);
         return -1;
     }

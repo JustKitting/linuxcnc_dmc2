@@ -14,7 +14,9 @@ use dmc2_core::supervisor::{FaultCode, MachineSnapshot};
 use dmc2_core::PULSES_PER_MM;
 use dmc2_hal_sys as hal;
 
-const COMPONENT_NAME: &[u8] = b"dmc2-pendant-control\0";
+// `loadrt dmc2_rt` waits for this exact HAL component name.  Pin and function
+// names intentionally retain the stable `dmc2-pendant-control` namespace.
+const COMPONENT_NAME: &[u8] = b"dmc2_rt\0";
 const FUNCTION_NAME: &[u8] = b"dmc2-pendant-control.update\0";
 const ENOMEM: c_int = -12;
 const EINVAL: c_int = -22;
@@ -1516,7 +1518,7 @@ mod tests {
         let name = unsafe { std::ffi::CStr::from_ptr(name) }
             .to_str()
             .expect("component name was UTF-8");
-        assert_eq!(name, "dmc2-pendant-control");
+        assert_eq!(name, "dmc2_rt");
         41
     }
 
