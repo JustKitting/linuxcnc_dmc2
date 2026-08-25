@@ -71,3 +71,49 @@ pub(crate) const STATUS_MESSAGE_CONTRACTS: &[(&str, &str)] = &[
     ("EMC_COOLANT_STAT", "EMC_COOLANT_STAT_TYPE"),
     ("EMC_LUBE_STAT", "EMC_LUBE_STAT_TYPE"),
 ];
+
+pub(crate) struct ErrorMessageSpec {
+    pub(crate) class_name: &'static str,
+    pub(crate) message_type_name: &'static str,
+    pub(crate) payload_member: &'static str,
+    pub(crate) id_member: Option<&'static str>,
+}
+
+pub(crate) const ERROR_MESSAGE_CONTRACTS: &[ErrorMessageSpec] = &[
+    ErrorMessageSpec {
+        class_name: "NML_ERROR",
+        message_type_name: "NML_ERROR_TYPE",
+        payload_member: "error",
+        id_member: None,
+    },
+    ErrorMessageSpec {
+        class_name: "NML_TEXT",
+        message_type_name: "NML_TEXT_TYPE",
+        payload_member: "text",
+        id_member: None,
+    },
+    ErrorMessageSpec {
+        class_name: "NML_DISPLAY",
+        message_type_name: "NML_DISPLAY_TYPE",
+        payload_member: "display",
+        id_member: None,
+    },
+    ErrorMessageSpec {
+        class_name: "EMC_OPERATOR_ERROR",
+        message_type_name: "EMC_OPERATOR_ERROR_TYPE",
+        payload_member: "error",
+        id_member: Some("id"),
+    },
+    ErrorMessageSpec {
+        class_name: "EMC_OPERATOR_TEXT",
+        message_type_name: "EMC_OPERATOR_TEXT_TYPE",
+        payload_member: "text",
+        id_member: Some("id"),
+    },
+    ErrorMessageSpec {
+        class_name: "EMC_OPERATOR_DISPLAY",
+        message_type_name: "EMC_OPERATOR_DISPLAY_TYPE",
+        payload_member: "display",
+        id_member: Some("id"),
+    },
+];

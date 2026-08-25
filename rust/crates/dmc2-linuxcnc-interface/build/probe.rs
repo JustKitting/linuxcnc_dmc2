@@ -3,7 +3,7 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-use super::config::INCLUDE_ROOT;
+use super::config::{ErrorMessageSpec, INCLUDE_ROOT};
 use super::domains::Domain;
 
 pub(crate) struct StatusContractValue {
@@ -12,9 +12,22 @@ pub(crate) struct StatusContractValue {
     pub(crate) message_size: i64,
 }
 
+pub(crate) struct ErrorContractValue {
+    pub(crate) message_type_name: String,
+    pub(crate) message_type: i64,
+    pub(crate) message_size: usize,
+    pub(crate) payload_member: String,
+    pub(crate) payload_offset: usize,
+    pub(crate) payload_size: usize,
+    pub(crate) id_member: Option<String>,
+    pub(crate) id_offset: Option<usize>,
+    pub(crate) id_size: usize,
+}
+
 pub(crate) struct Results {
     pub(crate) values: BTreeMap<(String, String), i64>,
     pub(crate) status_contracts: BTreeMap<String, StatusContractValue>,
+    pub(crate) error_contracts: BTreeMap<String, ErrorContractValue>,
 }
 
 fn paths(output_directory: &Path) -> (PathBuf, PathBuf) {
@@ -24,9 +37,13 @@ fn paths(output_directory: &Path) -> (PathBuf, PathBuf) {
     )
 }
 
-fn source(domains: &[Domain], status_contracts: &[(&str, &str)]) -> String {
+fn source(
+    domains: &[Domain],
+    status_contracts: &[(&str, &str)],
+    error_contracts: &[ErrorMessageSpec],
+) -> String {
     let mut probe = String::from(
-        "#include <cstdio>\n#include \"emc.hh\"\n#include \"emc_nml.hh\"\n#include \"motion.h\"\n#include \"interp_return.hh\"\n#include \"nml.hh\"\n#include \"nml_oi.hh\"\n#include \"rcs.hh\"\n#include \"stat_msg.hh\"\n#include \"cmd_msg.hh\"\n#include \"cms.hh\"\n#include \"canon.hh\"\n#include \"kinematics.h\"\n#include \"motion_types.h\"\n#include \"debugflags.h\"\n#include \"state_tag.h\"\n#include \"usrmotintf.h\"\nint main() {\n",
+        "#include <cstddef>\n#include <cstdio>\n#include \"emc.hh\"\n#include \"emc_nml.hh\"\n#include \"motion.h\"\n#include \"interp_return.hh\"\n#include \"nml.hh\"\n#include \"nml_oi.hh\"\n#include \"rcs.hh\"\n#include \"stat_msg.hh\"\n#include \"cmd_msg.hh\"\n#include \"cms.hh\"\n#include \"canon.hh\"\n#include \"kinematics.h\"\n#include \"motion_types.h\"\n#include \"debugflags.h\"\n#include \"state_tag.h\"\n#include \"usrmotintf.h\"\nint main() {\n",
     );
     for domain in domains {
         for symbol in &domain.symbols {
@@ -41,6 +58,22 @@ fn source(domains: &[Domain], status_contracts: &[(&str, &str)]) -> String {
             "std::printf(\"__status_message_contract__\\t{class_name}\\t{message_type_name}\\t%lld\\t%zu\\n\", static_cast<long long>({message_type_name}), sizeof({class_name}));\n"
         ));
     }
+    for contract in error_contracts {
+        let class_name = contract.class_name;
+        let message_type_name = contract.message_type_name;
+        let payload_member = contract.payload_member;
+        let (id_member, id_offset, id_size) = match contract.id_member {
+            Some(id_member) => (
+                id_member,
+                format!("static_cast<long long>(offsetof({class_name}, {id_member}))"),
+                format!("sizeof((({class_name} *)nullptr)->{id_member})"),
+            ),
+            None => ("-", "-1LL".to_owned(), "static_cast<size_t>(0)".to_owned()),
+        };
+        probe.push_str(&format!(
+            "std::printf(\"__error_message_contract__\\t{class_name}\\t{message_type_name}\\t%lld\\t%zu\\t{payload_member}\\t%zu\\t%zu\\t{id_member}\\t%lld\\t%zu\\n\", static_cast<long long>({message_type_name}), sizeof({class_name}), offsetof({class_name}, {payload_member}), sizeof((({class_name} *)nullptr)->{payload_member}), {id_offset}, {id_size});\n"
+        ));
+    }
     probe.push_str("return 0;\n}\n");
     probe
 }
@@ -53,6 +86,7 @@ fn compile(source: &Path, binary: &Path) {
             "-Wall",
             "-Wextra",
             "-Werror",
+            "-Wno-invalid-offsetof",
             "-isystem",
             INCLUDE_ROOT,
             source.to_str().expect("non-UTF-8 probe source path"),
@@ -71,11 +105,57 @@ fn compile(source: &Path, binary: &Path) {
 fn parse(stdout: Vec<u8>) -> Results {
     let mut values = BTreeMap::new();
     let mut status_contracts = BTreeMap::new();
+    let mut error_contracts = BTreeMap::new();
     for line in String::from_utf8(stdout)
         .expect("LinuxCNC code probe produced non-UTF-8 output")
         .lines()
     {
         let fields = line.split('\t').collect::<Vec<_>>();
+        if fields.first() == Some(&"__error_message_contract__") {
+            assert_eq!(
+                fields.len(),
+                11,
+                "malformed LinuxCNC error-message contract line: {line}"
+            );
+            let parse_usize = |index: usize, label: &str| {
+                fields[index]
+                    .parse::<usize>()
+                    .unwrap_or_else(|error| panic!("invalid {label} in {line:?}: {error}"))
+            };
+            let message_type = fields[3]
+                .parse::<i64>()
+                .unwrap_or_else(|error| panic!("invalid error-message type in {line:?}: {error}"));
+            let id_offset_raw = fields[9]
+                .parse::<i64>()
+                .unwrap_or_else(|error| panic!("invalid id offset in {line:?}: {error}"));
+            let (id_member, id_offset) = if fields[8] == "-" {
+                assert_eq!(id_offset_raw, -1, "missing id has an offset in {line:?}");
+                (None, None)
+            } else {
+                assert!(id_offset_raw >= 0, "present id has no offset in {line:?}");
+                (Some(fields[8].to_owned()), Some(id_offset_raw as usize))
+            };
+            assert!(
+                error_contracts
+                    .insert(
+                        fields[1].to_owned(),
+                        ErrorContractValue {
+                            message_type_name: fields[2].to_owned(),
+                            message_type,
+                            message_size: parse_usize(4, "error-message size"),
+                            payload_member: fields[5].to_owned(),
+                            payload_offset: parse_usize(6, "payload offset"),
+                            payload_size: parse_usize(7, "payload size"),
+                            id_member,
+                            id_offset,
+                            id_size: parse_usize(10, "id size"),
+                        },
+                    )
+                    .is_none(),
+                "duplicate LinuxCNC error-message contract: {line}"
+            );
+            continue;
+        }
         if fields.first() == Some(&"__status_message_contract__") {
             assert_eq!(
                 fields.len(),
@@ -125,6 +205,7 @@ fn parse(stdout: Vec<u8>) -> Results {
     Results {
         values,
         status_contracts,
+        error_contracts,
     }
 }
 
@@ -132,10 +213,14 @@ pub(crate) fn run(
     output_directory: &Path,
     domains: &[Domain],
     status_contracts: &[(&str, &str)],
+    error_contracts: &[ErrorMessageSpec],
 ) -> Results {
     let (probe_source, probe_binary) = paths(output_directory);
-    fs::write(&probe_source, source(domains, status_contracts))
-        .expect("failed to write LinuxCNC code probe");
+    fs::write(
+        &probe_source,
+        source(domains, status_contracts, error_contracts),
+    )
+    .expect("failed to write LinuxCNC code probe");
     compile(&probe_source, &probe_binary);
     let result = Command::new(&probe_binary)
         .output()
@@ -159,6 +244,11 @@ pub(crate) fn run(
         parsed.status_contracts.len(),
         status_contracts.len(),
         "LinuxCNC code probe omitted a public status-message contract"
+    );
+    assert_eq!(
+        parsed.error_contracts.len(),
+        error_contracts.len(),
+        "LinuxCNC code probe omitted a public error-message contract"
     );
     parsed
 }

@@ -4,8 +4,8 @@ use std::fs;
 use std::path::{Path, PathBuf};
 
 use super::config::{
-    EXPECTED_HEADER_FNV64, EXPECTED_LINUXCNC_COMMIT, EXPECTED_LINUXCNC_VERSION,
-    STATUS_MESSAGE_CONTRACTS,
+    ERROR_MESSAGE_CONTRACTS, EXPECTED_HEADER_FNV64, EXPECTED_LINUXCNC_COMMIT,
+    EXPECTED_LINUXCNC_VERSION, STATUS_MESSAGE_CONTRACTS,
 };
 use super::domains::{self, Domain};
 use super::parser::{integer_macro, interpreter_error_templates};
@@ -64,11 +64,13 @@ fn preamble(fingerprint: u64, generated_code_count: usize, limits: &MachineLimit
          pub const HEADER_SOURCE_FNV64: u64 = 0x{fingerprint:016x};\n\
          pub const GENERATED_CODE_COUNT: usize = {generated_code_count};\n\
          pub const STATUS_MESSAGE_CONTRACT_COUNT: usize = {};\n\
+         pub const ERROR_MESSAGE_CONTRACT_COUNT: usize = {};\n\
          pub const EMCMOT_MAX_JOINTS: usize = {};\n\
          pub const EMCMOT_MAX_AXIS: usize = {};\n\
          pub const EMCMOT_MAX_SPINDLES: usize = {};\n\
          pub const EMCMOT_MAX_MISC_ERROR: usize = {};\n",
         STATUS_MESSAGE_CONTRACTS.len(),
+        ERROR_MESSAGE_CONTRACTS.len(),
         limits.joints,
         limits.axes,
         limits.spindles,
@@ -99,6 +101,30 @@ fn append_status_contracts(generated: &mut String, results: &Results) {
         let message_size = contract.message_size;
         generated.push_str(&format!(
             "StatusMessageContract {{ class_name: {class_name:?}, message_type_name: {message_type_name:?}, message_type: {message_type}, message_size: {message_size} }},\n"
+        ));
+    }
+    generated.push_str("];\n");
+}
+
+fn append_error_contracts(generated: &mut String, results: &Results) {
+    generated.push_str("pub static ERROR_MESSAGE_CONTRACTS: &[ErrorMessageContract] = &[\n");
+    for expected in ERROR_MESSAGE_CONTRACTS {
+        let contract = &results.error_contracts[expected.class_name];
+        assert_eq!(contract.message_type_name, expected.message_type_name);
+        assert_eq!(contract.payload_member, expected.payload_member);
+        assert_eq!(contract.id_member.as_deref(), expected.id_member);
+        generated.push_str(&format!(
+            "ErrorMessageContract {{ class_name: {:?}, message_type_name: {:?}, message_type: {}, message_size: {}, payload_member: {:?}, payload_offset: {}, payload_size: {}, id_member: {:?}, id_offset: {:?}, id_size: {} }},\n",
+            expected.class_name,
+            contract.message_type_name,
+            contract.message_type,
+            contract.message_size,
+            contract.payload_member,
+            contract.payload_offset,
+            contract.payload_size,
+            contract.id_member.as_deref(),
+            contract.id_offset,
+            contract.id_size,
         ));
     }
     generated.push_str("];\n");
@@ -152,6 +178,7 @@ fn write_catalog(
     let mut generated = preamble(fingerprint, generated_code_count, limits);
     append_interpreter_errors(&mut generated, templates);
     append_status_contracts(&mut generated, results);
+    append_error_contracts(&mut generated, results);
     append_domains(&mut generated, domains, results);
     fs::write(output_directory.join("linuxcnc_code_catalog.rs"), generated)
         .expect("failed to write generated LinuxCNC code catalog");
@@ -165,7 +192,12 @@ pub(crate) fn generate() {
     let limits = machine_limits(&headers);
     let output_directory =
         PathBuf::from(env::var_os("OUT_DIR").expect("Cargo did not provide OUT_DIR"));
-    let results = probe::run(&output_directory, &domains, STATUS_MESSAGE_CONTRACTS);
+    let results = probe::run(
+        &output_directory,
+        &domains,
+        STATUS_MESSAGE_CONTRACTS,
+        ERROR_MESSAGE_CONTRACTS,
+    );
     write_catalog(
         &output_directory,
         &headers,

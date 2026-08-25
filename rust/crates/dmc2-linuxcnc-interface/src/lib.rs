@@ -26,6 +26,20 @@ pub struct StatusMessageContract {
     pub message_size: i64,
 }
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct ErrorMessageContract {
+    pub class_name: &'static str,
+    pub message_type_name: &'static str,
+    pub message_type: i64,
+    pub message_size: usize,
+    pub payload_member: &'static str,
+    pub payload_offset: usize,
+    pub payload_size: usize,
+    pub id_member: Option<&'static str>,
+    pub id_offset: Option<usize>,
+    pub id_size: usize,
+}
+
 impl CodeDomain {
     pub fn lookup(self, code: i64) -> Option<&'static str> {
         self.codes
@@ -47,6 +61,13 @@ pub fn domain(name: &str) -> Option<CodeDomain> {
 
 pub fn status_message_contract(class_name: &str) -> Option<StatusMessageContract> {
     STATUS_MESSAGE_CONTRACTS
+        .iter()
+        .copied()
+        .find(|contract| contract.class_name == class_name)
+}
+
+pub fn error_message_contract(class_name: &str) -> Option<ErrorMessageContract> {
+    ERROR_MESSAGE_CONTRACTS
         .iter()
         .copied()
         .find(|contract| contract.class_name == class_name)
@@ -132,6 +153,50 @@ mod tests {
             for other in STATUS_MESSAGE_CONTRACTS.iter().skip(index + 1) {
                 assert_ne!(contract.class_name, other.class_name);
                 assert_ne!(contract.message_type, other.message_type);
+            }
+        }
+    }
+
+    #[test]
+    fn every_error_channel_message_has_an_exact_payload_layout() {
+        assert_eq!(ERROR_MESSAGE_CONTRACT_COUNT, 6);
+        assert_eq!(ERROR_MESSAGE_CONTRACTS.len(), 6);
+        let expected = [
+            ("NML_ERROR", "NML_ERROR_TYPE", 1, "error"),
+            ("NML_TEXT", "NML_TEXT_TYPE", 2, "text"),
+            ("NML_DISPLAY", "NML_DISPLAY_TYPE", 3, "display"),
+            ("EMC_OPERATOR_ERROR", "EMC_OPERATOR_ERROR_TYPE", 11, "error"),
+            ("EMC_OPERATOR_TEXT", "EMC_OPERATOR_TEXT_TYPE", 12, "text"),
+            (
+                "EMC_OPERATOR_DISPLAY",
+                "EMC_OPERATOR_DISPLAY_TYPE",
+                13,
+                "display",
+            ),
+        ];
+        for (index, contract) in ERROR_MESSAGE_CONTRACTS.iter().enumerate() {
+            let (class_name, type_name, message_type, payload_member) = expected[index];
+            assert_eq!(contract.class_name, class_name);
+            assert_eq!(contract.message_type_name, type_name);
+            assert_eq!(contract.message_type, message_type);
+            assert_eq!(contract.payload_member, payload_member);
+            assert!(contract.message_size >= contract.payload_offset + contract.payload_size);
+            assert_eq!(error_message_contract(class_name), Some(*contract));
+            if class_name.starts_with("NML_") {
+                assert_eq!(contract.payload_size, 256);
+                assert_eq!(contract.id_member, None);
+                assert_eq!(contract.id_offset, None);
+                assert_eq!(contract.id_size, 0);
+                assert_eq!(
+                    NML_OPERATOR_MESSAGE_TYPE.lookup(message_type),
+                    Some(type_name)
+                );
+            } else {
+                assert_eq!(contract.payload_size, 255);
+                assert_eq!(contract.id_member, Some("id"));
+                assert_eq!(contract.id_size, core::mem::size_of::<i32>());
+                assert!(contract.id_offset.is_some());
+                assert_eq!(EMC_NML_MESSAGE_TYPE.lookup(message_type), Some(type_name));
             }
         }
     }
