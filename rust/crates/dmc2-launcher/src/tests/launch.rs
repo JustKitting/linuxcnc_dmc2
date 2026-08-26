@@ -175,6 +175,12 @@ fn direct_plan_is_the_exact_linuxcnc_process_replacement() {
             .get(&OsString::from("LINUXCNC_FORCE_REALTIME")),
         Some(&OsString::from("1"))
     );
+    assert_eq!(
+        command
+            .environment
+            .get(&OsString::from("PYTHONDONTWRITEBYTECODE")),
+        Some(&OsString::from("1"))
+    );
     platform.assert_runs_consumed();
 }
 
@@ -188,6 +194,9 @@ fn persistent_plan_uses_only_the_deployed_rust_launcher() {
     };
     assert_eq!(command.program.to_str(), Some("/usr/bin/systemd-run"));
     assert!(command.arguments.contains(&OsString::from("--quiet")));
+    assert!(command
+        .arguments
+        .contains(&OsString::from("--setenv=PYTHONDONTWRITEBYTECODE=1")));
     assert_eq!(command.arguments.last(), Some(&OsString::from("--live")));
     assert!(command.arguments.contains(
         &layout

@@ -11,6 +11,8 @@ use crate::validation::{self, require_executable, require_success};
 pub const PERSISTENT_UNIT: &str = "dmc2-linuxcnc";
 pub const REALTIME_ENVIRONMENT_NAME: &str = "LINUXCNC_FORCE_REALTIME";
 pub const REALTIME_ENVIRONMENT_VALUE: &str = "1";
+pub const PYTHON_BYTECODE_ENVIRONMENT_NAME: &str = "PYTHONDONTWRITEBYTECODE";
+pub const PYTHON_BYTECODE_ENVIRONMENT_VALUE: &str = "1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
@@ -101,6 +103,10 @@ fn direct_command(layout: &Layout, linuxcnc: std::path::PathBuf) -> CommandSpec 
         OsString::from(REALTIME_ENVIRONMENT_NAME),
         OsString::from(REALTIME_ENVIRONMENT_VALUE),
     );
+    command.environment.insert(
+        OsString::from(PYTHON_BYTECODE_ENVIRONMENT_NAME),
+        OsString::from(PYTHON_BYTECODE_ENVIRONMENT_VALUE),
+    );
     command.working_directory = Some(layout.project.join("live"));
     command
 }
@@ -112,6 +118,7 @@ fn persistent_command(platform: &dyn Platform, layout: &Layout) -> Result<Comman
         "--quiet",
         "--unit=dmc2-linuxcnc",
         "--setenv=LINUXCNC_FORCE_REALTIME=1",
+        "--setenv=PYTHONDONTWRITEBYTECODE=1",
         "--collect",
         "--property=KillMode=control-group",
         "--property=Restart=no",
