@@ -187,6 +187,7 @@ fn persistent_plan_uses_only_the_deployed_rust_launcher() {
         panic!("expected persistent command");
     };
     assert_eq!(command.program.to_str(), Some("/usr/bin/systemd-run"));
+    assert!(command.arguments.contains(&OsString::from("--quiet")));
     assert_eq!(command.arguments.last(), Some(&OsString::from("--live")));
     assert!(command.arguments.contains(
         &layout

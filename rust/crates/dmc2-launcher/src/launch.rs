@@ -109,6 +109,7 @@ fn persistent_command(platform: &dyn Platform, layout: &Layout) -> Result<Comman
     let mut command = CommandSpec::new(require_executable(platform, "systemd-run")?);
     for argument in [
         "--user",
+        "--quiet",
         "--unit=dmc2-linuxcnc",
         "--setenv=LINUXCNC_FORCE_REALTIME=1",
         "--collect",
