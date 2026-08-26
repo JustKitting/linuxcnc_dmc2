@@ -16,6 +16,13 @@ pub(crate) struct ErrorContractValue {
     pub(crate) message_type_name: String,
     pub(crate) message_type: i64,
     pub(crate) message_size: usize,
+    pub(crate) type_offset: usize,
+    pub(crate) type_size: usize,
+    pub(crate) size_offset: usize,
+    pub(crate) size_size: usize,
+    pub(crate) serial_member: Option<String>,
+    pub(crate) serial_offset: Option<usize>,
+    pub(crate) serial_size: usize,
     pub(crate) payload_member: String,
     pub(crate) payload_offset: usize,
     pub(crate) payload_size: usize,
@@ -72,6 +79,14 @@ fn source(
         let class_name = contract.class_name;
         let message_type_name = contract.message_type_name;
         let payload_member = contract.payload_member;
+        let (serial_member, serial_offset, serial_size) = match contract.serial_member {
+            Some(serial_member) => (
+                serial_member,
+                format!("static_cast<long long>(offsetof({class_name}, {serial_member}))"),
+                format!("sizeof((({class_name} *)nullptr)->{serial_member})"),
+            ),
+            None => ("-", "-1LL".to_owned(), "static_cast<size_t>(0)".to_owned()),
+        };
         let (id_member, id_offset, id_size) = match contract.id_member {
             Some(id_member) => (
                 id_member,
@@ -81,7 +96,7 @@ fn source(
             None => ("-", "-1LL".to_owned(), "static_cast<size_t>(0)".to_owned()),
         };
         probe.push_str(&format!(
-            "std::printf(\"__error_message_contract__\\t{class_name}\\t{message_type_name}\\t%lld\\t%zu\\t{payload_member}\\t%zu\\t%zu\\t{id_member}\\t%lld\\t%zu\\n\", static_cast<long long>({message_type_name}), sizeof({class_name}), offsetof({class_name}, {payload_member}), sizeof((({class_name} *)nullptr)->{payload_member}), {id_offset}, {id_size});\n"
+            "std::printf(\"__error_message_contract__\\t{class_name}\\t{message_type_name}\\t%lld\\t%zu\\t%zu\\t%zu\\t%zu\\t%zu\\t{serial_member}\\t%lld\\t%zu\\t{payload_member}\\t%zu\\t%zu\\t{id_member}\\t%lld\\t%zu\\n\", static_cast<long long>({message_type_name}), sizeof({class_name}), offsetof({class_name}, type), sizeof((({class_name} *)nullptr)->type), offsetof({class_name}, size), sizeof((({class_name} *)nullptr)->size), {serial_offset}, {serial_size}, offsetof({class_name}, {payload_member}), sizeof((({class_name} *)nullptr)->{payload_member}), {id_offset}, {id_size});\n"
         ));
     }
     probe.push_str("return 0;\n}\n");
@@ -150,7 +165,7 @@ fn parse(stdout: Vec<u8>) -> Results {
         if fields.first() == Some(&"__error_message_contract__") {
             assert_eq!(
                 fields.len(),
-                11,
+                18,
                 "malformed LinuxCNC error-message contract line: {line}"
             );
             let parse_usize = |index: usize, label: &str| {
@@ -161,15 +176,31 @@ fn parse(stdout: Vec<u8>) -> Results {
             let message_type = fields[3]
                 .parse::<i64>()
                 .unwrap_or_else(|error| panic!("invalid error-message type in {line:?}: {error}"));
-            let id_offset_raw = fields[9]
+            let optional_member = |member_index: usize, offset_index: usize, label: &str| {
+                let offset_raw = fields[offset_index]
+                    .parse::<i64>()
+                    .unwrap_or_else(|error| panic!("invalid {label} offset in {line:?}: {error}"));
+                if fields[member_index] == "-" {
+                    assert_eq!(offset_raw, -1, "missing {label} has an offset in {line:?}");
+                    (None, None)
+                } else {
+                    assert!(offset_raw >= 0, "present {label} has no offset in {line:?}");
+                    (
+                        Some(fields[member_index].to_owned()),
+                        Some(offset_raw as usize),
+                    )
+                }
+            };
+            let (serial_member, serial_offset) = optional_member(9, 10, "serial");
+            let id_offset_raw = fields[16]
                 .parse::<i64>()
                 .unwrap_or_else(|error| panic!("invalid id offset in {line:?}: {error}"));
-            let (id_member, id_offset) = if fields[8] == "-" {
+            let (id_member, id_offset) = if fields[15] == "-" {
                 assert_eq!(id_offset_raw, -1, "missing id has an offset in {line:?}");
                 (None, None)
             } else {
                 assert!(id_offset_raw >= 0, "present id has no offset in {line:?}");
-                (Some(fields[8].to_owned()), Some(id_offset_raw as usize))
+                (Some(fields[15].to_owned()), Some(id_offset_raw as usize))
             };
             assert!(
                 error_contracts
@@ -179,12 +210,19 @@ fn parse(stdout: Vec<u8>) -> Results {
                             message_type_name: fields[2].to_owned(),
                             message_type,
                             message_size: parse_usize(4, "error-message size"),
-                            payload_member: fields[5].to_owned(),
-                            payload_offset: parse_usize(6, "payload offset"),
-                            payload_size: parse_usize(7, "payload size"),
+                            type_offset: parse_usize(5, "message-type offset"),
+                            type_size: parse_usize(6, "message-type size"),
+                            size_offset: parse_usize(7, "message-size offset"),
+                            size_size: parse_usize(8, "message-size size"),
+                            serial_member,
+                            serial_offset,
+                            serial_size: parse_usize(11, "serial size"),
+                            payload_member: fields[12].to_owned(),
+                            payload_offset: parse_usize(13, "payload offset"),
+                            payload_size: parse_usize(14, "payload size"),
                             id_member,
                             id_offset,
-                            id_size: parse_usize(10, "id size"),
+                            id_size: parse_usize(17, "id size"),
                         },
                     )
                     .is_none(),

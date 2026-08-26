@@ -87,6 +87,7 @@ pub(crate) const STATUS_MESSAGE_CONTRACTS: &[(&str, &str)] = &[
 pub(crate) struct ErrorMessageSpec {
     pub(crate) class_name: &'static str,
     pub(crate) message_type_name: &'static str,
+    pub(crate) serial_member: Option<&'static str>,
     pub(crate) payload_member: &'static str,
     pub(crate) id_member: Option<&'static str>,
 }
@@ -95,36 +96,42 @@ pub(crate) const ERROR_MESSAGE_CONTRACTS: &[ErrorMessageSpec] = &[
     ErrorMessageSpec {
         class_name: "NML_ERROR",
         message_type_name: "NML_ERROR_TYPE",
+        serial_member: None,
         payload_member: "error",
         id_member: None,
     },
     ErrorMessageSpec {
         class_name: "NML_TEXT",
         message_type_name: "NML_TEXT_TYPE",
+        serial_member: None,
         payload_member: "text",
         id_member: None,
     },
     ErrorMessageSpec {
         class_name: "NML_DISPLAY",
         message_type_name: "NML_DISPLAY_TYPE",
+        serial_member: None,
         payload_member: "display",
         id_member: None,
     },
     ErrorMessageSpec {
         class_name: "EMC_OPERATOR_ERROR",
         message_type_name: "EMC_OPERATOR_ERROR_TYPE",
+        serial_member: Some("serial_number"),
         payload_member: "error",
         id_member: Some("id"),
     },
     ErrorMessageSpec {
         class_name: "EMC_OPERATOR_TEXT",
         message_type_name: "EMC_OPERATOR_TEXT_TYPE",
+        serial_member: Some("serial_number"),
         payload_member: "text",
         id_member: Some("id"),
     },
     ErrorMessageSpec {
         class_name: "EMC_OPERATOR_DISPLAY",
         message_type_name: "EMC_OPERATOR_DISPLAY_TYPE",
+        serial_member: Some("serial_number"),
         payload_member: "display",
         id_member: Some("id"),
     },

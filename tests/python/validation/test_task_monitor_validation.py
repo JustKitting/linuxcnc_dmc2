@@ -16,7 +16,7 @@ class CompiledTaskMonitorValidationTests(unittest.TestCase):
         return {
             **task_monitor.EXPECTED_VALIDATION_VALUES,
             "public_header_source_fnv64": task_monitor.EXPECTED_PUBLIC_HEADER_SOURCE_FNV64,
-            "snapshot_schema_fnv64": "0x7a1f54f8088b6ed9",
+            "snapshot_schema_fnv64": task_monitor.EXPECTED_SNAPSHOT_SCHEMA_FNV64,
         }
 
     def run_with(self, stdout: str, *, returncode: int = 0, stderr: str = ""):
@@ -89,6 +89,12 @@ class CompiledTaskMonitorValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "field ownership totals"):
             self.run_with(json.dumps(report))
 
+    def test_inconsistent_error_message_byte_ownership_is_rejected(self):
+        report = self.valid_report()
+        report["error_message_padding_bytes"] -= 1
+        with self.assertRaisesRegex(AssertionError, "error-message byte totals"):
+            self.run_with(json.dumps(report))
+
     def test_inconsistent_macro_classification_is_rejected(self):
         report = self.valid_report()
         report["public_macro_inactive"] -= 1
@@ -106,13 +112,16 @@ class CompiledTaskMonitorValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "omitted a LinuxCNC public integer macro"):
             self.run_with(json.dumps(report))
 
-    def test_invalid_or_zero_schema_fingerprint_is_rejected(self):
+    def test_invalid_or_changed_schema_fingerprint_is_rejected(self):
         report = self.valid_report()
         report["snapshot_schema_fnv64"] = "0x0000000000000000"
-        with self.assertRaisesRegex(AssertionError, "must not be zero"):
+        with self.assertRaisesRegex(AssertionError, "snapshot fingerprint changed"):
             self.run_with(json.dumps(report))
         report["snapshot_schema_fnv64"] = "not-a-fingerprint"
         with self.assertRaisesRegex(AssertionError, "invalid task-monitor snapshot"):
+            self.run_with(json.dumps(report))
+        report["snapshot_schema_fnv64"] = "0x1111111111111111"
+        with self.assertRaisesRegex(AssertionError, "snapshot fingerprint changed"):
             self.run_with(json.dumps(report))
 
     def test_invalid_or_zero_public_header_fingerprint_is_rejected(self):

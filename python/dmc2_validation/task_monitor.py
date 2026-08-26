@@ -11,7 +11,7 @@ from types import MappingProxyType
 from .paths import PROJECT_ROOT as ROOT
 
 EXPECTED_VALIDATION_VALUES = MappingProxyType({
-    "schema_version": 3,
+    "schema_version": 4,
     "linuxcnc_version": "2.9.10",
     "linuxcnc_source_commit": "86cdca76fa2a36274c432caa21952b23c267989a",
     "interface_domains": 91,
@@ -37,6 +37,9 @@ EXPECTED_VALIDATION_VALUES = MappingProxyType({
     "handled_interpreter_errors": 198,
     "status_message_contracts": 12,
     "error_message_contracts": 6,
+    "error_message_object_bytes": 1656,
+    "error_message_field_bytes": 1629,
+    "error_message_padding_bytes": 27,
     "snapshot_abi_version": 0x00020911,
     "snapshot_size": 11672,
     "snapshot_logical_fields": 1109,
@@ -47,6 +50,7 @@ EXPECTED_VALIDATION_VALUES = MappingProxyType({
     "snapshot_copy_signature_rounds": 21,
     "interface_all_codes_accounted": True,
     "interface_all_public_macros_classified": True,
+    "error_message_all_bytes_accounted": True,
     "snapshot_copy_all_bytes": True,
 })
 EXPECTED_VALIDATION_KEYS = frozenset(
@@ -57,6 +61,7 @@ EXPECTED_VALIDATION_KEYS = frozenset(
     )
 )
 EXPECTED_PUBLIC_HEADER_SOURCE_FNV64 = "0x8f2986fcf6b52329"
+EXPECTED_SNAPSHOT_SCHEMA_FNV64 = "0x7eb51e89a20d7605"
 
 
 def _compiled_task_monitor() -> Path:
@@ -133,6 +138,11 @@ def compiled_task_monitor_validation() -> dict[str, object]:
     if report["handled_interpreter_errors"] != report["interpreter_errors"]:
         raise AssertionError("task-monitor omitted a LinuxCNC interpreter error")
     if (
+        report["error_message_field_bytes"] + report["error_message_padding_bytes"]
+        != report["error_message_object_bytes"]
+    ):
+        raise AssertionError("task-monitor error-message byte totals do not add up")
+    if (
         report["snapshot_native_copy_fields"]
         + report["snapshot_rust_derived_fields"]
         != report["snapshot_logical_fields"]
@@ -154,8 +164,11 @@ def compiled_task_monitor_validation() -> dict[str, object]:
         raise AssertionError(
             f"invalid task-monitor snapshot fingerprint: {schema_fingerprint!r}"
         )
-    if int(schema_fingerprint, 16) == 0:
-        raise AssertionError("task-monitor snapshot fingerprint must not be zero")
+    if schema_fingerprint != EXPECTED_SNAPSHOT_SCHEMA_FNV64:
+        raise AssertionError(
+            "task-monitor snapshot fingerprint changed: "
+            f"expected={EXPECTED_SNAPSHOT_SCHEMA_FNV64} actual={schema_fingerprint}"
+        )
     header_fingerprint = report["public_header_source_fnv64"]
     if not isinstance(header_fingerprint, str) or not re.fullmatch(
         r"0x[0-9a-f]{16}", header_fingerprint
@@ -185,7 +198,8 @@ def validate_task_monitor_contract() -> str:
         f"{report['interface_codes']} LinuxCNC codes and "
         f"{report['public_integer_macros']} public integer macros and classifies all "
         f"{report['public_macros']} public macro names across {report['public_headers']} headers, "
-        f"{report['interpreter_errors']} interpreter errors, and accounts for every byte of its "
+        f"{report['interpreter_errors']} interpreter errors, every byte of all "
+        f"{report['error_message_contracts']} error-message layouts, and every byte of its "
         f"{report['snapshot_size']}-byte status snapshot across "
         f"{report['snapshot_copy_signature_rounds']} signature rounds and derives "
         f"{report['snapshot_rust_derived_fields']} runtime fields in Rust"

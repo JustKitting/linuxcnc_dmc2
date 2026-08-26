@@ -1,16 +1,16 @@
 use std::collections::BTreeSet;
 
 use dmc2_linuxcnc_interface::{
-    domain, error_message_contract, public_integer_macro_names, public_integer_macro_names_i128,
-    public_macro, status_message_contract, PublicHeaderContract, PublicMacroContract,
-    PublicMacroKind, DOMAINS, EMC_NML_MESSAGE_TYPE, ENUM_CODE_COUNT, ENUM_DECLARATION_COUNT,
-    ENUM_DOMAIN_CONTRACTS, ERROR_MESSAGE_CONTRACTS, ERROR_MESSAGE_CONTRACT_COUNT,
-    GENERATED_CODE_COUNT, INTERPRETER_ERROR_TEMPLATES, LINUXCNC_SOURCE_COMMIT, LINUXCNC_VERSION,
-    NML_OPERATOR_MESSAGE_TYPE, NON_ENUM_CODE_COUNT, PUBLIC_ENUM_HEADERS, PUBLIC_ENUM_HEADER_COUNT,
-    PUBLIC_HEADERS, PUBLIC_HEADER_COUNT, PUBLIC_HEADER_SOURCE_BYTE_COUNT,
-    PUBLIC_HEADER_SOURCE_FNV64, PUBLIC_INTEGER_MACRO_COUNT, PUBLIC_MACROS,
-    PUBLIC_MACRO_DECLARATION_COUNT, PUBLIC_MACRO_NAME_COUNT, STATUS_MESSAGE_CONTRACTS,
-    STATUS_MESSAGE_CONTRACT_COUNT,
+    domain, error_message_contract, error_message_contract_by_type, public_integer_macro_names,
+    public_integer_macro_names_i128, public_macro, status_message_contract, ErrorMessageContract,
+    PublicHeaderContract, PublicMacroContract, PublicMacroKind, DOMAINS, EMC_NML_MESSAGE_TYPE,
+    ENUM_CODE_COUNT, ENUM_DECLARATION_COUNT, ENUM_DOMAIN_CONTRACTS, ERROR_MESSAGE_CONTRACTS,
+    ERROR_MESSAGE_CONTRACT_COUNT, GENERATED_CODE_COUNT, INTERPRETER_ERROR_TEMPLATES,
+    LINUXCNC_SOURCE_COMMIT, LINUXCNC_VERSION, NML_OPERATOR_MESSAGE_TYPE, NON_ENUM_CODE_COUNT,
+    PUBLIC_ENUM_HEADERS, PUBLIC_ENUM_HEADER_COUNT, PUBLIC_HEADERS, PUBLIC_HEADER_COUNT,
+    PUBLIC_HEADER_SOURCE_BYTE_COUNT, PUBLIC_HEADER_SOURCE_FNV64, PUBLIC_INTEGER_MACRO_COUNT,
+    PUBLIC_MACROS, PUBLIC_MACRO_DECLARATION_COUNT, PUBLIC_MACRO_NAME_COUNT,
+    STATUS_MESSAGE_CONTRACTS, STATUS_MESSAGE_CONTRACT_COUNT,
 };
 
 const AUDITED_DOMAIN_COUNT: usize = 91;
@@ -22,6 +22,9 @@ const AUDITED_ENUM_DECLARATION_COUNT: usize = 79;
 const AUDITED_INTERPRETER_ERROR_COUNT: usize = 198;
 const AUDITED_STATUS_MESSAGE_COUNT: usize = 12;
 const AUDITED_ERROR_MESSAGE_COUNT: usize = 6;
+const AUDITED_ERROR_MESSAGE_OBJECT_BYTES: usize = 1_656;
+const AUDITED_ERROR_MESSAGE_FIELD_BYTES: usize = 1_629;
+const AUDITED_ERROR_MESSAGE_PADDING_BYTES: usize = 27;
 const AUDITED_PUBLIC_HEADER_COUNT: usize = 120;
 const AUDITED_PUBLIC_HEADER_SOURCE_BYTE_COUNT: usize = 635_278;
 const AUDITED_PUBLIC_HEADER_SOURCE_FNV64: u64 = 0x8f2986fcf6b52329;
@@ -43,6 +46,9 @@ pub(super) struct InterfaceCoverage {
     pub(super) handled_interpreter_error_count: usize,
     pub(super) status_message_count: usize,
     pub(super) error_message_count: usize,
+    pub(super) error_message_object_bytes: usize,
+    pub(super) error_message_field_bytes: usize,
+    pub(super) error_message_padding_bytes: usize,
     pub(super) public_header_count: usize,
     pub(super) public_header_source_byte_count: usize,
     pub(super) public_header_source_fnv64: u64,
@@ -363,7 +369,40 @@ fn validate_interpreter_errors() -> Result<usize, String> {
     Ok(names.len())
 }
 
-fn validate_message_contracts() -> Result<(), String> {
+fn claim_message_bytes(
+    owners: &mut [Option<&'static str>],
+    class_name: &str,
+    member_name: &'static str,
+    offset: usize,
+    size: usize,
+) -> Result<(), String> {
+    if size == 0 {
+        return Err(format!(
+            "LinuxCNC error message member is empty: {class_name}.{member_name}"
+        ));
+    }
+    let end = offset.checked_add(size).ok_or_else(|| {
+        format!("LinuxCNC error message member range overflow: {class_name}.{member_name}")
+    })?;
+    if end > owners.len() {
+        return Err(format!(
+            "LinuxCNC error message member is outside its object: {class_name}.{member_name}"
+        ));
+    }
+    for owner in &mut owners[offset..end] {
+        if let Some(previous) = owner {
+            return Err(format!(
+                "LinuxCNC error message members overlap: {class_name}.{previous} and {class_name}.{member_name}"
+            ));
+        }
+        *owner = Some(member_name);
+    }
+    Ok(())
+}
+
+fn validate_message_contracts(
+    error_contracts: &[ErrorMessageContract],
+) -> Result<(usize, usize, usize), String> {
     if STATUS_MESSAGE_CONTRACTS.len() != STATUS_MESSAGE_CONTRACT_COUNT
         || STATUS_MESSAGE_CONTRACT_COUNT != AUDITED_STATUS_MESSAGE_COUNT
     {
@@ -389,39 +428,114 @@ fn validate_message_contracts() -> Result<(), String> {
         }
     }
 
-    if ERROR_MESSAGE_CONTRACTS.len() != ERROR_MESSAGE_CONTRACT_COUNT
+    if error_contracts.len() != ERROR_MESSAGE_CONTRACT_COUNT
         || ERROR_MESSAGE_CONTRACT_COUNT != AUDITED_ERROR_MESSAGE_COUNT
     {
         return Err(format!(
             "LinuxCNC error layout inventory has {} entries, expected {AUDITED_ERROR_MESSAGE_COUNT}",
-            ERROR_MESSAGE_CONTRACTS.len()
+            error_contracts.len()
         ));
     }
     let mut error_classes = BTreeSet::new();
     let mut error_types = BTreeSet::new();
-    for contract in ERROR_MESSAGE_CONTRACTS {
-        let expected_name = if contract.class_name.starts_with("NML_") {
+    let mut object_bytes = 0_usize;
+    let mut field_bytes = 0_usize;
+    let mut padding_bytes = 0_usize;
+    for contract in error_contracts {
+        let is_nml_operator_message = contract.class_name.starts_with("NML_");
+        let expected_name = if is_nml_operator_message {
             NML_OPERATOR_MESSAGE_TYPE.lookup(contract.message_type)
         } else {
             EMC_NML_MESSAGE_TYPE.lookup(contract.message_type)
         };
-        let payload_end = contract
-            .payload_offset
-            .checked_add(contract.payload_size)
-            .ok_or_else(|| format!("error payload range overflow: {}", contract.class_name))?;
-        if contract.message_size < payload_end
-            || expected_name != Some(contract.message_type_name)
+        let expected_optional_members = if is_nml_operator_message {
+            (None, None)
+        } else {
+            (Some("serial_number"), Some("id"))
+        };
+        if expected_name != Some(contract.message_type_name)
             || !error_classes.insert(contract.class_name)
             || !error_types.insert(contract.message_type)
             || error_message_contract(contract.class_name) != Some(*contract)
+            || error_message_contract_by_type(contract.message_type) != Some(*contract)
+            || contract.serial_member != expected_optional_members.0
+            || contract.id_member != expected_optional_members.1
+            || contract.serial_member.is_some() != contract.serial_offset.is_some()
+            || contract.id_member.is_some() != contract.id_offset.is_some()
+            || (contract.serial_member.is_none() && contract.serial_size != 0)
+            || (contract.id_member.is_none() && contract.id_size != 0)
         {
             return Err(format!(
                 "invalid LinuxCNC error layout contract: {}",
                 contract.class_name
             ));
         }
+
+        let mut owners = vec![None; contract.message_size];
+        claim_message_bytes(
+            &mut owners,
+            contract.class_name,
+            "type",
+            contract.type_offset,
+            contract.type_size,
+        )?;
+        claim_message_bytes(
+            &mut owners,
+            contract.class_name,
+            "size",
+            contract.size_offset,
+            contract.size_size,
+        )?;
+        if let Some(offset) = contract.serial_offset {
+            claim_message_bytes(
+                &mut owners,
+                contract.class_name,
+                "serial_number",
+                offset,
+                contract.serial_size,
+            )?;
+        }
+        if let Some(offset) = contract.id_offset {
+            claim_message_bytes(
+                &mut owners,
+                contract.class_name,
+                "id",
+                offset,
+                contract.id_size,
+            )?;
+        }
+        claim_message_bytes(
+            &mut owners,
+            contract.class_name,
+            contract.payload_member,
+            contract.payload_offset,
+            contract.payload_size,
+        )?;
+
+        let contract_field_bytes = owners.iter().filter(|owner| owner.is_some()).count();
+        let contract_padding_bytes = owners.len() - contract_field_bytes;
+        object_bytes = object_bytes
+            .checked_add(owners.len())
+            .ok_or_else(|| "LinuxCNC error message object-byte total overflow".to_owned())?;
+        field_bytes = field_bytes
+            .checked_add(contract_field_bytes)
+            .ok_or_else(|| "LinuxCNC error message field-byte total overflow".to_owned())?;
+        padding_bytes = padding_bytes
+            .checked_add(contract_padding_bytes)
+            .ok_or_else(|| "LinuxCNC error message padding-byte total overflow".to_owned())?;
     }
-    Ok(())
+    if error_message_contract_by_type(i64::MIN).is_some()
+        || error_message_contract_by_type(i64::MAX).is_some()
+        || object_bytes != AUDITED_ERROR_MESSAGE_OBJECT_BYTES
+        || field_bytes != AUDITED_ERROR_MESSAGE_FIELD_BYTES
+        || padding_bytes != AUDITED_ERROR_MESSAGE_PADDING_BYTES
+        || field_bytes + padding_bytes != object_bytes
+    {
+        return Err(format!(
+            "LinuxCNC error message byte coverage changed: objects={object_bytes} fields={field_bytes} padding={padding_bytes}"
+        ));
+    }
+    Ok((object_bytes, field_bytes, padding_bytes))
 }
 
 impl InterfaceCoverage {
@@ -438,7 +552,8 @@ impl InterfaceCoverage {
         let (handled_public_integer_macro_count, public_macro_kind_counts) =
             validate_public_macros(PUBLIC_HEADERS, PUBLIC_MACROS)?;
         let handled_interpreter_error_count = validate_interpreter_errors()?;
-        validate_message_contracts()?;
+        let (error_message_object_bytes, error_message_field_bytes, error_message_padding_bytes) =
+            validate_message_contracts(ERROR_MESSAGE_CONTRACTS)?;
         Ok(Self {
             domain_count: DOMAINS.len(),
             code_count: GENERATED_CODE_COUNT,
@@ -451,6 +566,9 @@ impl InterfaceCoverage {
             handled_interpreter_error_count,
             status_message_count: STATUS_MESSAGE_CONTRACTS.len(),
             error_message_count: ERROR_MESSAGE_CONTRACTS.len(),
+            error_message_object_bytes,
+            error_message_field_bytes,
+            error_message_padding_bytes,
             public_header_count: PUBLIC_HEADERS.len(),
             public_header_source_byte_count: PUBLIC_HEADER_SOURCE_BYTE_COUNT,
             public_header_source_fnv64: PUBLIC_HEADER_SOURCE_FNV64,
@@ -501,5 +619,28 @@ mod tests {
         let mut headers = PUBLIC_HEADERS.to_vec();
         headers[0].source_byte_count += 1;
         assert!(validate_public_macros(&headers, PUBLIC_MACROS).is_err());
+    }
+
+    #[test]
+    fn complete_error_message_objects_are_byte_accounted() {
+        assert_eq!(
+            validate_message_contracts(ERROR_MESSAGE_CONTRACTS).unwrap(),
+            (1_656, 1_629, 27)
+        );
+    }
+
+    #[test]
+    fn missing_duplicate_or_mutated_error_message_contract_is_rejected() {
+        let mut missing = ERROR_MESSAGE_CONTRACTS.to_vec();
+        missing.pop();
+        assert!(validate_message_contracts(&missing).is_err());
+
+        let mut duplicate = ERROR_MESSAGE_CONTRACTS.to_vec();
+        duplicate[1] = duplicate[0];
+        assert!(validate_message_contracts(&duplicate).is_err());
+
+        let mut mutated = ERROR_MESSAGE_CONTRACTS.to_vec();
+        mutated[0].payload_offset = mutated[0].type_offset;
+        assert!(validate_message_contracts(&mutated).is_err());
     }
 }

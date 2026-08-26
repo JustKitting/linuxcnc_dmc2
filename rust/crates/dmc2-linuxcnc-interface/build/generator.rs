@@ -232,14 +232,22 @@ fn append_error_contracts(generated: &mut String, results: &Results) {
     for expected in ERROR_MESSAGE_CONTRACTS {
         let contract = &results.error_contracts[expected.class_name];
         assert_eq!(contract.message_type_name, expected.message_type_name);
+        assert_eq!(contract.serial_member.as_deref(), expected.serial_member);
         assert_eq!(contract.payload_member, expected.payload_member);
         assert_eq!(contract.id_member.as_deref(), expected.id_member);
         generated.push_str(&format!(
-            "ErrorMessageContract {{ class_name: {:?}, message_type_name: {:?}, message_type: {}, message_size: {}, payload_member: {:?}, payload_offset: {}, payload_size: {}, id_member: {:?}, id_offset: {:?}, id_size: {} }},\n",
+            "ErrorMessageContract {{ class_name: {:?}, message_type_name: {:?}, message_type: {}, message_size: {}, type_offset: {}, type_size: {}, size_offset: {}, size_size: {}, serial_member: {:?}, serial_offset: {:?}, serial_size: {}, payload_member: {:?}, payload_offset: {}, payload_size: {}, id_member: {:?}, id_offset: {:?}, id_size: {} }},\n",
             expected.class_name,
             contract.message_type_name,
             contract.message_type,
             contract.message_size,
+            contract.type_offset,
+            contract.type_size,
+            contract.size_offset,
+            contract.size_size,
+            contract.serial_member.as_deref(),
+            contract.serial_offset,
+            contract.serial_size,
             contract.payload_member,
             contract.payload_offset,
             contract.payload_size,

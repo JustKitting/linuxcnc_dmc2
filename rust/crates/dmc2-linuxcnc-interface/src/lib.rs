@@ -32,6 +32,13 @@ pub struct ErrorMessageContract {
     pub message_type_name: &'static str,
     pub message_type: i64,
     pub message_size: usize,
+    pub type_offset: usize,
+    pub type_size: usize,
+    pub size_offset: usize,
+    pub size_size: usize,
+    pub serial_member: Option<&'static str>,
+    pub serial_offset: Option<usize>,
+    pub serial_size: usize,
     pub payload_member: &'static str,
     pub payload_offset: usize,
     pub payload_size: usize,
@@ -137,6 +144,13 @@ pub fn error_message_contract(class_name: &str) -> Option<ErrorMessageContract> 
         .iter()
         .copied()
         .find(|contract| contract.class_name == class_name)
+}
+
+pub fn error_message_contract_by_type(message_type: i64) -> Option<ErrorMessageContract> {
+    ERROR_MESSAGE_CONTRACTS
+        .iter()
+        .copied()
+        .find(|contract| contract.message_type == message_type)
 }
 
 pub fn public_macro(header_name: &str, name: &str) -> Option<PublicMacroContract> {
@@ -504,22 +518,75 @@ mod tests {
             assert_eq!(contract.payload_member, payload_member);
             assert!(contract.message_size >= contract.payload_offset + contract.payload_size);
             assert_eq!(error_message_contract(class_name), Some(*contract));
+            assert_eq!(
+                error_message_contract_by_type(message_type),
+                Some(*contract)
+            );
+            assert_eq!(contract.type_offset, 0);
+            assert_eq!(contract.type_size, core::mem::size_of::<i32>());
+            assert_eq!(contract.size_offset, 8);
+            assert_eq!(contract.size_size, core::mem::size_of::<i64>());
+
+            let mut byte_owner = std::vec![None; contract.message_size];
+            let mut claim = |name: &'static str, offset: usize, size: usize| {
+                assert!(size > 0, "{class_name}.{name} is empty");
+                let end = offset.checked_add(size).expect("field range overflowed");
+                assert!(
+                    end <= byte_owner.len(),
+                    "{class_name}.{name} is outside object"
+                );
+                for owner in &mut byte_owner[offset..end] {
+                    assert!(
+                        owner.is_none(),
+                        "{class_name}.{name} overlaps another field"
+                    );
+                    *owner = Some(name);
+                }
+            };
+            claim("type", contract.type_offset, contract.type_size);
+            claim("size", contract.size_offset, contract.size_size);
+            if let Some(offset) = contract.serial_offset {
+                claim("serial_number", offset, contract.serial_size);
+            } else {
+                assert_eq!(contract.serial_size, 0);
+            }
+            if let Some(offset) = contract.id_offset {
+                claim("id", offset, contract.id_size);
+            } else {
+                assert_eq!(contract.id_size, 0);
+            }
+            claim(
+                contract.payload_member,
+                contract.payload_offset,
+                contract.payload_size,
+            );
+            let padding = byte_owner.iter().filter(|owner| owner.is_none()).count();
             if class_name.starts_with("NML_") {
                 assert_eq!(contract.payload_size, 256);
+                assert_eq!(contract.serial_member, None);
+                assert_eq!(contract.serial_offset, None);
+                assert_eq!(contract.serial_size, 0);
                 assert_eq!(contract.id_member, None);
                 assert_eq!(contract.id_offset, None);
                 assert_eq!(contract.id_size, 0);
+                assert_eq!(padding, 4);
                 assert_eq!(
                     NML_OPERATOR_MESSAGE_TYPE.lookup(message_type),
                     Some(type_name)
                 );
             } else {
                 assert_eq!(contract.payload_size, 255);
+                assert_eq!(contract.serial_member, Some("serial_number"));
+                assert_eq!(contract.serial_offset, Some(16));
+                assert_eq!(contract.serial_size, core::mem::size_of::<i32>());
                 assert_eq!(contract.id_member, Some("id"));
+                assert_eq!(contract.id_offset, Some(20));
                 assert_eq!(contract.id_size, core::mem::size_of::<i32>());
-                assert!(contract.id_offset.is_some());
+                assert_eq!(padding, 5);
                 assert_eq!(EMC_NML_MESSAGE_TYPE.lookup(message_type), Some(type_name));
             }
         }
+        assert_eq!(error_message_contract_by_type(i64::MIN), None);
+        assert_eq!(error_message_contract_by_type(i64::MAX), None);
     }
 }

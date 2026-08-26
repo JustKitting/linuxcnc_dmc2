@@ -128,7 +128,7 @@ impl ValidationReport {
 
     fn print_human(&self) {
         println!(
-            "dmc2-task-monitor: program validation passed; linuxcnc_version={} source_commit={} interface_domains={} interface_codes={} handled_codes={} enum_declarations={} public_headers={} public_header_bytes={} public_header_fnv64=0x{:016x} public_macros={} macro_declarations={} integer_macros={} handled_integer_macros={} macro_kinds={}/{}/{}/{}/{}/{} interpreter_errors={} handled_interpreter_errors={} status_contracts={} error_contracts={} snapshot_abi=0x{:08x} snapshot_size={} snapshot_fields={} native_copy_fields={} rust_derived_fields={} copy_rounds={} all_codes_accounted=1 all_bytes_accounted=1",
+            "dmc2-task-monitor: program validation passed; linuxcnc_version={} source_commit={} interface_domains={} interface_codes={} handled_codes={} enum_declarations={} public_headers={} public_header_bytes={} public_header_fnv64=0x{:016x} public_macros={} macro_declarations={} integer_macros={} handled_integer_macros={} macro_kinds={}/{}/{}/{}/{}/{} interpreter_errors={} handled_interpreter_errors={} status_contracts={} error_contracts={} error_object_bytes={} error_field_bytes={} error_padding_bytes={} snapshot_abi=0x{:08x} snapshot_size={} snapshot_fields={} native_copy_fields={} rust_derived_fields={} copy_rounds={} all_codes_accounted=1 error_all_bytes_accounted=1 all_bytes_accounted=1",
             LINUXCNC_VERSION,
             LINUXCNC_SOURCE_COMMIT,
             self.interface.domain_count,
@@ -152,6 +152,9 @@ impl ValidationReport {
             self.interface.handled_interpreter_error_count,
             self.interface.status_message_count,
             self.interface.error_message_count,
+            self.interface.error_message_object_bytes,
+            self.interface.error_message_field_bytes,
+            self.interface.error_message_padding_bytes,
             SNAPSHOT_ABI_VERSION,
             self.native_snapshot_size,
             self.snapshot_native_copy_fields + self.snapshot_rust_derived_fields,
@@ -165,7 +168,7 @@ impl ValidationReport {
         println!(
             concat!(
                 "{{",
-                "\"schema_version\":3,",
+                "\"schema_version\":4,",
                 "\"linuxcnc_version\":\"{}\",",
                 "\"linuxcnc_source_commit\":\"{}\",",
                 "\"interface_domains\":{},",
@@ -192,6 +195,9 @@ impl ValidationReport {
                 "\"handled_interpreter_errors\":{},",
                 "\"status_message_contracts\":{},",
                 "\"error_message_contracts\":{},",
+                "\"error_message_object_bytes\":{},",
+                "\"error_message_field_bytes\":{},",
+                "\"error_message_padding_bytes\":{},",
                 "\"snapshot_abi_version\":{},",
                 "\"snapshot_schema_fnv64\":\"0x{:016x}\",",
                 "\"snapshot_size\":{},",
@@ -203,6 +209,7 @@ impl ValidationReport {
                 "\"snapshot_copy_signature_rounds\":{},",
                 "\"interface_all_codes_accounted\":true,",
                 "\"interface_all_public_macros_classified\":true,",
+                "\"error_message_all_bytes_accounted\":true,",
                 "\"snapshot_copy_all_bytes\":true",
                 "}}"
             ),
@@ -232,6 +239,9 @@ impl ValidationReport {
             self.interface.handled_interpreter_error_count,
             self.interface.status_message_count,
             self.interface.error_message_count,
+            self.interface.error_message_object_bytes,
+            self.interface.error_message_field_bytes,
+            self.interface.error_message_padding_bytes,
             SNAPSHOT_ABI_VERSION,
             SNAPSHOT_SCHEMA_FNV64,
             self.native_snapshot_size,
@@ -287,6 +297,14 @@ mod tests {
         assert_eq!(report.interface.handled_interpreter_error_count, 198);
         assert_eq!(report.interface.status_message_count, 12);
         assert_eq!(report.interface.error_message_count, 6);
+        assert_eq!(report.interface.error_message_object_bytes, 1_656);
+        assert_eq!(report.interface.error_message_field_bytes, 1_629);
+        assert_eq!(report.interface.error_message_padding_bytes, 27);
+        assert_eq!(
+            report.interface.error_message_field_bytes
+                + report.interface.error_message_padding_bytes,
+            report.interface.error_message_object_bytes
+        );
         assert_eq!(report.native_snapshot_size, 11_672);
         assert_eq!(report.snapshot_native_copy_fields, 1_100);
         assert_eq!(report.snapshot_rust_derived_fields, 9);
