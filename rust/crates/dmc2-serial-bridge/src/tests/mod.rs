@@ -3,6 +3,9 @@ mod state;
 
 pub(super) const IDLE: &str = "P3,1,20,0,0,0,0,X,X1,0,0,1";
 
+// The helper spells out every wire field so tests cannot silently inherit a
+// default for a pendant packet field they intend to exercise.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn packet(
     sequence: u32,
     latest_detent: i32,

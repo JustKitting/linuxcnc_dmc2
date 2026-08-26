@@ -4,6 +4,8 @@ use core::mem;
 
 use dmc2_linuxcnc_interface::{LINUXCNC_SOURCE_COMMIT, LINUXCNC_VERSION};
 
+use crate::application::error_channel;
+
 use crate::snapshot::{
     dmc2_task_status_copy_self_test, dmc2_task_status_copy_signature_rounds,
     dmc2_task_status_snapshot_abi_version, dmc2_task_status_snapshot_size,
@@ -20,6 +22,70 @@ struct ValidationReport {
     snapshot_native_copy_fields: usize,
     snapshot_rust_derived_fields: usize,
     snapshot_copy_signature_rounds: u32,
+    error_message_native_abi_version: u32,
+    error_message_native_snapshot_size: usize,
+    error_message_native_field_bytes: usize,
+    error_message_native_padding_bytes: usize,
+    error_message_native_copy_types: usize,
+}
+
+fn error_message_native_byte_coverage() -> Result<(usize, usize), String> {
+    let snapshot = error_channel::RawErrorSnapshot::default();
+    let fields = [
+        (
+            "abi_version",
+            mem::offset_of!(error_channel::RawErrorSnapshot, abi_version),
+            mem::size_of_val(&snapshot.abi_version),
+        ),
+        (
+            "struct_size",
+            mem::offset_of!(error_channel::RawErrorSnapshot, struct_size),
+            mem::size_of_val(&snapshot.struct_size),
+        ),
+        (
+            "message_type",
+            mem::offset_of!(error_channel::RawErrorSnapshot, message_type),
+            mem::size_of_val(&snapshot.message_type),
+        ),
+        (
+            "nml_error",
+            mem::offset_of!(error_channel::RawErrorSnapshot, nml_error),
+            mem::size_of_val(&snapshot.nml_error),
+        ),
+        (
+            "cms_status",
+            mem::offset_of!(error_channel::RawErrorSnapshot, cms_status),
+            mem::size_of_val(&snapshot.cms_status),
+        ),
+        (
+            "object_size",
+            mem::offset_of!(error_channel::RawErrorSnapshot, object_size),
+            mem::size_of_val(&snapshot.object_size),
+        ),
+        (
+            "object",
+            mem::offset_of!(error_channel::RawErrorSnapshot, object),
+            mem::size_of_val(&snapshot.object),
+        ),
+    ];
+    let snapshot_size = mem::size_of::<error_channel::RawErrorSnapshot>();
+    let mut owners = vec![false; snapshot_size];
+    for (name, offset, size) in fields {
+        let end = offset
+            .checked_add(size)
+            .ok_or_else(|| format!("native error-message field range overflow: {name}"))?;
+        if size == 0 || end > snapshot_size {
+            return Err(format!("native error-message field is outside ABI: {name}"));
+        }
+        for owned in &mut owners[offset..end] {
+            if *owned {
+                return Err(format!("overlapping native error-message field: {name}"));
+            }
+            *owned = true;
+        }
+    }
+    let field_bytes = owners.iter().filter(|owned| **owned).count();
+    Ok((field_bytes, snapshot_size - field_bytes))
 }
 
 fn snapshot_byte_coverage() -> Result<(usize, usize), String> {
@@ -60,6 +126,28 @@ fn snapshot_byte_coverage() -> Result<(usize, usize), String> {
 impl ValidationReport {
     fn collect() -> Result<Self, String> {
         let interface = interface::InterfaceCoverage::collect()?;
+        let error_message_native_abi_version = error_channel::abi_version();
+        let error_message_native_snapshot_size = error_channel::snapshot_size();
+        if error_message_native_abi_version != error_channel::ERROR_MESSAGE_ABI_VERSION
+            || error_message_native_snapshot_size
+                != mem::size_of::<error_channel::RawErrorSnapshot>()
+        {
+            return Err(format!(
+                "native error-message ABI mismatch: C++ version=0x{error_message_native_abi_version:08x} size={error_message_native_snapshot_size}, Rust version=0x{:08x} size={}",
+                error_channel::ERROR_MESSAGE_ABI_VERSION,
+                mem::size_of::<error_channel::RawErrorSnapshot>()
+            ));
+        }
+        let (error_message_native_field_bytes, error_message_native_padding_bytes) =
+            error_message_native_byte_coverage()?;
+        if error_message_native_field_bytes + error_message_native_padding_bytes
+            != error_message_native_snapshot_size
+        {
+            return Err(
+                "native error-message byte inventory does not cover the complete ABI".to_owned(),
+            );
+        }
+        let error_message_native_copy_types = error_channel::copy_self_test()? as usize;
         let native_abi = unsafe { dmc2_task_status_snapshot_abi_version() };
         let native_snapshot_size = unsafe { dmc2_task_status_snapshot_size() };
         let rust_snapshot_size = mem::size_of::<NativeSnapshot>();
@@ -123,12 +211,17 @@ impl ValidationReport {
             snapshot_native_copy_fields: snapshot_native_copy_fields as usize,
             snapshot_rust_derived_fields: RUST_DERIVED_FIELD_COUNT,
             snapshot_copy_signature_rounds,
+            error_message_native_abi_version,
+            error_message_native_snapshot_size,
+            error_message_native_field_bytes,
+            error_message_native_padding_bytes,
+            error_message_native_copy_types,
         })
     }
 
     fn print_human(&self) {
         println!(
-            "dmc2-task-monitor: program validation passed; linuxcnc_version={} source_commit={} interface_domains={} interface_codes={} handled_codes={} enum_declarations={} public_headers={} public_header_bytes={} public_header_fnv64=0x{:016x} public_macros={} macro_declarations={} integer_macros={} handled_integer_macros={} macro_kinds={}/{}/{}/{}/{}/{} interpreter_errors={} handled_interpreter_errors={} status_contracts={} error_contracts={} error_object_bytes={} error_field_bytes={} error_padding_bytes={} snapshot_abi=0x{:08x} snapshot_size={} snapshot_fields={} native_copy_fields={} rust_derived_fields={} copy_rounds={} all_codes_accounted=1 error_all_bytes_accounted=1 all_bytes_accounted=1",
+            "dmc2-task-monitor: program validation passed; linuxcnc_version={} source_commit={} interface_domains={} interface_codes={} handled_codes={} enum_declarations={} public_headers={} public_header_bytes={} public_header_fnv64=0x{:016x} public_macros={} macro_declarations={} integer_macros={} handled_integer_macros={} macro_kinds={}/{}/{}/{}/{}/{} interpreter_errors={} handled_interpreter_errors={} status_contracts={} error_contracts={} error_object_bytes={} error_field_bytes={} error_padding_bytes={} error_native_abi=0x{:08x} error_native_size={} error_native_field_bytes={} error_native_padding_bytes={} error_native_copy_types={} snapshot_abi=0x{:08x} snapshot_size={} snapshot_fields={} native_copy_fields={} rust_derived_fields={} copy_rounds={} all_codes_accounted=1 error_all_bytes_accounted=1 all_bytes_accounted=1",
             LINUXCNC_VERSION,
             LINUXCNC_SOURCE_COMMIT,
             self.interface.domain_count,
@@ -155,6 +248,11 @@ impl ValidationReport {
             self.interface.error_message_object_bytes,
             self.interface.error_message_field_bytes,
             self.interface.error_message_padding_bytes,
+            self.error_message_native_abi_version,
+            self.error_message_native_snapshot_size,
+            self.error_message_native_field_bytes,
+            self.error_message_native_padding_bytes,
+            self.error_message_native_copy_types,
             SNAPSHOT_ABI_VERSION,
             self.native_snapshot_size,
             self.snapshot_native_copy_fields + self.snapshot_rust_derived_fields,
@@ -168,7 +266,7 @@ impl ValidationReport {
         println!(
             concat!(
                 "{{",
-                "\"schema_version\":4,",
+                "\"schema_version\":5,",
                 "\"linuxcnc_version\":\"{}\",",
                 "\"linuxcnc_source_commit\":\"{}\",",
                 "\"interface_domains\":{},",
@@ -198,6 +296,11 @@ impl ValidationReport {
                 "\"error_message_object_bytes\":{},",
                 "\"error_message_field_bytes\":{},",
                 "\"error_message_padding_bytes\":{},",
+                "\"error_message_native_abi_version\":{},",
+                "\"error_message_native_snapshot_size\":{},",
+                "\"error_message_native_field_bytes\":{},",
+                "\"error_message_native_padding_bytes\":{},",
+                "\"error_message_native_copy_types\":{},",
                 "\"snapshot_abi_version\":{},",
                 "\"snapshot_schema_fnv64\":\"0x{:016x}\",",
                 "\"snapshot_size\":{},",
@@ -210,6 +313,7 @@ impl ValidationReport {
                 "\"interface_all_codes_accounted\":true,",
                 "\"interface_all_public_macros_classified\":true,",
                 "\"error_message_all_bytes_accounted\":true,",
+                "\"error_message_native_all_bytes_accounted\":true,",
                 "\"snapshot_copy_all_bytes\":true",
                 "}}"
             ),
@@ -242,6 +346,11 @@ impl ValidationReport {
             self.interface.error_message_object_bytes,
             self.interface.error_message_field_bytes,
             self.interface.error_message_padding_bytes,
+            self.error_message_native_abi_version,
+            self.error_message_native_snapshot_size,
+            self.error_message_native_field_bytes,
+            self.error_message_native_padding_bytes,
+            self.error_message_native_copy_types,
             SNAPSHOT_ABI_VERSION,
             SNAPSHOT_SCHEMA_FNV64,
             self.native_snapshot_size,
@@ -305,6 +414,15 @@ mod tests {
                 + report.interface.error_message_padding_bytes,
             report.interface.error_message_object_bytes
         );
+        assert_eq!(report.error_message_native_abi_version, 0x0002_0910);
+        assert_eq!(report.error_message_native_snapshot_size, 304);
+        assert_eq!(report.error_message_native_field_bytes, 304);
+        assert_eq!(report.error_message_native_padding_bytes, 0);
+        assert_eq!(
+            report.error_message_native_field_bytes + report.error_message_native_padding_bytes,
+            report.error_message_native_snapshot_size
+        );
+        assert_eq!(report.error_message_native_copy_types, 6);
         assert_eq!(report.native_snapshot_size, 11_672);
         assert_eq!(report.snapshot_native_copy_fields, 1_100);
         assert_eq!(report.snapshot_rust_derived_fields, 9);

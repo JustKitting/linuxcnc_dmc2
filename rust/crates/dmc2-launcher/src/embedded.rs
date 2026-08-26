@@ -48,9 +48,11 @@ pub const FILES: &[File] = &[
     project_file!("python/dmc2_axis/__init__.py"),
     project_file!("python/dmc2_axis/axis_user_command.py"),
     project_file!("python/dmc2_axis/constants.py"),
+    project_file!("python/dmc2_axis/error_journal.py"),
     project_file!("python/dmc2_axis/notifications.py"),
     project_file!("python/dmc2_axis/pendant_mode.py"),
     project_file!("python/dmc2_axis/pendant_icon.xbm"),
+    project_file!("var/log/linuxcnc/README.md"),
     h100_file!("maps/live/h100-spindle.mbccb"),
     h100_file!("maps/live/h100-spindle.mbccs"),
 ];

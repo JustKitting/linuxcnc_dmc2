@@ -95,6 +95,14 @@ class CompiledTaskMonitorValidationTests(unittest.TestCase):
         with self.assertRaisesRegex(AssertionError, "error-message byte totals"):
             self.run_with(json.dumps(report))
 
+    def test_inconsistent_native_error_message_byte_ownership_is_rejected(self):
+        report = self.valid_report()
+        report["error_message_native_field_bytes"] -= 1
+        with self.assertRaisesRegex(
+            AssertionError, "native error-message byte totals"
+        ):
+            self.run_with(json.dumps(report))
+
     def test_inconsistent_macro_classification_is_rejected(self):
         report = self.valid_report()
         report["public_macro_inactive"] -= 1

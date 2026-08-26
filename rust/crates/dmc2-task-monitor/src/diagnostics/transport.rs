@@ -56,8 +56,8 @@ fn evaluate_cms(report: &mut DiagnosticReport, cms_status: i32, disconnected: bo
             name,
             "native LinuxCNC CMS transport reported an error",
         );
-    } else if !matches!(name, Some("CMS_READ_OLD" | "CMS_READ_OK"))
-        && !(disconnected && name == Some("CMS_STATUS_NOT_SET"))
+    } else if !(matches!(name, Some("CMS_READ_OLD" | "CMS_READ_OK"))
+        || disconnected && name == Some("CMS_STATUS_NOT_SET"))
     {
         issue(
             report,

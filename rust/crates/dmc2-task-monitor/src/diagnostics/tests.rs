@@ -110,7 +110,8 @@ fn every_snapshot_field_has_exactly_one_executed_diagnostic_policy() {
 
 #[test]
 fn every_rcs_error_source_is_classified() {
-    let sources: &[(fn(&mut NativeSnapshot) -> &mut RcsStatusSnapshot, u64)] = &[
+    type RcsSource = fn(&mut NativeSnapshot) -> &mut RcsStatusSnapshot;
+    let sources: &[(RcsSource, u64)] = &[
         (|s| &mut s.top_rcs, category::TOP_RCS),
         (|s| &mut s.task.rcs, category::TASK_RCS),
         (|s| &mut s.motion_rcs, category::MOTION_RCS),

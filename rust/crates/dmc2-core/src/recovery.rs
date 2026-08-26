@@ -126,7 +126,7 @@ impl EstopRecoverySequence {
         }
 
         let signal = sample.latest_detent;
-        if signal < -1 || signal > 1 {
+        if !(-1..=1).contains(&signal) {
             return self.restart_update(sample);
         }
 

@@ -11,7 +11,7 @@ from types import MappingProxyType
 from .paths import PROJECT_ROOT as ROOT
 
 EXPECTED_VALIDATION_VALUES = MappingProxyType({
-    "schema_version": 4,
+    "schema_version": 5,
     "linuxcnc_version": "2.9.10",
     "linuxcnc_source_commit": "86cdca76fa2a36274c432caa21952b23c267989a",
     "interface_domains": 91,
@@ -40,6 +40,11 @@ EXPECTED_VALIDATION_VALUES = MappingProxyType({
     "error_message_object_bytes": 1656,
     "error_message_field_bytes": 1629,
     "error_message_padding_bytes": 27,
+    "error_message_native_abi_version": 0x00020910,
+    "error_message_native_snapshot_size": 304,
+    "error_message_native_field_bytes": 304,
+    "error_message_native_padding_bytes": 0,
+    "error_message_native_copy_types": 6,
     "snapshot_abi_version": 0x00020911,
     "snapshot_size": 11672,
     "snapshot_logical_fields": 1109,
@@ -51,6 +56,7 @@ EXPECTED_VALIDATION_VALUES = MappingProxyType({
     "interface_all_codes_accounted": True,
     "interface_all_public_macros_classified": True,
     "error_message_all_bytes_accounted": True,
+    "error_message_native_all_bytes_accounted": True,
     "snapshot_copy_all_bytes": True,
 })
 EXPECTED_VALIDATION_KEYS = frozenset(
@@ -142,6 +148,14 @@ def compiled_task_monitor_validation() -> dict[str, object]:
         != report["error_message_object_bytes"]
     ):
         raise AssertionError("task-monitor error-message byte totals do not add up")
+    if (
+        report["error_message_native_field_bytes"]
+        + report["error_message_native_padding_bytes"]
+        != report["error_message_native_snapshot_size"]
+    ):
+        raise AssertionError(
+            "task-monitor native error-message byte totals do not add up"
+        )
     if (
         report["snapshot_native_copy_fields"]
         + report["snapshot_rust_derived_fields"]

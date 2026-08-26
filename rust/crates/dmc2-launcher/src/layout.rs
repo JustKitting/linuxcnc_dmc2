@@ -19,7 +19,10 @@ pub fn discover(platform: &dyn Platform) -> Result<Layout, Error> {
             error,
         )
     })?;
-    discover_from(platform, &executable)
+    let Some(executable_directory) = executable.parent() else {
+        return Err(Error::ProjectRootNotFound(executable));
+    };
+    discover_from(platform, executable_directory)
 }
 
 pub fn discover_from(platform: &dyn Platform, start: &Path) -> Result<Layout, Error> {

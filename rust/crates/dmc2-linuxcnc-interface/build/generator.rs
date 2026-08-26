@@ -281,16 +281,28 @@ fn append_domains(generated: &mut String, domains: &[Domain], results: &Results)
     generated.push_str("];\n");
 }
 
-fn write_catalog(
-    output_directory: &Path,
-    headers: &Headers,
-    public_enum_headers: &[PublicEnumHeader],
-    domains: &[Domain],
-    templates: &[(String, String)],
-    results: &Results,
-    macro_inventory: &Inventory,
-    limits: &MachineLimits,
-) {
+struct CatalogInputs<'a> {
+    output_directory: &'a Path,
+    headers: &'a Headers,
+    public_enum_headers: &'a [PublicEnumHeader],
+    domains: &'a [Domain],
+    templates: &'a [(String, String)],
+    results: &'a Results,
+    macro_inventory: &'a Inventory,
+    limits: &'a MachineLimits,
+}
+
+fn write_catalog(inputs: CatalogInputs<'_>) {
+    let CatalogInputs {
+        output_directory,
+        headers,
+        public_enum_headers,
+        domains,
+        templates,
+        results,
+        macro_inventory,
+        limits,
+    } = inputs;
     let fingerprint = header_fingerprint(headers);
     assert_eq!(
         fingerprint, EXPECTED_HEADER_FNV64,
@@ -347,14 +359,14 @@ pub(crate) fn generate() {
         STATUS_MESSAGE_CONTRACTS,
         ERROR_MESSAGE_CONTRACTS,
     );
-    write_catalog(
-        &output_directory,
-        &headers,
-        &public_enum_headers,
-        &domains,
-        &templates,
-        &results,
-        &macro_inventory,
-        &limits,
-    );
+    write_catalog(CatalogInputs {
+        output_directory: &output_directory,
+        headers: &headers,
+        public_enum_headers: &public_enum_headers,
+        domains: &domains,
+        templates: &templates,
+        results: &results,
+        macro_inventory: &macro_inventory,
+        limits: &limits,
+    });
 }

@@ -14,6 +14,9 @@ pub(super) fn domain_id(domain: CodeDomain) -> u32 {
         .expect("LinuxCNC domain index does not fit in u32")
 }
 
+// Every argument maps directly to one field of `Issue`; keeping that mapping
+// visible at call sites prevents diagnostic provenance from being defaulted.
+#[allow(clippy::too_many_arguments)]
 pub(super) fn issue(
     report: &mut DiagnosticReport,
     severity: Severity,

@@ -21,7 +21,7 @@ unsafe fn write<T: Copy>(pointer: *mut T, value: T) {
 }
 
 unsafe fn generation(pointer: *mut hal::hal_u32_t) -> u32 {
-    unsafe { (&*pointer.cast::<AtomicU32>()).load(Ordering::SeqCst) }
+    unsafe { (*pointer.cast::<AtomicU32>()).load(Ordering::SeqCst) }
 }
 
 const fn generation_is_coherent(first: u32, second: u32) -> bool {

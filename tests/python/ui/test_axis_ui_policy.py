@@ -23,14 +23,36 @@ from dmc2_axis import (
 )
 
 
-class FakeErrorChannel:
-    def __init__(self, errors):
-        self.errors = list(errors)
+class FakeJournalEvent:
+    def __init__(self, sequence, message_type, message):
+        self.sequence = sequence
+        self.message_type = message_type
+        self.message = message
+        self.serial_number = None
+        self.operator_id = None
+
+    def display_text(self):
+        return self.message
+
+    def __repr__(self):
+        return repr((self.message_type, self.message))
+
+
+class FakeJournalReader:
+    def __init__(self, records):
+        self.records = []
+        sequence = 1
+        for record in records:
+            if isinstance(record, tuple) and len(record) == 2:
+                self.records.append(FakeJournalEvent(sequence, *record))
+                sequence += 1
+            else:
+                self.records.append(record)
 
     def poll(self):
-        if not self.errors:
+        if not self.records:
             return None
-        result = self.errors.pop(0)
+        result = self.records.pop(0)
         if isinstance(result, BaseException):
             raise result
         return result
@@ -137,6 +159,16 @@ class FakeBitmapImage:
 
 
 class AxisUiPolicyTests(unittest.TestCase):
+    def setUp(self):
+        self.journal_reader = FakeJournalReader([])
+        reader_patch = patch.object(
+            notification_policy,
+            "ErrorJournalReader",
+            side_effect=lambda: self.journal_reader,
+        )
+        reader_patch.start()
+        self.addCleanup(reader_patch.stop)
+
     def make_namespace(self, errors):
         linuxcnc = types.SimpleNamespace(
             version="2.9.10",
@@ -153,8 +185,9 @@ class AxisUiPolicyTests(unittest.TestCase):
             error_after=None,
             error_task=lambda: None,
         )
+        self.journal_reader = FakeJournalReader(errors)
         namespace = {
-            "e": FakeErrorChannel(errors),
+            "e": object(),
             "linuxcnc": linuxcnc,
             "notifications": notifications,
             "live_plotter": live_plotter,
@@ -171,6 +204,7 @@ class AxisUiPolicyTests(unittest.TestCase):
         namespace, notifications, live_plotter = self.make_namespace(errors)
 
         install_axis_ui_policy(namespace)
+        self.assertIsNone(namespace["e"])
         live_plotter.error_task()
 
         self.assertEqual(

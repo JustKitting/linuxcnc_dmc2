@@ -50,25 +50,31 @@ fn main() {
         PathBuf::from(env::var_os("CARGO_MANIFEST_DIR").expect("missing CARGO_MANIFEST_DIR"));
     let native = manifest.join("src/native");
     let snapshot_header = native.join("status_snapshot.h");
+    let error_message_header = native.join("error_message.h");
     let output_directory =
         PathBuf::from(env::var_os("OUT_DIR").expect("Cargo did not provide OUT_DIR"));
 
     const NATIVE_SOURCES: &[&str] = &[
         "status_copy.cc",
         "status_channel.cc",
+        "error_message_copy.cc",
+        "error_channel.cc",
         "tests/status_fixture_common.cc",
         "tests/status_fixture_task.cc",
         "tests/status_fixture_trajectory.cc",
         "tests/status_fixture_motion_components.cc",
         "tests/status_fixture_io.cc",
         "tests/status_copy_fixture.cc",
+        "tests/error_message_fixture.cc",
     ];
 
     for path in [
         manifest.join("build.rs"),
         manifest.join("build/status_schema.rs"),
         snapshot_header.clone(),
+        error_message_header.clone(),
         native.join("status_copy.hh"),
+        native.join("error_message_copy.hh"),
         native.join("tests/status_fixture.hh"),
     ] {
         println!("cargo:rerun-if-changed={}", path.display());
@@ -105,8 +111,10 @@ fn main() {
         ("motion.h", "src/emc/motion/motion.h"),
         ("state_tag.h", "src/emc/motion/state_tag.h"),
         ("stat_msg.hh", "src/libnml/nml/stat_msg.hh"),
+        ("cmd_msg.hh", "src/libnml/nml/cmd_msg.hh"),
         ("nmlmsg.hh", "src/libnml/nml/nmlmsg.hh"),
         ("nml.hh", "src/libnml/nml/nml.hh"),
+        ("nml_oi.hh", "src/libnml/nml/nml_oi.hh"),
         ("nml_type.hh", "src/libnml/nml/nml_type.hh"),
     ] {
         exact_header(&manifest, installed, source);
@@ -138,6 +146,32 @@ fn main() {
         ],
     );
     status_schema::generate(&snapshot_header, &output_directory);
+
+    let error_bindings = output_directory.join("error_message_bindings.rs");
+    run(
+        "bindgen",
+        &[
+            path_text(&error_message_header),
+            "--allowlist-type",
+            "^dmc2_error_.*",
+            "--allowlist-function",
+            "^dmc2_error_.*",
+            "--allowlist-var",
+            "^DMC2_ERROR_.*",
+            "--use-core",
+            "--with-derive-default",
+            "--with-derive-partialeq",
+            "--no-prepend-enum-name",
+            "--formatter",
+            "rustfmt",
+            "--output",
+            path_text(&error_bindings),
+            "--",
+            "-x",
+            "c",
+            "-std=c11",
+        ],
+    );
 
     let mut objects = Vec::new();
     for source_name in NATIVE_SOURCES {

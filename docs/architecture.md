@@ -14,10 +14,23 @@ LinuxCNC NML status
   -> task_status_shim.cc (version-locked C++ snapshot)
   -> dmc2-task-monitor (diagnostics + coherent HAL snapshot)
   -> dmc2_rt.so
+
+LinuxCNC emcError queue
+  -> error_channel.cc (the sole NML queue reader + version-locked raw snapshot)
+  -> dmc2-task-monitor (total classification + synchronized checksummed journal)
+  -> dmc2_axis/error_journal.py (validation and presentation only)
+  -> AXIS notifications
 ```
 
 LinuxCNC is the only Mesa owner. No Python process is in the live motion,
 limit, E-stop, watchdog, or spindle-command loop.
+
+The error queue has exactly one consumer. AXIS releases its stock Python NML
+error reader before polling the Rust-owned journal, so two processes can never
+advance the same queued channel. The Rust journal retains the complete native
+object, including type, declared size, serial number, operator ID, payload,
+padding, transport state, and every uninterpreted byte. AXIS does not infer or
+control machine state from that journal; it validates and displays records.
 
 ## Source responsibilities
 
@@ -27,11 +40,13 @@ limit, E-stop, watchdog, or spindle-command loop.
   registration, coherent input transport, and output publication.
 - `rust/crates/dmc2-serial-bridge`: bounded P3 parsing, serial lifecycle, and
   coherent read-only pendant HAL publication.
-- `rust/crates/dmc2-task-monitor`: native NML lifecycle, source-backed status
-  classification, transition diagnostics, and coherent status HAL publication.
+- `rust/crates/dmc2-task-monitor`: native status and sole error-queue NML
+  lifecycles, source-backed total classification, transition diagnostics,
+  durable error journaling, and coherent status HAL publication.
 - `rust/crates/dmc2-linuxcnc-interface`: generated, version-locked values and
-  status sizes consumed by the task monitor. It does not inventory unrelated
-  LinuxCNC headers or codes.
+  layouts consumed by the task monitor, including every public header, enum,
+  integer macro, status object, and error-message object in the pinned source
+  contract.
 - `rust/crates/dmc2-launcher`: the standard compiled live-launch boundary;
   byte-exact profile/deployment checks, process-owner exclusion, persistent
   service creation, and direct LinuxCNC process replacement.

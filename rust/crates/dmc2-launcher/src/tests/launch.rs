@@ -22,7 +22,7 @@ fn owner_probe_accepts_only_clean_pgrep_no_match_results() {
 
 #[test]
 fn every_owner_pattern_and_multiple_owners_are_reported() {
-    for selected in 0..CONFLICT_PATTERNS.len() {
+    for (selected, &selected_pattern) in CONFLICT_PATTERNS.iter().enumerate() {
         let (platform, _) = MockPlatform::nominal();
         clear_nominal_validation(&platform);
         for (index, pattern) in CONFLICT_PATTERNS.iter().enumerate() {
@@ -36,7 +36,7 @@ fn every_owner_pattern_and_multiple_owners_are_reported() {
         assert_eq!(
             assert_exclusive(&platform),
             Err(Error::OwnerConflict(vec![OwnerMatch {
-                pattern: CONFLICT_PATTERNS[selected],
+                pattern: selected_pattern,
                 stdout: b"123\n".to_vec(),
                 stderr: Vec::new(),
             }]))

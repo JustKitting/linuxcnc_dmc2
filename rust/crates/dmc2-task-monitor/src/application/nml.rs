@@ -20,13 +20,13 @@ pub(super) enum PollDisposition {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct PollCodes {
-    no_error: i32,
-    invalid_configuration: i32,
-    invalid_message: i32,
-    status_message_type: i32,
-    cms_status_not_set: i32,
-    cms_read_old: i32,
-    cms_read_ok: i32,
+    pub(super) no_error: i32,
+    pub(super) invalid_configuration: i32,
+    pub(super) invalid_message: i32,
+    pub(super) status_message_type: i32,
+    pub(super) cms_status_not_set: i32,
+    pub(super) cms_read_old: i32,
+    pub(super) cms_read_ok: i32,
 }
 
 impl PollCodes {
@@ -252,6 +252,7 @@ impl Drop for StatusChannel {
 
 #[cfg(test)]
 mod tests {
+    use std::collections::BTreeSet;
     use std::ptr;
 
     use super::*;
@@ -468,6 +469,48 @@ mod tests {
                 fault(transport, false)
             );
             assert!(!transport.healthy_after_open(codes));
+        }
+    }
+
+    #[test]
+    fn every_nml_error_and_unknown_value_is_classified_exactly() {
+        let codes = PollCodes::required();
+        let nml_errors = NML_ERROR
+            .codes
+            .iter()
+            .map(|entry| i32::try_from(entry.code).unwrap())
+            .chain([i32::MIN, i32::MAX])
+            .collect::<BTreeSet<_>>();
+        for nml_error in nml_errors {
+            for (message_type, cms_status) in [
+                (codes.status_message_type, codes.cms_read_ok),
+                (0, codes.cms_read_old),
+                (77, codes.cms_read_ok),
+            ] {
+                let transport = TransportStatus {
+                    nml_error,
+                    cms_status,
+                };
+                let decision = classify_observation(
+                    DMC2_TASK_STATUS_NATIVE_OK,
+                    message_type,
+                    nml_error,
+                    cms_status,
+                    false,
+                    codes,
+                );
+                if nml_error != codes.no_error {
+                    assert_eq!(decision, fault(transport, false));
+                }
+            }
+            assert_eq!(
+                TransportStatus {
+                    nml_error,
+                    cms_status: codes.cms_status_not_set,
+                }
+                .healthy_after_open(codes),
+                nml_error == codes.no_error
+            );
         }
     }
 

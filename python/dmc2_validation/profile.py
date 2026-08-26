@@ -221,6 +221,7 @@ def validate_live_hal() -> list[str]:
     required_pendant_tokens = (
         "../native/bin/dmc2-serial-bridge",
         "../native/bin/dmc2-task-monitor",
+        "--error-journal ../var/log/linuxcnc/error-channel.tsv",
         "dmc2-pendant.snapshot-generation",
         "dmc2-pendant-control.snapshot-generation",
         "dmc2-task-monitor.task-heartbeat => dmc2-pendant-control.task-heartbeat",

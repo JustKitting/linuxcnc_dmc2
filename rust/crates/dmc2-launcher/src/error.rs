@@ -1,4 +1,5 @@
 use std::fmt;
+use std::fmt::Write as _;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::path::PathBuf;
@@ -149,17 +150,17 @@ impl fmt::Display for Error {
                 render_bytes(stderr)
             ),
             Self::OwnerConflict(matches) => {
-                let evidence = matches
-                    .iter()
-                    .map(|item| {
-                        format!(
-                            "; pattern={:?} stdout={} stderr={}",
-                            item.pattern,
-                            render_bytes(&item.stdout),
-                            render_bytes(&item.stderr)
-                        )
-                    })
-                    .collect::<String>();
+                let mut evidence = String::new();
+                for item in matches {
+                    write!(
+                        &mut evidence,
+                        "; pattern={:?} stdout={} stderr={}",
+                        item.pattern,
+                        render_bytes(&item.stdout),
+                        render_bytes(&item.stderr)
+                    )
+                    .expect("writing formatted owner evidence to a String cannot fail");
+                }
                 write!(
                     formatter,
                     "another LinuxCNC/HAL/Mesa owner may be active{evidence}"

@@ -2,13 +2,14 @@
 
 from __future__ import annotations
 
-from collections.abc import Mapping
+from collections.abc import Mapping, MutableMapping
 
 from .constants import (
     ERROR_CHANNEL_KIND_DEFINITIONS,
     EXPECTED_LIMIT_STOP_MESSAGE,
     REQUIRED_LINUXCNC_VERSION,
 )
+from .error_journal import ErrorJournalReader
 
 
 def error_channel_kind_catalog(linuxcnc_module) -> dict[int, tuple[str, str]]:
@@ -51,15 +52,22 @@ def should_suppress_notification(kind, message: str, linuxcnc_module) -> bool:
     )
 
 
-def install_axis_ui_policy(namespace: Mapping[str, object]) -> None:
+def install_axis_ui_policy(
+    namespace: MutableMapping[str, object],
+    *,
+    journal_reader_factory=None,
+) -> None:
     """Install error-channel policy into AXIS's USER_COMMAND_FILE globals."""
     live_plotter = namespace["live_plotter"]
     if getattr(live_plotter, "_dmc2_ui_policy_installed", False):
         return
 
-    error_channel = namespace["e"]
+    if not isinstance(namespace, MutableMapping):
+        raise RuntimeError("AXIS namespace must permit disabling its competing NML reader")
     linuxcnc_module = namespace["linuxcnc"]
     kind_catalog = error_channel_kind_catalog(linuxcnc_module)
+    journal_reader = (journal_reader_factory or ErrorJournalReader)()
+    namespace["e"] = None
     notifications = namespace["notifications"]
     original_add = notifications.add
 
@@ -77,7 +85,7 @@ def install_axis_ui_policy(namespace: Mapping[str, object]) -> None:
         try:
             while True:
                 try:
-                    error = error_channel.poll()
+                    event = journal_reader.poll()
                 except Exception as polling_error:
                     print(
                         "DMC2_LINUXCNC_ERROR_CHANNEL "
@@ -90,21 +98,20 @@ def install_axis_ui_policy(namespace: Mapping[str, object]) -> None:
                         f"LinuxCNC error-channel polling failed: {polling_error}",
                     )
                     break
-                if error is None:
+                if event is None:
                     break
                 try:
-                    kind, raw_message = error
-                    kind = int(kind)
-                    message = str(raw_message)
+                    kind = int(event.message_type)
+                    message = str(event.display_text())
                 except Exception as malformed:
                     print(
                         "DMC2_LINUXCNC_ERROR_CHANNEL "
                         "kind=malformed name=UNKNOWN severity=error suppressed=0 "
-                        f"record={error!r} exception={malformed!r}",
+                        f"record={event!r} exception={malformed!r}",
                         flush=True,
                     )
                     notifications.add(
-                        "error", f"Malformed LinuxCNC error record: {error!r}"
+                        "error", f"Malformed LinuxCNC error record: {event!r}"
                     )
                 else:
                     name, severity = kind_catalog.get(kind, ("UNKNOWN", "error"))
@@ -115,7 +122,9 @@ def install_axis_ui_policy(namespace: Mapping[str, object]) -> None:
                     )
                     print(
                         "DMC2_LINUXCNC_ERROR_CHANNEL "
-                        f"kind={kind} name={name} severity={severity} "
+                        f"sequence={event.sequence} kind={kind} name={name} "
+                        f"severity={severity} serial={event.serial_number!r} "
+                        f"operator_id={event.operator_id!r} "
                         f"suppressed={int(suppressed)} message={message!r}",
                         flush=True,
                     )

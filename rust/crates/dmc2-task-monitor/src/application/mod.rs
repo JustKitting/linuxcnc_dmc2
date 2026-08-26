@@ -1,24 +1,16 @@
 mod cli;
 mod diagnostic_state;
+mod error_channel;
 mod hal;
 mod nml;
 mod program_validation;
+mod runtime;
 
-use std::ffi::CString;
 use std::mem;
-use std::thread;
-use std::time::Duration;
 
-use crate::diagnostics;
 use crate::snapshot::{NativeSnapshot, SNAPSHOT_ABI_VERSION};
 
 use self::cli::arguments;
-use self::diagnostic_state::DiagnosticState;
-use self::hal::HalPublisher;
-use self::nml::{PollCodes, PollDisposition, StatusChannel};
-
-const POLL_PERIOD: Duration = Duration::from_millis(10);
-const RECONNECT_PERIOD: Duration = Duration::from_secs(1);
 
 pub(super) fn run() -> Result<(), String> {
     let args = arguments()?;
@@ -30,87 +22,19 @@ pub(super) fn run() -> Result<(), String> {
             mem::size_of::<NativeSnapshot>()
         ));
     }
+    let native_error_abi = error_channel::abi_version();
+    let native_error_size = error_channel::snapshot_size();
+    if native_error_abi != error_channel::ERROR_MESSAGE_ABI_VERSION
+        || native_error_size != mem::size_of::<error_channel::RawErrorSnapshot>()
+    {
+        return Err(format!(
+            "native error-message ABI mismatch: C++ version=0x{native_error_abi:08x} size={native_error_size}, Rust version=0x{:08x} size={}",
+            error_channel::ERROR_MESSAGE_ABI_VERSION,
+            mem::size_of::<error_channel::RawErrorSnapshot>()
+        ));
+    }
     if args.validate {
         return program_validation::run(args.validation_json);
     }
-
-    let nml_file = CString::new(args.nml_file.as_str())
-        .map_err(|_| "NML file path contained a NUL byte".to_owned())?;
-    let hal = HalPublisher::new(&args.component)?;
-    let mut channel = None;
-    let mut diagnostic_state = DiagnosticState::new();
-    let poll_codes = PollCodes::required();
-
-    loop {
-        if channel.is_none() {
-            let (opened, transport) = StatusChannel::open(&nml_file, poll_codes);
-            channel = opened;
-            if channel.is_none() || !transport.healthy_after_open(poll_codes) {
-                channel = None;
-                hal.increment_poll_errors();
-                hal.publish(
-                    NativeSnapshot::safe(),
-                    false,
-                    true,
-                    transport,
-                    &diagnostics::disconnected(transport.nml_error, transport.cms_status),
-                    &mut diagnostic_state,
-                );
-                thread::sleep(RECONNECT_PERIOD);
-                continue;
-            }
-        }
-
-        let mut snapshot = NativeSnapshot::safe();
-        let outcome = channel
-            .as_mut()
-            .expect("NML channel was checked above")
-            .poll(&mut snapshot, poll_codes);
-        if outcome.disposition == PollDisposition::WaitingForFirstStatus {
-            thread::sleep(POLL_PERIOD);
-            continue;
-        }
-        let transport_ok = outcome.disposition == PollDisposition::Snapshot;
-        let snapshot_ok = snapshot.valid_abi();
-        if transport_ok && snapshot_ok {
-            let report = diagnostics::evaluate_with_transport(
-                &snapshot,
-                outcome.transport.nml_error,
-                outcome.transport.cms_status,
-            );
-            hal.publish(
-                snapshot,
-                true,
-                false,
-                outcome.transport,
-                &report,
-                &mut diagnostic_state,
-            );
-        } else {
-            hal.increment_poll_errors();
-            let report = if transport_ok {
-                diagnostics::evaluate_with_transport(
-                    &snapshot,
-                    outcome.transport.nml_error,
-                    outcome.transport.cms_status,
-                )
-            } else {
-                diagnostics::disconnected(outcome.transport.nml_error, outcome.transport.cms_status)
-            };
-            hal.publish(
-                NativeSnapshot::safe(),
-                false,
-                true,
-                outcome.transport,
-                &report,
-                &mut diagnostic_state,
-            );
-            channel = None;
-        }
-        thread::sleep(if transport_ok && snapshot_ok {
-            POLL_PERIOD
-        } else {
-            RECONNECT_PERIOD
-        });
-    }
+    runtime::run(args)
 }

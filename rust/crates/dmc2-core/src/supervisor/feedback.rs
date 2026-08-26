@@ -19,8 +19,8 @@ pub(super) fn stepgen_position_pulses(
         return Err(StepgenFeedbackError::Unavailable);
     }
     let fractional_phase = position_pulses - generated_count as f64;
-    if fractional_phase < -STEPGEN_PHASE_EPSILON_PULSES
-        || fractional_phase >= 1.0 + STEPGEN_PHASE_EPSILON_PULSES
+    if !(-STEPGEN_PHASE_EPSILON_PULSES..1.0 + STEPGEN_PHASE_EPSILON_PULSES)
+        .contains(&fractional_phase)
     {
         return Err(StepgenFeedbackError::Incoherent);
     }

@@ -78,7 +78,7 @@ impl LinuxCncPendantSupervisor {
         let same_motion = self.phase == Phase::Idle
             && active.intent.motor == intent.motor
             && active.intent.axis == intent.axis
-            && active.joint_jog == !inputs.machine.all_homed()
+            && active.joint_jog != inputs.machine.all_homed()
             && active.toward_positive_limit() == (intent.delta_pulses > 0);
         if same_motion && inputs.command_channel_ready {
             let current_count = inputs.counts_by_motor[intent.motor];

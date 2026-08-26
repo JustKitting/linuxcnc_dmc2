@@ -383,10 +383,10 @@ fn publish_task_state(
     set_bit("dmc2-pendant-control.joint-mode", joint_mode);
     set_bit("dmc2-pendant-control.teleop-mode", teleop_mode);
     set_bit("dmc2-pendant-control.interp-idle", true);
-    for index in 0..3 {
+    for (index, &is_homed) in homed.iter().enumerate() {
         set_bit(
             &format!("dmc2-pendant-control.joint-{index}-homed"),
-            homed[index],
+            is_homed,
         );
         set_bit(&format!("dmc2-pendant-control.joint-{index}-homing"), false);
         set_bit(&format!("dmc2-pendant-control.axis-{index}-stopped"), true);

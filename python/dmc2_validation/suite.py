@@ -1,7 +1,11 @@
 """Composition root for the complete offline profile validation."""
 
+import shlex
 import shutil
 
+from dmc2_axis.error_journal import default_error_journal_path
+
+from .axis import validate_axis_error_reader_handoff
 from .common import (
     executable_hal_text,
     pin_names_from_panel,
@@ -44,6 +48,18 @@ def validate() -> list[str]:
         raise AssertionError("AXIS policy does not identify the exact expected limit stop")
     if "notifications.add = add_without_covering_status_panel" not in axis_policy:
         raise AssertionError("AXIS notifications are not moved away from the status panel")
+    required_error_ownership = (
+        'namespace["e"] = None',
+        "journal_reader.poll()",
+        'JOURNAL_HEADER_MARKER = "DMC2_ERROR_JOURNAL"',
+        'JOURNAL_EVENT_MARKER = "DMC2_ERROR_EVENT"',
+    )
+    missing = [token for token in required_error_ownership if token not in axis_policy]
+    if missing or "error_channel.poll()" in axis_policy:
+        raise AssertionError(
+            "Rust/AXIS error-channel ownership is incomplete: "
+            f"missing={missing} competing_reader={'error_channel.poll()' in axis_policy}"
+        )
     required_pendant_mode_policy = (
         'PENDANT_MODE_PIN = "pendant-mode-enabled"',
         'CONTROLLER_AVAILABLE_PIN = "controller-available"',
@@ -93,9 +109,29 @@ def validate() -> list[str]:
     live_pendant = (LIVE_DIR / "pendant.hal").read_text(encoding="utf-8")
     if "python3" in executable_hal_text(LIVE_DIR / "pendant.hal"):
         raise AssertionError("live pendant control still invokes Python")
+    monitor_lines = [
+        shlex.split(line)
+        for line in live_pendant.splitlines()
+        if line.strip().startswith("loadusr ") and "dmc2-task-monitor" in line
+    ]
+    if len(monitor_lines) != 1 or "--error-journal" not in monitor_lines[0]:
+        raise AssertionError("task monitor does not own one explicit error journal")
+    monitor_arguments = monitor_lines[0]
+    journal_option = monitor_arguments.index("--error-journal")
+    if journal_option + 1 >= len(monitor_arguments):
+        raise AssertionError("task-monitor error journal has no path")
+    hal_journal = (LIVE_DIR / monitor_arguments[journal_option + 1]).resolve()
+    axis_journal = default_error_journal_path().resolve()
+    if hal_journal != axis_journal:
+        raise AssertionError(
+            f"Rust and AXIS error-journal paths differ: {hal_journal} != {axis_journal}"
+        )
+    if not (hal_journal.parent / "README.md").is_file():
+        raise AssertionError("error-journal parent is not preserved by the project")
     checks.append(
-        "AXIS hides only the expected realtime limit-stop popup and preserves other notifications"
+        "Rust exclusively drains complete LinuxCNC error objects and AXIS presents the checksummed journal"
     )
+    checks.append(validate_axis_error_reader_handoff())
     checks.append(
         "AXIS keeps the requested Pendant panel visible through readiness and fault transitions while realtime control remains gated"
     )

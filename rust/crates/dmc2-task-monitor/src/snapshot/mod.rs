@@ -116,11 +116,13 @@ pub(crate) fn snapshot_schema_fingerprint() -> u64 {
 
 impl NativeSnapshot {
     pub fn safe() -> Self {
-        let mut snapshot = Self::default();
-        snapshot.abi_version = SNAPSHOT_ABI_VERSION;
-        snapshot.struct_size = core::mem::size_of::<Self>()
-            .try_into()
-            .expect("native snapshot size exceeds its u32 ABI field");
+        let mut snapshot = Self {
+            abi_version: SNAPSHOT_ABI_VERSION,
+            struct_size: core::mem::size_of::<Self>()
+                .try_into()
+                .expect("native snapshot size exceeds its u32 ABI field"),
+            ..Self::default()
+        };
         snapshot.io.aux.estop = 1;
         for axis in &mut snapshot.axes {
             axis.stopped = 1;
