@@ -9,6 +9,7 @@ pub const CONFLICT_PATTERNS: &[&str] = &[
     "[/]usr/bin/[l]inuxcnc([[:space:]]|$)",
     "[l]inuxcncsvr",
     "[m]illtask",
+    "[d]mc2-milltask-supervisor",
     "[d]mc2-serial-bridge",
     "[d]mc2-task-monitor",
     "[p]endant_cnc/control.py.*--live",

@@ -20,6 +20,9 @@ install -D -m 0755 \
     "${rust_dir}/target/release/dmc2-task-monitor" \
     "${native_bin_dir}/dmc2-task-monitor"
 install -D -m 0755 \
+    "${rust_dir}/target/release/dmc2-milltask-supervisor" \
+    "${native_bin_dir}/dmc2-milltask-supervisor"
+install -D -m 0755 \
     "${rust_dir}/target/release/dmc2-linuxcnc" \
     "${native_bin_dir}/dmc2-linuxcnc"
 install -D -m 0755 \
@@ -31,6 +34,9 @@ cmp --silent \
 cmp --silent \
     "${rust_dir}/target/release/dmc2-task-monitor" \
     "${native_bin_dir}/dmc2-task-monitor"
+cmp --silent \
+    "${rust_dir}/target/release/dmc2-milltask-supervisor" \
+    "${native_bin_dir}/dmc2-milltask-supervisor"
 cmp --silent \
     "${rust_dir}/target/release/dmc2-linuxcnc" \
     "${native_bin_dir}/dmc2-linuxcnc"

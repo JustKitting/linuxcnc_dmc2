@@ -1,0 +1,16 @@
+[package]
+name = "dmc2-milltask-supervisor"
+version = "0.1.0"
+edition.workspace = true
+license.workspace = true
+rust-version.workspace = true
+
+[[bin]]
+name = "dmc2-milltask-supervisor"
+path = "src/main.rs"
+
+[lib]
+name = "dmc2_milltask_supervisor"
+path = "src/lib.rs"
+
+[dependencies]
