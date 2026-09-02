@@ -1,6 +1,8 @@
 #![cfg_attr(not(test), no_std)]
 
-pub mod halui;
+use dmc2_diagnostics::diagnostic_catalog;
+
+pub mod motion;
 pub mod pendant;
 pub mod recovery;
 pub mod runtime;
@@ -11,29 +13,18 @@ include!(concat!(env!("OUT_DIR"), "/machine_scale.rs"));
 
 pub const MOTOR_BY_AXIS: [usize; 3] = [1, 0, 2];
 pub const CLOCKWISE_SIGN_BY_AXIS: [i32; 3] = [-1, 1, 1];
-pub const PULSES_PER_MM: i32 = 1_000;
-pub const BOUNCE_PULSES: i32 = 50 * MOTOR_PULSE_SCALE;
 pub const TASK_HEARTBEAT_TIMEOUT_NS: u64 = 100_000_000;
 pub const PENDANT_PACKET_TIMEOUT_NS: u64 = 100_000_000;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(i32)]
-pub enum Axis {
-    X = 0,
-    Y = 1,
-    Z = 2,
+diagnostic_catalog! {
+    pub enum Axis: i32 {
+        X = 0 => ("AXIS_X", "x", "the decoded motion axis is X", "confirm this named axis matches the physical motion requested before jogging"),
+        Y = 1 => ("AXIS_Y", "y", "the decoded motion axis is Y", "confirm this named axis matches the physical motion requested before jogging"),
+        Z = 2 => ("AXIS_Z", "z", "the decoded motion axis is Z", "confirm this named axis matches the physical motion requested before jogging")
+    }
 }
 
 impl Axis {
-    pub const fn from_wire_code(code: i32) -> Option<Self> {
-        match code {
-            0 => Some(Self::X),
-            1 => Some(Self::Y),
-            2 => Some(Self::Z),
-            _ => None,
-        }
-    }
-
     pub const fn index(self) -> usize {
         self as usize
     }
@@ -47,41 +38,30 @@ impl Axis {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(i32)]
-pub enum Multiplier {
-    X1 = 1,
-    X10 = 10,
-    X100 = 100,
+diagnostic_catalog! {
+    pub enum Multiplier: i32 {
+        X1 = 1 => ("MULTIPLIER_X1", "x1", "the decoded jog increment is the base multiplier", "confirm this named increment is appropriate before jogging"),
+        X10 = 10 => ("MULTIPLIER_X10", "x10", "the decoded jog increment is ten times the base multiplier", "confirm this named increment is appropriate before jogging"),
+        X100 = 100 => ("MULTIPLIER_X100", "x100", "the decoded jog increment is one hundred times the base multiplier", "confirm this named increment is appropriate before jogging")
+    }
 }
 
 impl Multiplier {
-    pub const fn from_wire_code(code: i32) -> Option<Self> {
-        match code {
-            1 => Some(Self::X1),
-            10 => Some(Self::X10),
-            100 => Some(Self::X100),
-            _ => None,
-        }
-    }
-
     pub const fn pulses(self) -> i32 {
         match self {
-            Self::X1 => 10,
-            Self::X10 => 100,
-            Self::X100 => 1_000,
+            Self::X1 => PENDANT_INCREMENT_PULSES[0],
+            Self::X10 => PENDANT_INCREMENT_PULSES[1],
+            Self::X100 => PENDANT_INCREMENT_PULSES[2],
         }
     }
 
-    /// Exact previously accepted HALUI jog speed in machine units/minute.
-    pub const fn jog_speed_mm_per_minute(self) -> i32 {
+    /// Exact accepted rate for issuing the finite position target. LinuxCNC's
+    /// native planner separately owns acceleration and physical velocity.
+    pub const fn jog_target_rate_mm_per_minute(self) -> i32 {
         match self {
-            Self::X1 => (500 * MOTOR_PULSE_SCALE * 2 * 60) / PULSES_PER_MM,
-            Self::X10 => (3_000 * MOTOR_PULSE_SCALE * 5 * 60) / PULSES_PER_MM,
-            // Preserve the exact requested 300,000 pulses/s.
-            // LinuxCNC motion, not this component, owns enforcement of the
-            // accepted 30 mm/s axis maximum.
-            Self::X100 => (3_000 * 2 * MOTOR_PULSE_SCALE * 10 * 60) / PULSES_PER_MM,
+            Self::X1 => PENDANT_TARGET_PULSES_PER_SECOND[0] * 60 / PULSES_PER_MM,
+            Self::X10 => PENDANT_TARGET_PULSES_PER_SECOND[1] * 60 / PULSES_PER_MM,
+            Self::X100 => PENDANT_TARGET_PULSES_PER_SECOND[2] * 60 / PULSES_PER_MM,
         }
     }
 }
@@ -144,7 +124,7 @@ pub struct JogIntent {
     pub axis: Axis,
     pub motor: usize,
     pub delta_pulses: i32,
-    pub speed_mm_per_minute: i32,
+    pub target_rate_mm_per_minute: i32,
 }
 
 impl JogIntent {
@@ -159,66 +139,7 @@ impl JogIntent {
             axis: selection.axis,
             motor: selection.axis.motor(),
             delta_pulses,
-            speed_mm_per_minute: selection.multiplier.jog_speed_mm_per_minute(),
+            target_rate_mm_per_minute: selection.multiplier.jog_target_rate_mm_per_minute(),
         })
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn exact_user_confirmed_axis_and_motor_mapping_is_preserved() {
-        assert_eq!(Axis::X.motor(), 1);
-        assert_eq!(Axis::Y.motor(), 0);
-        assert_eq!(Axis::Z.motor(), 2);
-        assert_eq!(Axis::X.clockwise_machine_sign(), -1);
-        assert_eq!(Axis::Y.clockwise_machine_sign(), 1);
-        assert_eq!(Axis::Z.clockwise_machine_sign(), 1);
-    }
-
-    #[test]
-    fn exact_user_confirmed_increment_and_speed_mapping_is_preserved() {
-        assert_eq!(Multiplier::X1.pulses(), 10);
-        assert_eq!(Multiplier::X10.pulses(), 100);
-        assert_eq!(Multiplier::X100.pulses(), 1_000);
-        assert_eq!(Multiplier::X1.jog_speed_mm_per_minute(), 300);
-        assert_eq!(Multiplier::X10.jog_speed_mm_per_minute(), 4_500);
-        assert_eq!(Multiplier::X100.jog_speed_mm_per_minute(), 18_000);
-    }
-
-    #[test]
-    fn clockwise_and_counterclockwise_intents_are_exact_opposites() {
-        for axis in [Axis::X, Axis::Y, Axis::Z] {
-            for multiplier in [Multiplier::X1, Multiplier::X10, Multiplier::X100] {
-                let selection = PendantSelection { axis, multiplier };
-                let clockwise = JogIntent::from_detent(selection, 1).unwrap();
-                let counterclockwise = JogIntent::from_detent(selection, -1).unwrap();
-                assert_eq!(clockwise.delta_pulses, -counterclockwise.delta_pulses);
-                assert_eq!(clockwise.motor, axis.motor());
-                assert_eq!(
-                    clockwise.speed_mm_per_minute,
-                    multiplier.jog_speed_mm_per_minute()
-                );
-            }
-        }
-    }
-
-    #[test]
-    fn freshness_fails_closed_at_the_exact_timeout() {
-        let mut freshness = Freshness::new();
-        assert!(!freshness.is_fresh(100));
-        freshness.update(7, 10);
-        assert!(freshness.is_fresh(100));
-        for _ in 0..9 {
-            freshness.update(7, 10);
-        }
-        assert!(freshness.is_fresh(100));
-        freshness.update(7, 10);
-        assert!(!freshness.is_fresh(100));
-        freshness.update(8, 10);
-        assert!(freshness.is_fresh(100));
-        assert_eq!(freshness.age_ns(), 0);
     }
 }

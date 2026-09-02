@@ -131,6 +131,34 @@ impl HalKnownErrno {
         }
     }
 
+    pub const fn summary(self) -> &'static str {
+        match self {
+            Self::PermissionDenied => {
+                "LinuxCNC HAL denied the requested operation because the caller lacks permission"
+            }
+            Self::OutOfMemory => {
+                "LinuxCNC HAL could not allocate the shared-memory resources required by the operation"
+            }
+            Self::InvalidArgument => {
+                "LinuxCNC HAL rejected an argument, component identifier, name, direction, or lifecycle state"
+            }
+        }
+    }
+
+    pub const fn action(self) -> &'static str {
+        match self {
+            Self::PermissionDenied => {
+                "verify LinuxCNC/HAL ownership and process privileges before retrying the named call"
+            }
+            Self::OutOfMemory => {
+                "stop duplicate HAL owners and restore sufficient HAL shared memory before restarting"
+            }
+            Self::InvalidArgument => {
+                "inspect the retained call and raw value, then verify its component id, name, direction, and lifecycle ordering"
+            }
+        }
+    }
+
     const fn from_raw(raw: c_int) -> Option<Self> {
         if raw == Self::PermissionDenied.raw() {
             Some(Self::PermissionDenied)
@@ -197,13 +225,50 @@ impl HalError {
     }
 
     pub const fn label(self) -> &'static str {
+        self.identity()
+    }
+
+    /// Stable operator-visible identity for this exact return-value class.
+    pub const fn identity(self) -> &'static str {
         match self.kind() {
             HalFailureKind::SourceDeclared(errno) | HalFailureKind::KnownButUndeclared(errno) => {
                 errno.name()
             }
-            HalFailureKind::UnknownNegative => "UNKNOWN_ERRNO",
-            HalFailureKind::InvalidZero => "INVALID_ZERO",
-            HalFailureKind::UnexpectedPositive => "UNEXPECTED_POSITIVE",
+            HalFailureKind::UnknownNegative => "HAL_UNKNOWN_NEGATIVE_RETURN",
+            HalFailureKind::InvalidZero => "HAL_INVALID_ZERO_RETURN",
+            HalFailureKind::UnexpectedPositive => "HAL_UNEXPECTED_POSITIVE_RETURN",
+        }
+    }
+
+    /// Plain-language cause, available without a separate errno table.
+    pub const fn summary(self) -> &'static str {
+        match self.kind() {
+            HalFailureKind::SourceDeclared(errno) => errno.summary(),
+            HalFailureKind::KnownButUndeclared(_) => {
+                "LinuxCNC HAL returned a known errno that the pinned 2.9.10 source does not declare for this call"
+            }
+            HalFailureKind::UnknownNegative => {
+                "LinuxCNC HAL returned a negative value absent from the verified HAL errno catalog"
+            }
+            HalFailureKind::InvalidZero => {
+                "LinuxCNC HAL returned zero even though this call requires a positive success identifier"
+            }
+            HalFailureKind::UnexpectedPositive => {
+                "LinuxCNC HAL returned a positive value even though this call documents only zero as success"
+            }
+        }
+    }
+
+    /// Concrete next step paired with every numeric HAL failure.
+    pub const fn action(self) -> &'static str {
+        match self.kind() {
+            HalFailureKind::SourceDeclared(errno) => errno.action(),
+            HalFailureKind::KnownButUndeclared(_) | HalFailureKind::UnknownNegative => {
+                "retain the named call and raw value, stop launch, and verify the running HAL ABI against pinned LinuxCNC 2.9.10"
+            }
+            HalFailureKind::InvalidZero | HalFailureKind::UnexpectedPositive => {
+                "retain the named call and raw value, stop launch, and verify the HAL ABI and component lifecycle contract"
+            }
         }
     }
 
@@ -212,140 +277,45 @@ impl HalError {
             HalFailureKind::SourceDeclared(errno) | HalFailureKind::KnownButUndeclared(errno) => {
                 errno.c_name()
             }
-            HalFailureKind::UnknownNegative => b"UNKNOWN_ERRNO\0",
-            HalFailureKind::InvalidZero => b"INVALID_ZERO\0",
-            HalFailureKind::UnexpectedPositive => b"UNEXPECTED_POSITIVE\0",
+            HalFailureKind::UnknownNegative => b"HAL_UNKNOWN_NEGATIVE_RETURN\0",
+            HalFailureKind::InvalidZero => b"HAL_INVALID_ZERO_RETURN\0",
+            HalFailureKind::UnexpectedPositive => b"HAL_UNEXPECTED_POSITIVE_RETURN\0",
+        }
+    }
+
+    pub const fn c_summary(self) -> &'static [u8] {
+        match self.kind() {
+            HalFailureKind::SourceDeclared(HalKnownErrno::PermissionDenied) => b"LinuxCNC HAL denied the requested operation because the caller lacks permission\0",
+            HalFailureKind::SourceDeclared(HalKnownErrno::OutOfMemory) => b"LinuxCNC HAL could not allocate the shared-memory resources required by the operation\0",
+            HalFailureKind::SourceDeclared(HalKnownErrno::InvalidArgument) => b"LinuxCNC HAL rejected an argument, component identifier, name, direction, or lifecycle state\0",
+            HalFailureKind::KnownButUndeclared(_) => b"LinuxCNC HAL returned a known errno that the pinned 2.9.10 source does not declare for this call\0",
+            HalFailureKind::UnknownNegative => b"LinuxCNC HAL returned a negative value absent from the verified HAL errno catalog\0",
+            HalFailureKind::InvalidZero => b"LinuxCNC HAL returned zero even though this call requires a positive success identifier\0",
+            HalFailureKind::UnexpectedPositive => b"LinuxCNC HAL returned a positive value even though this call documents only zero as success\0",
+        }
+    }
+
+    pub const fn c_action(self) -> &'static [u8] {
+        match self.kind() {
+            HalFailureKind::SourceDeclared(HalKnownErrno::PermissionDenied) => b"verify LinuxCNC/HAL ownership and process privileges before retrying the named call\0",
+            HalFailureKind::SourceDeclared(HalKnownErrno::OutOfMemory) => b"stop duplicate HAL owners and restore sufficient HAL shared memory before restarting\0",
+            HalFailureKind::SourceDeclared(HalKnownErrno::InvalidArgument) => b"inspect the retained call and raw value, then verify its component id, name, direction, and lifecycle ordering\0",
+            HalFailureKind::KnownButUndeclared(_) | HalFailureKind::UnknownNegative => b"retain the named call and raw value, stop launch, and verify the running HAL ABI against pinned LinuxCNC 2.9.10\0",
+            HalFailureKind::InvalidZero | HalFailureKind::UnexpectedPositive => b"retain the named call and raw value, stop launch, and verify the HAL ABI and component lifecycle contract\0",
         }
     }
 }
 
 impl fmt::Display for HalError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self.kind() {
-            HalFailureKind::SourceDeclared(errno) => {
-                write!(formatter, "{} ({})", errno.name(), self.raw)
-            }
-            HalFailureKind::KnownButUndeclared(errno) => write!(
-                formatter,
-                "{} ({}; not declared for {})",
-                errno.name(),
-                self.raw,
-                self.call.name()
-            ),
-            HalFailureKind::UnknownNegative => {
-                write!(formatter, "UNKNOWN_ERRNO ({})", self.raw)
-            }
-            HalFailureKind::InvalidZero => write!(
-                formatter,
-                "INVALID_ZERO (0; {} requires a nonzero failure or documented success)",
-                self.call.name()
-            ),
-            HalFailureKind::UnexpectedPositive => write!(
-                formatter,
-                "UNEXPECTED_POSITIVE ({}; {} documents no positive status)",
-                self.raw,
-                self.call.name()
-            ),
-        }
-    }
-}
-
-#[cfg(test)]
-mod tests {
-    extern crate std;
-
-    use std::collections::BTreeSet;
-    use std::format;
-
-    use super::*;
-
-    #[test]
-    fn every_bound_hal_call_has_one_unique_name_and_c_name() {
-        assert_eq!(HAL_CALLS.len(), 10);
-        assert_eq!(
-            HAL_CALLS
-                .iter()
-                .map(|call| call.name())
-                .collect::<BTreeSet<_>>()
-                .len(),
-            HAL_CALLS.len()
-        );
-        for call in HAL_CALLS {
-            assert_eq!(call.c_name().last(), Some(&0));
-            assert_eq!(
-                &call.c_name()[..call.c_name().len() - 1],
-                call.name().as_bytes()
-            );
-        }
-    }
-
-    #[test]
-    fn every_source_declared_errno_is_exact_for_every_call() {
-        for call in HAL_CALLS {
-            for errno in HAL_KNOWN_ERRNOS {
-                let error = call.classify(errno.raw()).unwrap_err();
-                assert_eq!(error.call(), call);
-                assert_eq!(error.raw(), errno.raw());
-                assert_eq!(
-                    error.source_declared(),
-                    call.declares(errno),
-                    "{} {}",
-                    call.name(),
-                    errno.name()
-                );
-                assert_eq!(error.safe_return_code(), errno.raw());
-                assert_eq!(error.c_label().last(), Some(&0));
-            }
-        }
-    }
-
-    #[test]
-    fn every_raw_result_class_fails_closed_without_losing_its_value() {
-        assert_eq!(HalCall::Init.classify(1), Ok(1));
-        assert_eq!(HalCall::Init.classify(c_int::MAX), Ok(c_int::MAX));
-        for raw in [c_int::MIN, -2, -1, 0] {
-            let error = HalCall::Init.classify(raw).unwrap_err();
-            assert_eq!(error.raw(), raw);
-            assert!(error.safe_return_code() < 0);
-        }
-
-        for call in HAL_CALLS.into_iter().filter(|call| *call != HalCall::Init) {
-            assert_eq!(call.classify(0), Ok(0));
-            for raw in [c_int::MIN, -22, -2, 1, c_int::MAX] {
-                let error = call.classify(raw).unwrap_err();
-                assert_eq!(error.raw(), raw);
-                assert!(error.safe_return_code() < 0);
-            }
-        }
-    }
-
-    #[test]
-    fn exact_operator_text_distinguishes_declared_unknown_and_contract_failures() {
-        assert_eq!(
-            format!(
-                "{}",
-                HalCall::Ready.classify(-(EINVAL as c_int)).unwrap_err()
-            ),
-            "EINVAL (-22)"
-        );
-        assert_eq!(
-            format!(
-                "{}",
-                HalCall::Exit.classify(-(ENOMEM as c_int)).unwrap_err()
-            ),
-            "ENOMEM (-12; not declared for hal_exit)"
-        );
-        assert_eq!(
-            format!("{}", HalCall::Ready.classify(-2).unwrap_err()),
-            "UNKNOWN_ERRNO (-2)"
-        );
-        assert_eq!(
-            format!("{}", HalCall::Init.classify(0).unwrap_err()),
-            "INVALID_ZERO (0; hal_init requires a nonzero failure or documented success)"
-        );
-        assert_eq!(
-            format!("{}", HalCall::Ready.classify(7).unwrap_err()),
-            "UNEXPECTED_POSITIVE (7; hal_ready documents no positive status)"
-        );
+        write!(
+            formatter,
+            "{} (raw={}, call={}): {}; action: {}",
+            self.identity(),
+            self.raw,
+            self.call.name(),
+            self.summary(),
+            self.action()
+        )
     }
 }

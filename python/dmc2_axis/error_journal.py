@@ -14,7 +14,7 @@ from typing import BinaryIO
 from .constants import ERROR_CHANNEL_KIND_DEFINITIONS, REQUIRED_LINUXCNC_VERSION
 
 
-JOURNAL_SCHEMA_VERSION = 1
+JOURNAL_SCHEMA_VERSION = 2
 JOURNAL_OBJECT_CAPACITY = 280
 JOURNAL_HEADER_MARKER = "DMC2_ERROR_JOURNAL"
 JOURNAL_EVENT_MARKER = "DMC2_ERROR_EVENT"
@@ -25,8 +25,6 @@ HEX_RE = re.compile(r"(?:[0-9a-f]{2})*")
 U64_MAX = (1 << 64) - 1
 I32_MIN = -(1 << 31)
 I32_MAX = (1 << 31) - 1
-NML_NO_ERROR = 0
-CMS_READ_OK = 1
 
 _JOURNAL_CLASS_NAMES = {
     1: "NML_ERROR",
@@ -66,7 +64,14 @@ class ErrorJournalEvent:
 
     def display_text(self) -> str:
         if not self.known:
-            return f"Unknown LinuxCNC error-channel message type {self.message_type}"
+            return (
+                "UNKNOWN_LINUXCNC_ERROR_CHANNEL_TYPE"
+                f"(raw={self.message_type})\n"
+                "Cause: LinuxCNC supplied an error-channel type outside the pinned "
+                "2.9.10 public catalog\n"
+                "Action: preserve the raw journal record and stop using the machine "
+                "until the binary/version mismatch is corrected"
+            )
         return self.text.decode("utf-8", errors="replace")
 
 
@@ -79,6 +84,7 @@ class ErrorJournalReader:
         self._identity: tuple[int, int] | None = None
         self._buffer = b""
         self._header_seen = False
+        self._success_transport: tuple[int, int] | None = None
         self._next_sequence = 1
         self._events: deque[ErrorJournalEvent] = deque()
         self._failed_identity: tuple[int, int] | None = None
@@ -131,6 +137,7 @@ class ErrorJournalReader:
         self._failed_identity = None
         self._buffer = b""
         self._header_seen = False
+        self._success_transport = None
         self._next_sequence = 1
         self._events.clear()
         return identity
@@ -156,10 +163,12 @@ class ErrorJournalReader:
             except UnicodeDecodeError as error:
                 raise RuntimeError("error journal contains non-ASCII framing") from error
             if not self._header_seen:
-                self._validate_header(line)
+                self._success_transport = self._validate_header(line)
                 self._header_seen = True
             else:
-                event = self._parse_event(line)
+                if self._success_transport is None:
+                    raise RuntimeError("error journal transport contract is unavailable")
+                event = self._parse_event(line, *self._success_transport)
                 if event.sequence != self._next_sequence:
                     raise RuntimeError(
                         "error journal sequence changed: "
@@ -169,8 +178,13 @@ class ErrorJournalReader:
                 self._events.append(event)
 
     @staticmethod
-    def _validate_header(line: str) -> None:
-        expected = (
+    def _validate_header(line: str) -> tuple[int, int]:
+        fields = tuple(line.split("\t"))
+        if len(fields) != 9:
+            raise RuntimeError(
+                f"error journal header has {len(fields)} fields instead of 9"
+            )
+        expected_prefix = (
             JOURNAL_HEADER_MARKER,
             str(JOURNAL_SCHEMA_VERSION),
             REQUIRED_LINUXCNC_VERSION,
@@ -178,14 +192,26 @@ class ErrorJournalReader:
             str(JOURNAL_OBJECT_CAPACITY),
             sys.byteorder,
         )
-        fields = tuple(line.split("\t"))
-        if fields != expected:
+        if fields[:6] != expected_prefix:
             raise RuntimeError(
-                f"error journal header changed: expected={expected!r} actual={fields!r}"
+                "error journal header changed: "
+                f"expected_prefix={expected_prefix!r} actual={fields!r}"
             )
+        prefix = "\t".join(fields[:8]).encode("ascii")
+        expected_checksum = f"{_fnv64(prefix):016x}"
+        if fields[8] != expected_checksum:
+            raise RuntimeError(
+                "error journal header checksum mismatch: "
+                f"expected {expected_checksum}, found {fields[8]}"
+            )
+        nml_no_error = _bounded_int(fields[6], "NML success code", I32_MIN, I32_MAX)
+        cms_read_ok = _bounded_int(fields[7], "CMS read-success code", I32_MIN, I32_MAX)
+        return nml_no_error, cms_read_ok
 
     @staticmethod
-    def _parse_event(line: str) -> ErrorJournalEvent:
+    def _parse_event(
+        line: str, nml_no_error: int, cms_read_ok: int
+    ) -> ErrorJournalEvent:
         fields = line.split("\t")
         if len(fields) != 18:
             raise RuntimeError(
@@ -221,10 +247,16 @@ class ErrorJournalReader:
         nml_error = _bounded_int(fields[15], "NML error", I32_MIN, I32_MAX)
         cms_status = _bounded_int(fields[16], "CMS status", I32_MIN, I32_MAX)
 
-        if nml_error != NML_NO_ERROR or cms_status != CMS_READ_OK:
+        if nml_error != nml_no_error or cms_status != cms_read_ok:
             raise RuntimeError(
-                "error journal message transport state changed: "
-                f"NML error {nml_error}, CMS status {cms_status}"
+                "ERROR_JOURNAL_TRANSPORT_STATE_INVALID: error journal message "
+                "transport state changed; "
+                f"expected=NML_NO_ERROR(raw={nml_no_error}),"
+                f"CMS_READ_OK(raw={cms_read_ok}) "
+                f"observed=nml_error(raw={nml_error}),cms_status(raw={cms_status}); "
+                "cause: a record was published without a successful pinned LinuxCNC "
+                "NML/CMS read; action: preserve both journals and restart only after "
+                "correcting the task monitor or binary/version mismatch"
             )
 
         if object_size > JOURNAL_OBJECT_CAPACITY or len(object_bytes) != object_size:

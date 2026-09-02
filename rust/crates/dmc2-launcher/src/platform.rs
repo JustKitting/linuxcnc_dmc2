@@ -37,6 +37,7 @@ pub trait Platform {
     fn current_executable(&self) -> io::Result<PathBuf>;
     fn is_regular_file(&self, path: &Path) -> io::Result<bool>;
     fn read_file(&self, path: &Path) -> io::Result<Vec<u8>>;
+    fn remove_file_if_exists(&self, path: &Path) -> io::Result<bool>;
     fn find_executable(&self, name: &str) -> io::Result<Option<PathBuf>>;
     fn run(&self, command: &CommandSpec) -> io::Result<ProcessOutput>;
     fn replace_process(&self, command: &CommandSpec) -> io::Result<()>;
@@ -68,6 +69,14 @@ impl Platform for RealPlatform {
 
     fn read_file(&self, path: &Path) -> io::Result<Vec<u8>> {
         fs::read(path)
+    }
+
+    fn remove_file_if_exists(&self, path: &Path) -> io::Result<bool> {
+        match fs::remove_file(path) {
+            Ok(()) => Ok(true),
+            Err(error) if error.kind() == io::ErrorKind::NotFound => Ok(false),
+            Err(error) => Err(error),
+        }
     }
 
     fn find_executable(&self, name: &str) -> io::Result<Option<PathBuf>> {

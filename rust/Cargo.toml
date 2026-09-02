@@ -1,13 +1,16 @@
 [workspace]
 resolver = "2"
 members = [
+    "crates/dmc2-acceptance",
     "crates/dmc2-core",
+    "crates/dmc2-diagnostics",
     "crates/dmc2-hal-sys",
     "crates/dmc2-linuxcnc-interface",
     "crates/dmc2-launcher",
     "crates/dmc2-rt",
     "crates/dmc2-serial-bridge",
     "crates/dmc2-task-monitor",
+    "crates/dmc2ctl",
 ]
 
 [workspace.package]

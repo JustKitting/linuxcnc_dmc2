@@ -1,7 +1,5 @@
 use core::ffi::{c_long, c_void};
 
-use dmc2_core::supervisor::FaultCode;
-
 use super::hal::{publish, runtime_inputs};
 use super::state::ComponentState;
 
@@ -12,16 +10,24 @@ pub(super) unsafe extern "C" fn update_component(argument: *mut c_void, period: 
     let state = unsafe { &mut *argument.cast::<ComponentState>() };
     let pins = unsafe { &*state.pins };
     let period_ns = period as u64;
-    state.sequencer.advance(period_ns);
-    let inputs = unsafe { runtime_inputs(state, pins, state.sequencer.ready()) };
+    let advance_error = state.motion_commands.advance(period_ns).err();
+    let inputs = unsafe { runtime_inputs(state, pins, state.motion_commands.ready()) };
+    if let Some(error) = advance_error {
+        state.runtime.fail(error.fault_code());
+        state.motion_commands.force_stop_immediate();
+    }
     let mut outputs = state.runtime.update(period_ns, inputs);
     if let Some(command) = outputs.supervisor.command {
-        if !state.sequencer.accept(command) {
-            state.runtime.fail(FaultCode::CommandSequencerFailure);
-            state.sequencer.force_stop_immediate();
+        if let Err(error) =
+            state
+                .motion_commands
+                .accept(command, dmc2_core::PULSES_PER_MM, period_ns)
+        {
+            state.runtime.fail(error.fault_code());
+            state.motion_commands.force_stop_immediate();
             outputs.supervisor = state.runtime.supervisor().outputs();
             outputs.limit_reset = outputs.supervisor.limit_reset;
         }
     }
-    unsafe { publish(pins, outputs, &state.sequencer) };
+    unsafe { publish(pins, outputs, &state.motion_commands) };
 }

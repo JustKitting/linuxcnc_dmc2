@@ -1,0 +1,57 @@
+# Production LinuxCNC 2.9.10 motion-consumer contract.
+#
+# The real acceptance machine sources this exact file and observes
+# joint.N.motor-pos-cmd.  It cannot supply or overwrite that result.
+
+# Realtime acknowledgement comes from LinuxCNC motion itself, never from a
+# local publisher or a test adapter.
+net dmc2-motion-enabled => dmc2-pendant-control.motion-enabled
+net dmc2-motion-teleop-mode motion.teleop-mode => dmc2-pendant-control.motion-teleop-mode
+net dmc2-motion-coord-mode motion.coord-mode => dmc2-pendant-control.motion-coord-mode
+net dmc2-motion-in-position motion.in-position => dmc2-pendant-control.motion-in-position
+net dmc2-motion-jog-active motion.jog-is-active => dmc2-pendant-control.motion-jog-active
+net dmc2-axis-x-wheel-jog-active axis.x.wheel-jog-active => dmc2-pendant-control.axis-0-wheel-jog-active
+net dmc2-axis-y-wheel-jog-active axis.y.wheel-jog-active => dmc2-pendant-control.axis-1-wheel-jog-active
+net dmc2-axis-z-wheel-jog-active axis.z.wheel-jog-active => dmc2-pendant-control.axis-2-wheel-jog-active
+net dmc2-joint-0-wheel-jog-active joint.0.wheel-jog-active => dmc2-pendant-control.joint-0-wheel-jog-active
+net dmc2-joint-1-wheel-jog-active joint.1.wheel-jog-active => dmc2-pendant-control.joint-1-wheel-jog-active
+net dmc2-joint-2-wheel-jog-active joint.2.wheel-jog-active => dmc2-pendant-control.joint-2-wheel-jog-active
+net dmc2-joint-0-in-position joint.0.in-position => dmc2-pendant-control.joint-0-in-position
+net dmc2-joint-1-in-position joint.1.in-position => dmc2-pendant-control.joint-1-in-position
+net dmc2-joint-2-in-position joint.2.in-position => dmc2-pendant-control.joint-2-in-position
+
+# Physical motor numbering remains motor 0=Y, motor 1=X, motor 2=Z.
+net dmc2-y-count-s32 => dmc2-pendant-control.motor-0-count
+net dmc2-x-count-s32 => dmc2-pendant-control.motor-1-count
+net dmc2-z-count-s32 => dmc2-pendant-control.motor-2-count
+net dmc2-y-stepgen-position-feedback => dmc2-pendant-control.motor-0-position-feedback
+net dmc2-x-stepgen-position-feedback => dmc2-pendant-control.motor-1-position-feedback
+net dmc2-z-stepgen-position-feedback => dmc2-pendant-control.motor-2-position-feedback
+
+# Finite position-mode increments are consumed directly by motmod in the servo
+# thread.  The scale and count pins below are the production movement boundary.
+net dmc2-axis-x-jog-counts dmc2-pendant-control.axis-0-jog-counts => axis.x.jog-counts
+net dmc2-axis-y-jog-counts dmc2-pendant-control.axis-1-jog-counts => axis.y.jog-counts
+net dmc2-axis-z-jog-counts dmc2-pendant-control.axis-2-jog-counts => axis.z.jog-counts
+net dmc2-axis-x-jog-scale dmc2-pendant-control.axis-0-jog-scale => axis.x.jog-scale
+net dmc2-axis-y-jog-scale dmc2-pendant-control.axis-1-jog-scale => axis.y.jog-scale
+net dmc2-axis-z-jog-scale dmc2-pendant-control.axis-2-jog-scale => axis.z.jog-scale
+net dmc2-axis-x-jog-enable dmc2-pendant-control.axis-0-jog-enable => axis.x.jog-enable
+net dmc2-axis-y-jog-enable dmc2-pendant-control.axis-1-jog-enable => axis.y.jog-enable
+net dmc2-axis-z-jog-enable dmc2-pendant-control.axis-2-jog-enable => axis.z.jog-enable
+net dmc2-axis-x-jog-vel-mode dmc2-pendant-control.axis-0-jog-vel-mode => axis.x.jog-vel-mode
+net dmc2-axis-y-jog-vel-mode dmc2-pendant-control.axis-1-jog-vel-mode => axis.y.jog-vel-mode
+net dmc2-axis-z-jog-vel-mode dmc2-pendant-control.axis-2-jog-vel-mode => axis.z.jog-vel-mode
+
+net dmc2-joint-0-jog-counts dmc2-pendant-control.joint-0-jog-counts => joint.0.jog-counts
+net dmc2-joint-1-jog-counts dmc2-pendant-control.joint-1-jog-counts => joint.1.jog-counts
+net dmc2-joint-2-jog-counts dmc2-pendant-control.joint-2-jog-counts => joint.2.jog-counts
+net dmc2-joint-0-jog-scale dmc2-pendant-control.joint-0-jog-scale => joint.0.jog-scale
+net dmc2-joint-1-jog-scale dmc2-pendant-control.joint-1-jog-scale => joint.1.jog-scale
+net dmc2-joint-2-jog-scale dmc2-pendant-control.joint-2-jog-scale => joint.2.jog-scale
+net dmc2-joint-0-jog-enable dmc2-pendant-control.joint-0-jog-enable => joint.0.jog-enable
+net dmc2-joint-1-jog-enable dmc2-pendant-control.joint-1-jog-enable => joint.1.jog-enable
+net dmc2-joint-2-jog-enable dmc2-pendant-control.joint-2-jog-enable => joint.2.jog-enable
+net dmc2-joint-0-jog-vel-mode dmc2-pendant-control.joint-0-jog-vel-mode => joint.0.jog-vel-mode
+net dmc2-joint-1-jog-vel-mode dmc2-pendant-control.joint-1-jog-vel-mode => joint.1.jog-vel-mode
+net dmc2-joint-2-jog-vel-mode dmc2-pendant-control.joint-2-jog-vel-mode => joint.2.jog-vel-mode

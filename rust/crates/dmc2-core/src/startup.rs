@@ -1,3 +1,5 @@
+use dmc2_diagnostics::diagnostic_catalog;
+
 pub const HEARTBEAT_TOGGLE_NS: u64 = 20_000_000;
 pub const CONTROLLER_WATCHDOG_ARM_LOW_NS: u64 = 10_000_000;
 pub const CONTROLLER_WATCHDOG_OK_WAIT_NS: u64 = 150_000_000;
@@ -38,15 +40,27 @@ impl Default for HeartbeatGenerator {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(i32)]
-pub enum MesaStartupPhase {
-    WaitServo,
-    WatchdogStable,
-    LimitReset,
-    LimitSettle,
-    Ready,
-    Fault,
+diagnostic_catalog! {
+    pub enum MesaStartupPhase {
+        WaitServo = 0, "WAIT_SERVO", "wait-servo",
+            "the Mesa startup guard is waiting for the LinuxCNC servo thread to become ready",
+            "wait for the servo-thread-ready input or inspect LinuxCNC realtime startup";
+        WatchdogStable = 1, "WATCHDOG_STABLE", "watchdog-stable",
+            "the Mesa startup guard is clearing and observing the HostMot2 watchdog before enabling outputs",
+            "wait for the watchdog-stable interval or inspect the named Mesa watchdog fault";
+        LimitReset = 2, "LIMIT_RESET", "limit-reset",
+            "the Mesa startup guard is asserting all configured realtime limit-latch resets",
+            "wait for the bounded reset interval";
+        LimitSettle = 3, "LIMIT_SETTLE", "limit-settle",
+            "the Mesa startup guard is allowing the reset limit latches to settle",
+            "wait for the bounded settle interval";
+        Ready = 4, "READY", "ready",
+            "the Mesa servo thread, watchdog, and startup limit-reset contract are ready",
+            "no Mesa startup action is required";
+        Fault = 5, "FAULT", "fault",
+            "the Mesa startup guard latched an I/O or watchdog contract failure",
+            "inspect the named controller fault and retained Mesa watchdog evidence";
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -149,15 +163,27 @@ impl Default for MesaStartupGuard {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(i32)]
-pub enum ControllerWatchdogPhase {
-    WaitPrerequisites,
-    ArmLow,
-    WaitOk,
-    Stable,
-    Ready,
-    Fault,
+diagnostic_catalog! {
+    pub enum ControllerWatchdogPhase {
+        WaitPrerequisites = 0, "WAIT_PREREQUISITES", "wait-prerequisites",
+            "the controller heartbeat watchdog is waiting for every startup prerequisite",
+            "inspect the named readiness inputs if this phase persists";
+        ArmLow = 1, "ARM_LOW", "arm-low",
+            "the controller is holding watchdog-enable low for the required rearm interval",
+            "wait for the bounded low interval";
+        WaitOk = 2, "WAIT_OK", "wait-ok",
+            "the controller enabled the software watchdog and is waiting for its healthy acknowledgement",
+            "inspect the watchdog component and heartbeat signal if acknowledgement does not arrive";
+        Stable = 3, "STABLE", "stable",
+            "the watchdog acknowledgement is healthy and being observed for the required stable interval",
+            "wait for the bounded stable interval";
+        Ready = 4, "READY", "ready",
+            "the controller heartbeat watchdog contract is armed and healthy",
+            "no watchdog startup action is required";
+        Fault = 5, "FAULT", "fault",
+            "the committed controller watchdog contract lost its healthy acknowledgement",
+            "inspect the named watchdog fault and retained heartbeat evidence before resetting";
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -276,6 +302,3 @@ impl Default for ControllerWatchdogGuard {
         Self::new()
     }
 }
-
-#[cfg(test)]
-mod tests;

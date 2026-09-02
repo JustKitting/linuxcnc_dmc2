@@ -1,0 +1,43 @@
+# Production pendant and LinuxCNC task-state inputs.
+#
+# This file is sourced by both the live machine and the real LinuxCNC motion
+# acceptance machine.  Keeping one wiring contract prevents a test from
+# passing through an adapter that the deployed machine does not use.
+
+net dmc2-pendant-connected dmc2-pendant.connected => dmc2-pendant-control.connected
+net dmc2-pendant-snapshot-generation dmc2-pendant.snapshot-generation => dmc2-pendant-control.snapshot-generation dmc2-task-monitor.ser-fd-generation-in
+net dmc2-pendant-link-fault dmc2-pendant.serial-fault => dmc2-pendant-control.serial-fault
+net dmc2-pendant-quadrature-fault dmc2-pendant.quadrature-fault => dmc2-pendant-control.quadrature-fault
+net dmc2-pendant-estop dmc2-pendant.estop-pressed => dmc2-pendant-control.estop-pressed
+net dmc2-pendant-deadman dmc2-pendant.deadman-held => dmc2-pendant-control.deadman-held
+net dmc2-pendant-selector-valid dmc2-pendant.selector-valid => dmc2-pendant-control.selector-valid
+net dmc2-pendant-axis-code dmc2-pendant.axis-code => dmc2-pendant-control.axis-code
+net dmc2-pendant-multiplier-code dmc2-pendant.multiplier-code => dmc2-pendant-control.multiplier-code
+net dmc2-pendant-latest-detent dmc2-pendant.latest-detent => dmc2-pendant-control.latest-detent
+net dmc2-pendant-detent-count dmc2-pendant.detent-count => dmc2-pendant-control.detent-count
+net dmc2-pendant-transition-count dmc2-pendant.transition-count => dmc2-pendant-control.transition-count
+net dmc2-pendant-quadrature-errors dmc2-pendant.quadrature-errors => dmc2-pendant-control.quadrature-errors
+net dmc2-pendant-sequence dmc2-pendant.sequence => dmc2-pendant-control.sequence
+net dmc2-pendant-milliseconds dmc2-pendant.milliseconds => dmc2-pendant-control.milliseconds
+
+# The task monitor publishes coherent odd/even snapshots from LinuxCNC's NML
+# status channel.  The realtime controller independently checks its heartbeat.
+net dmc2-task-snapshot-generation dmc2-task-monitor.snapshot-generation => dmc2-pendant-control.task-snapshot-generation
+net dmc2-task-monitor-connected dmc2-task-monitor.connected => dmc2-pendant-control.task-monitor-connected
+net dmc2-task-monitor-fault dmc2-task-monitor.fault => dmc2-pendant-control.task-monitor-fault
+net dmc2-task-heartbeat dmc2-task-monitor.task-heartbeat => dmc2-pendant-control.task-heartbeat
+net dmc2-task-machine-on dmc2-task-monitor.machine-on => dmc2-pendant-control.machine-on
+net dmc2-task-estopped dmc2-task-monitor.estopped => dmc2-pendant-control.estopped
+net dmc2-task-manual-mode dmc2-task-monitor.manual-mode => dmc2-pendant-control.manual-mode
+net dmc2-task-joint-mode dmc2-task-monitor.joint-mode => dmc2-pendant-control.joint-mode
+net dmc2-task-teleop-mode dmc2-task-monitor.teleop-mode => dmc2-pendant-control.teleop-mode
+net dmc2-task-interp-idle dmc2-task-monitor.interp-idle => dmc2-pendant-control.interp-idle
+net dmc2-task-joint-0-homed dmc2-task-monitor.joint-0-homed => dmc2-pendant-control.joint-0-homed
+net dmc2-task-joint-1-homed dmc2-task-monitor.joint-1-homed => dmc2-pendant-control.joint-1-homed
+net dmc2-task-joint-2-homed dmc2-task-monitor.joint-2-homed => dmc2-pendant-control.joint-2-homed
+net dmc2-task-joint-0-homing dmc2-task-monitor.joint-0-homing => dmc2-pendant-control.joint-0-homing
+net dmc2-task-joint-1-homing dmc2-task-monitor.joint-1-homing => dmc2-pendant-control.joint-1-homing
+net dmc2-task-joint-2-homing dmc2-task-monitor.joint-2-homing => dmc2-pendant-control.joint-2-homing
+net dmc2-task-axis-0-stopped dmc2-task-monitor.axis-0-stopped => dmc2-pendant-control.axis-0-stopped
+net dmc2-task-axis-1-stopped dmc2-task-monitor.axis-1-stopped => dmc2-pendant-control.axis-1-stopped
+net dmc2-task-axis-2-stopped dmc2-task-monitor.axis-2-stopped => dmc2-pendant-control.axis-2-stopped

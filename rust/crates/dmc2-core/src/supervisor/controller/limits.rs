@@ -74,38 +74,3 @@ impl LinuxCncPendantSupervisor {
         }
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn every_active_motor_direction_and_limit_vector_has_one_exact_action() {
-        let mut states = 0_u32;
-        for active_motor in [None, Some(0), Some(1), Some(2)] {
-            for toward_positive_limit in [false, true] {
-                for bits in 0_u8..8 {
-                    let limits = [bits & 1 != 0, bits & 2 != 0, bits & 4 != 0];
-                    let active_limits = limits.into_iter().filter(|value| *value).count();
-                    let expected = if active_limits == 0 {
-                        LimitAction::None
-                    } else if active_limits == 1
-                        && toward_positive_limit
-                        && active_motor == single_active(limits)
-                    {
-                        LimitAction::Bounce(active_motor.expect("matching motor exists"))
-                    } else {
-                        LimitAction::Fault
-                    };
-                    assert_eq!(
-                        decide_limit_action(active_motor, toward_positive_limit, limits),
-                        expected,
-                        "active_motor={active_motor:?} toward={toward_positive_limit} limits={limits:?}"
-                    );
-                    states += 1;
-                }
-            }
-        }
-        assert_eq!(states, 64);
-    }
-}

@@ -15,7 +15,24 @@ impl LinuxCncPendantSupervisor {
         }
     }
 
+    fn process_limit_release_sample(&mut self, inputs: &SupervisorInputs) {
+        let Some(sample) = inputs.packet else {
+            return;
+        };
+        match self.interpreter.process(sample) {
+            PendantDecision::Stop(_) => self.cancel_pendant_motion(),
+            PendantDecision::NoDetent => {}
+            PendantDecision::Jog(intent) => {
+                if self.phase == Phase::BounceReleaseWait {
+                    self.start_limit_release_jog(intent, inputs);
+                }
+            }
+            PendantDecision::Fault(_) => self.fail(FaultCode::InvalidPendantPacket),
+        }
+    }
+
     pub fn update(&mut self, period_ns: u64, inputs: SupervisorInputs) -> SupervisorOutputs {
+        self.observe_inputs(inputs);
         self.command = None;
         self.phase_elapsed_ns = self.phase_elapsed_ns.saturating_add(period_ns);
         self.set_pendant_mode(inputs.pendant_mode_enabled);
@@ -33,14 +50,9 @@ impl LinuxCncPendantSupervisor {
             self.external_enable = false;
             return self.outputs();
         }
-        if inputs.link.serial_fault || !inputs.link.connected {
-            self.fail(FaultCode::LinkFailure);
-            return self.outputs();
-        }
-        if inputs.link.quadrature_fault {
-            self.fail(FaultCode::QuadratureFailure);
-            return self.outputs();
-        }
+        // A physical pendant E-stop always owns this transition. It drops the
+        // same external gate consumed by LinuxCNC's estop_latch and cannot be
+        // delayed behind diagnostic classification.
         if inputs.link.estop_pressed {
             if let Some(sample) = inputs.packet {
                 if !self.recovery.active() {
@@ -50,6 +62,12 @@ impl LinuxCncPendantSupervisor {
             self.external_enable = false;
             return self.outputs();
         }
+        if inputs.linuxcnc_estop_reset_rising
+            && self.recovery.active()
+            && self.recovery_power_phase.is_none()
+        {
+            self.accept_linuxcnc_estop_reset(&inputs);
+        }
         if self.recovery_power_phase.is_some() {
             self.advance_recovery(period_ns, &inputs);
             return self.outputs();
@@ -57,6 +75,14 @@ impl LinuxCncPendantSupervisor {
         if self.recovery.active() {
             self.external_enable = false;
             self.process_recovery_sample(&inputs);
+            return self.outputs();
+        }
+        if inputs.link.serial_fault || !inputs.link.connected {
+            self.fail(FaultCode::LinkFailure);
+            return self.outputs();
+        }
+        if inputs.link.quadrature_fault {
+            self.fail(FaultCode::QuadratureFailure);
             return self.outputs();
         }
 
@@ -93,15 +119,23 @@ impl LinuxCncPendantSupervisor {
             && self.startup_reset_complete
             && self.recovery_power_phase.is_none()
             && inputs.machine.ready_for_pendant_jog()
+            && inputs.motion.ready_for_path(!inputs.machine.all_homed())
             && (self.phase.bounce() || (!any(inputs.raw_limits) && !any(inputs.safety_limits)));
 
-        if self.pendant_mode_enabled && !self.phase.bounce() {
-            if let Some(sample) = inputs.packet {
-                match self.interpreter.process(sample) {
-                    PendantDecision::Stop(_) => self.cancel_pendant_motion(),
-                    PendantDecision::NoDetent => {}
-                    PendantDecision::Jog(intent) => self.request_jog(intent, &inputs),
-                    PendantDecision::Fault(_) => self.fail(FaultCode::InvalidPendantPacket),
+        if self.pendant_mode_enabled {
+            if matches!(
+                self.phase,
+                Phase::BounceReleaseWait | Phase::BounceReleaseJog
+            ) {
+                self.process_limit_release_sample(&inputs);
+            } else if !self.phase.bounce() {
+                if let Some(sample) = inputs.packet {
+                    match self.interpreter.process(sample) {
+                        PendantDecision::Stop(_) => self.cancel_pendant_motion(),
+                        PendantDecision::NoDetent => {}
+                        PendantDecision::Jog(intent) => self.request_jog(intent, &inputs),
+                        PendantDecision::Fault(_) => self.fail(FaultCode::InvalidPendantPacket),
+                    }
                 }
             }
         }

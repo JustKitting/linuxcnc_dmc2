@@ -24,11 +24,12 @@ o<dmc2_spindle_test> sub
     (M3 is the physically verified top-down clockwise mapping.)
     S#<test_rpm> M3
 
-    M66 P3 L3 Q#<transition_timeout_seconds>
-    o<dmc2_spindle_test_running> if [#5399 LT 0]
+    (Require direction feedback, not merely nonzero rotation feedback.)
+    M66 P4 L3 Q#<transition_timeout_seconds>
+    o<dmc2_spindle_test_clockwise> if [#5399 LT 0]
         M5
-        (abort,DMC2 SPINDLE TEST FAILED: spindle did not report running)
-    o<dmc2_spindle_test_running> endif
+        (abort,DMC2 SPINDLE TEST FAILED: H100 did not confirm clockwise rotation)
+    o<dmc2_spindle_test_clockwise> endif
 
     M66 P2 L3 Q#<transition_timeout_seconds>
     o<dmc2_spindle_test_at_speed> if [#5399 LT 0]

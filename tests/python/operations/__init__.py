@@ -1,1 +1,0 @@
-"""Parameterized LinuxCNC operation tests."""

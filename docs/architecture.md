@@ -6,8 +6,8 @@
 MYST1474 pendant
   -> Arduino Nano P3 serial protocol
   -> dmc2-serial-bridge (bounded parser + coherent HAL snapshot)
-  -> dmc2_rt.so (1 kHz realtime policy and finite HALUI edges)
-  -> LinuxCNC HALUI/motion
+  -> dmc2_rt.so (1 kHz realtime policy + native wheel-jog counts)
+  -> LinuxCNC servo-thread motion consumer and activity feedback
   -> Mesa 7I95T
 
 LinuxCNC NML status
@@ -50,16 +50,15 @@ control machine state from that journal; it validates and displays records.
 - `rust/crates/dmc2-launcher`: the standard compiled live-launch boundary;
   byte-exact profile/deployment checks, process-owner exclusion, persistent
   service creation, and direct LinuxCNC process replacement.
-- `rust/crates/dmc2-hal-sys`: generated LinuxCNC HAL FFI declarations.
-- `config`: reviewed machine constants shared by compiled production code and
-  offline compatibility tests.
+- `rust/crates/dmc2-hal-sys`: generated LinuxCNC HAL FFI declarations plus
+  source-pinned return-code, lifecycle, and signal-link semantics.
+- `config`: reviewed machine constants consumed by compiled production code.
 - `python/dmc2_axis`: presentation-only AXIS integration required by AXIS. Its modules own
   notification handling, pendant-mode visibility, and the special AXIS entry
   point as separate responsibilities.
 - `live`: the single accepted hardware profile and its NC programs.
-- `sim`: hardware-free LinuxCNC configuration.
-- `tests`: integration tests and small deterministic fixtures.
-- `reference`: preserved, non-live behavioral or historical implementations.
+- `tests/linuxcnc-motion`: the isolated real-LinuxCNC motion-consumer
+  acceptance fixture.
 - `archive/local`: untracked one-off experiments retained only for traceability.
 - `artifacts/captures`: untracked raw hardware captures.
 - `var/log` and `var/tmp`: runtime diagnostics and disposable project files.
@@ -71,23 +70,42 @@ control machine state from that journal; it validates and displays records.
 2. FFI and operating-system ownership stay at adapter boundaries.
 3. Realtime code performs no allocation, blocking I/O, logging, or Python
    calls in the servo callback.
-4. Public HAL schemas are compatibility contracts and must have exact tests
-   for names, types, directions, and uniqueness.
-5. Userspace snapshots use odd/even generations; realtime consumers accept
+4. Public HAL schemas are compatibility contracts; the real LinuxCNC
+   acceptance must successfully register and connect the production pins.
+5. Every live HAL net has an explicit direction annotation and
+   no pin may belong to two signals. A signal may have no more than one
+   `HAL_OUT`; `HAL_OUT` and `HAL_IO` may never share a signal; multiple
+   `HAL_IO` pins are valid tri-state writers.
+6. Userspace snapshots use odd/even generations; realtime consumers accept
    only a matching, even generation before and after a read.
-6. LinuxCNC numeric values come from the pinned 2.9.10 source tree at commit
+7. LinuxCNC numeric values and native motion pin semantics come from the pinned
+   2.9.10 source tree at commit
    `86cdca76fa2a36274c432caa21952b23c267989a`, never from memory or duplicated
    guesses.
-7. Live configuration cannot reference `reference`, `archive`, `artifacts`,
+8. Live configuration cannot reference `reference`, `archive`, `artifacts`,
    or `var/tmp`.
 
 ## Verification boundary
 
-The offline build must format and compile every Rust target, execute the full
-workspace tests, validate the values, object sizes, and snapshot ABI actually
-consumed by the controller, validate every live HAL/INI/UI connection, and
-enforce the source-layout limits. The launcher is additionally instrumented
-with the matching LLVM 19 tools and must have zero missed production regions,
-functions, or lines. Hardware motion or a LinuxCNC restart is a separate
-explicitly ordered operation and is never part of an offline verification
-command.
+`scripts/verify.sh` formats and compiles the Rust workspace, then launches an
+isolated LinuxCNC 2.9.10 instance with real `motmod`, the deployed serial and
+task-monitor binaries, the deployed realtime controller, and a software step
+generator. It sends production P3 packets through all X/Y/Z, x1/x10/x100, and
+both-direction combinations and requires the selected LinuxCNC joint command
+and downstream step count to move within the manual-jog tolerance while the
+other axes remain still. The fixture sources the same pendant input and motion
+contracts as the live profile. It also drives modeled raw and latched X/Y/Z
+limit inputs through three complete production-controller stop and automatic
+bounce paths while deliberately retaining the raw input. It requires an
+operator-commanded x1 move on the attributed axis in the away direction,
+verifies the native LinuxCNC hard-limit input remains masked throughout that
+recovery, then clears the modeled raw input and requires latch reset and return
+to ready. Finally, it passes the resulting real LinuxCNC error-channel records
+through the production AXIS journal reader and rejects native joint-limit
+errors.
+
+That acceptance loads no HostMot2 or Mesa driver and therefore cannot prove
+Ethernet delivery, physical step-pin output, drive response, motor movement,
+physical limit wiring or switch response, or spindle behavior. Those boundaries
+require a separately ordered live hardware observation. A successful build or
+isolated acceptance must never be reported as proof of physical movement.

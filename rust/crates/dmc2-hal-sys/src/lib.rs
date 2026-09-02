@@ -9,8 +9,13 @@
 include!(concat!(env!("OUT_DIR"), "/hal_bindings.rs"));
 
 mod abi;
+mod catalog;
+mod pin;
+mod registration_error;
 mod return_code;
 
+pub use pin::{register_numbered_pin, register_pin, HalPinDirection, HalPinKind, HalPinValue};
+pub use registration_error::{HalNameKind, HalRegistrationError, HalRegistrationFailure};
 pub use return_code::{
     HalCall, HalError, HalFailureKind, HalKnownErrno, HAL_CALLS, HAL_KNOWN_ERRNOS,
 };

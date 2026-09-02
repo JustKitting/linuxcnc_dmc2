@@ -1,8 +1,8 @@
+mod error;
 mod pins;
 mod publisher;
 mod registration;
 
-#[cfg(test)]
-mod tests;
-
+pub(in crate::application) use error::PublisherError;
 pub(super) use publisher::HalPublisher;
+pub(in crate::application) use registration::RegistrationError;

@@ -1,0 +1,65 @@
+%
+(DMC2 X PROBE-OFFSET: SELECTED CONTACT INPUT TO FIXED PUCK)
+(Authorized values: -X 40.00 mm maximum at 0.10 mm/s.)
+(After IN1 contact is durably recorded: +X 1.00 mm at 0.10 mm/s.)
+(No Y, Z, or spindle command is present.)
+
+#<maximum_travel_mm> = 40.00
+#<approach_feed_mm_min> = 6.00
+#<backoff_distance_mm> = 1.00
+#<backoff_feed_mm_min> = 6.00
+
+G21 G91 G94
+
+(Start with the existing OUT5 contact-test power path off.)
+M65 P0
+M66 P1 L4 Q1.0
+o<dmc2_x_probe_initial_power_off> if [#5399 LT 0]
+    (DEBUG,DMC2 X PROBE REFUSED: OUT5 gate did not report off)
+    G90
+    M2
+o<dmc2_x_probe_initial_power_off> endif
+
+(Enable OUT5 only while this LinuxCNC program is running.)
+M64 P0
+M66 P1 L3 Q1.0
+o<dmc2_x_probe_power_on> if [#5399 LT 0]
+    M65 P0
+    (DEBUG,DMC2 X PROBE REFUSED: OUT5 gate did not report on)
+    G90
+    M2
+o<dmc2_x_probe_power_on> endif
+
+(The selected contact input must be open before movement.)
+o<dmc2_x_probe_initial_open> if [#<_hal[motion.probe-input]> NE 0]
+    M65 P0
+    (DEBUG,DMC2 X PROBE REFUSED: selected contact input is already active)
+    G90
+    M2
+o<dmc2_x_probe_initial_open> endif
+
+(Open the durable capture before motion. LinuxCNC writes the accepted probe)
+(point, and the file is closed before any backoff can begin.)
+(PROBEOPEN /home/kit/linuxcnc_dmc2/var/log/linuxcnc/probe-offset-x-capture.txt)
+
+(Exactly -X, maximum 40.00 mm, at 6.00 mm/min = 0.10 mm/s.)
+G38.2 X[-#<maximum_travel_mm>] F#<approach_feed_mm_min>
+#<probe_contact_machine_x> = #5061
+(PROBECLOSE)
+(DEBUG,DMC2 X PROBE CONTACT: X = #<probe_contact_machine_x> mm)
+
+(Exactly +X 1.00 mm at 6.00 mm/min = 0.10 mm/s.)
+G1 X#<backoff_distance_mm> F#<backoff_feed_mm_min>
+#<backoff_machine_x> = #<_abs_x>
+
+(Remove contact-test power after the requested backoff.)
+M65 P0
+M66 P1 L4 Q1.0
+o<dmc2_x_probe_final_power_off> if [#5399 LT 0]
+    (DEBUG,DMC2 X PROBE WARNING: OUT5 gate did not report off after backoff)
+o<dmc2_x_probe_final_power_off> endif
+
+G90
+(DEBUG,DMC2 X PROBE BACKOFF COMPLETE: machine X = #<backoff_machine_x> mm)
+M2
+%

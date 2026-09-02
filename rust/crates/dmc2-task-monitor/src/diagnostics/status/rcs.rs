@@ -7,7 +7,7 @@ use dmc2_linuxcnc_interface::{
 
 use crate::snapshot::RcsStatusSnapshot;
 
-use super::super::catalog::{check_code, domain_id, issue, unknown_code};
+use super::super::catalog::{check_code, domain_id, issue, issue_with_evidence, unknown_code};
 use super::super::category;
 use super::super::report::{DiagnosticReport, Severity};
 use super::super::validation::{account_open, check_bounded_c_bytes};
@@ -112,7 +112,12 @@ pub(super) fn check_rcs(
     report.account(format!("{source}.reserved"), "reserved_zero");
 
     if rcs_name == Some("RCS_ERROR") {
-        issue(
+        let command_name = commands
+            .catalog()
+            .lookup(command_type)
+            .or_else(|| RCS_GENERIC_COMMAND.lookup(command_type))
+            .unwrap_or("UNKNOWN_COMMAND");
+        issue_with_evidence(
             report,
             Severity::Error,
             fault_category,
@@ -122,6 +127,17 @@ pub(super) fn check_rcs(
             i64::from(status.status),
             rcs_name,
             "LinuxCNC subsystem reported RCS_ERROR",
+            format!(
+                "source={source:?} raw={} command_type={} command_name={command_name:?} echo_serial={} rcs_state={} line={} source_line={} source_file={:?}",
+                status.status,
+                status.command_type,
+                status.echo_serial_number,
+                status.state,
+                status.line,
+                status.source_line,
+                String::from_utf8_lossy(&status.source_file)
+                    .trim_end_matches(char::from(0)),
+            ),
         );
     }
     if status.reserved != 0 {

@@ -3,7 +3,18 @@
 version = 4
 
 [[package]]
+name = "dmc2-acceptance"
+version = "0.1.0"
+
+[[package]]
 name = "dmc2-core"
+version = "0.1.0"
+dependencies = [
+ "dmc2-diagnostics",
+]
+
+[[package]]
+name = "dmc2-diagnostics"
 version = "0.1.0"
 
 [[package]]
@@ -24,12 +35,15 @@ version = "0.1.0"
 dependencies = [
  "dmc2-core",
  "dmc2-hal-sys",
+ "dmc2-linuxcnc-interface",
+ "dmc2-serial-bridge",
 ]
 
 [[package]]
 name = "dmc2-serial-bridge"
 version = "0.1.0"
 dependencies = [
+ "dmc2-diagnostics",
  "dmc2-hal-sys",
 ]
 
@@ -37,6 +51,21 @@ dependencies = [
 name = "dmc2-task-monitor"
 version = "0.1.0"
 dependencies = [
+ "dmc2-core",
+ "dmc2-diagnostics",
  "dmc2-hal-sys",
  "dmc2-linuxcnc-interface",
+ "dmc2-serial-bridge",
+ "h100-spindle",
+]
+
+[[package]]
+name = "dmc2ctl"
+version = "0.1.0"
+
+[[package]]
+name = "h100-spindle"
+version = "0.1.0"
+dependencies = [
+ "dmc2-diagnostics",
 ]

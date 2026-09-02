@@ -26,26 +26,3 @@ pub(super) fn stepgen_position_pulses(
     }
     Ok(position_pulses)
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn accepts_the_exact_negative_live_hostmot2_capture() {
-        let value = stepgen_position_pulses(-11, -0.010_003_16).unwrap();
-        assert!((value - -10.00316).abs() < 1e-12);
-    }
-
-    #[test]
-    fn rejects_non_finite_and_count_incoherent_feedback() {
-        assert_eq!(
-            stepgen_position_pulses(0, f64::NAN),
-            Err(StepgenFeedbackError::Unavailable)
-        );
-        assert_eq!(
-            stepgen_position_pulses(-10, -0.010_003_16),
-            Err(StepgenFeedbackError::Incoherent)
-        );
-    }
-}

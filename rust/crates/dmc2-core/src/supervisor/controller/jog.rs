@@ -6,7 +6,21 @@ use crate::BOUNCE_PULSES;
 impl LinuxCncPendantSupervisor {
     pub(super) fn cancel_pendant_motion(&mut self) {
         self.pending = None;
-        if self.active.is_none() || self.phase.bounce() {
+        if self.active.is_none() {
+            return;
+        }
+        // Cancellation is level-driven while LinuxCNC reports homing.  Once
+        // the stop transition has begun, do not republish motion.jog-stop on
+        // every servo cycle while the planner decelerates and settles.
+        if self.phase == Phase::StoppingCancel {
+            return;
+        }
+        if self.phase == Phase::BounceReleaseJog {
+            self.command = Some(CommandEvent::JogStop);
+            self.transition(Phase::BounceReleaseStopping);
+            return;
+        }
+        if self.phase.bounce() {
             return;
         }
         self.command = Some(CommandEvent::JogStop);
@@ -28,6 +42,11 @@ impl LinuxCncPendantSupervisor {
         {
             return;
         }
+        let joint_jog = !inputs.machine.all_homed();
+        if !inputs.motion.ready_for_path(joint_jog) {
+            self.fail(FaultCode::MotionPathUnavailable);
+            return;
+        }
         let start_position_pulses = match stepgen_position_pulses(
             inputs.counts_by_motor[intent.motor],
             inputs.position_feedback_by_motor[intent.motor],
@@ -42,14 +61,13 @@ impl LinuxCncPendantSupervisor {
                 return;
             }
         };
-        let joint_jog = !inputs.machine.all_homed();
         let command = JogCommand {
             axis: intent.axis,
             joint_jog,
             signed_delta_pulses: intent.delta_pulses as f64,
-            speed_mm_per_minute: intent.speed_mm_per_minute,
+            target_rate_mm_per_minute: intent.target_rate_mm_per_minute,
         };
-        if !self.emit_jog(command, inputs.command_channel_ready) {
+        if !self.emit_jog(command, inputs.motion_command_ready) {
             self.pending = Some(intent);
             return;
         }
@@ -58,12 +76,15 @@ impl LinuxCncPendantSupervisor {
             intent,
             joint_jog,
             start_count,
+            start_position_pulses,
             target_count: start_count.wrapping_add(intent.delta_pulses),
             target_position_pulses: start_position_pulses + intent.delta_pulses as f64,
+            command_elapsed_ns: 0,
+            consumer_active_seen: false,
+            feedback_progress_seen: false,
         });
         self.pending = None;
         self.transition(Phase::Idle);
-        self.motion_not_before_ns = MOTION_SETTLE_NS;
     }
 
     pub(super) fn request_jog(&mut self, intent: JogIntent, inputs: &SupervisorInputs) {
@@ -78,9 +99,12 @@ impl LinuxCncPendantSupervisor {
         let same_motion = self.phase == Phase::Idle
             && active.intent.motor == intent.motor
             && active.intent.axis == intent.axis
-            && active.joint_jog != inputs.machine.all_homed()
+            && active.joint_jog == !inputs.machine.all_homed()
             && active.toward_positive_limit() == (intent.delta_pulses > 0);
-        if same_motion && inputs.command_channel_ready {
+        if same_motion
+            && inputs.motion.ready_for_path(active.joint_jog)
+            && inputs.motion_command_ready
+        {
             let current_count = inputs.counts_by_motor[intent.motor];
             let replacement_target = current_count.wrapping_add(intent.delta_pulses);
             let extension = replacement_target.wrapping_sub(active.target_count);
@@ -96,16 +120,16 @@ impl LinuxCncPendantSupervisor {
                     axis: intent.axis,
                     joint_jog: active.joint_jog,
                     signed_delta_pulses: extension as f64,
-                    speed_mm_per_minute: intent.speed_mm_per_minute,
+                    target_rate_mm_per_minute: intent.target_rate_mm_per_minute,
                 };
                 if self.emit_jog(command, true) {
                     if let Some(value) = self.active.as_mut() {
                         value.intent = intent;
                         value.target_count = replacement_target;
                         value.target_position_pulses += extension as f64;
+                        value.command_elapsed_ns = 0;
                     }
                     self.pending = None;
-                    self.motion_not_before_ns = MOTION_SETTLE_NS;
                     return;
                 }
             }
@@ -146,6 +170,10 @@ impl LinuxCncPendantSupervisor {
             self.fail(FaultCode::BounceLostLimitAttribution);
             return;
         };
+        if !inputs.motion.ready_for_path(active.joint_jog) {
+            self.fail(FaultCode::MotionPathUnavailable);
+            return;
+        }
         let start_count = inputs.counts_by_motor[motor];
         let position_pulses = match stepgen_position_pulses(
             inputs.counts_by_motor[motor],
@@ -174,27 +202,62 @@ impl LinuxCncPendantSupervisor {
             axis: axis_by_motor(motor),
             joint_jog: active.joint_jog,
             signed_delta_pulses: -distance_pulses,
-            speed_mm_per_minute: BOUNCE_SPEED_MM_PER_MINUTE,
+            target_rate_mm_per_minute: BOUNCE_SPEED_MM_PER_MINUTE,
         };
-        if !self.emit_jog(command, inputs.command_channel_ready) {
+        if !self.emit_jog(command, inputs.motion_command_ready) {
             return;
         }
         self.bounce_start_count = Some(start_count);
+        if let Some(value) = self.active.as_mut() {
+            value.intent = JogIntent {
+                axis: axis_by_motor(motor),
+                motor,
+                delta_pulses: -BOUNCE_PULSES,
+                target_rate_mm_per_minute: BOUNCE_SPEED_MM_PER_MINUTE,
+            };
+            value.restart_observation(
+                start_count,
+                position_pulses,
+                start_count.wrapping_sub(BOUNCE_PULSES),
+                position_pulses - distance_pulses,
+            );
+        }
         self.transition(Phase::Bouncing);
-        self.motion_not_before_ns = MOTION_SETTLE_NS;
     }
 
-    fn finish_bounce(&mut self, inputs: &SupervisorInputs) {
-        let (Some(motor), Some(start_count)) = (self.collision_motor, self.bounce_start_count)
-        else {
+    pub(super) fn start_limit_release_jog(&mut self, intent: JogIntent, inputs: &SupervisorInputs) {
+        let Some(motor) = self.collision_motor else {
             self.fail(FaultCode::BounceLostLimitAttribution);
             return;
         };
-        match stepgen_position_pulses(
+        if self.phase != Phase::BounceReleaseWait
+            || intent.motor != motor
+            || intent.axis != axis_by_motor(motor)
+            || intent.delta_pulses >= 0
+        {
+            return;
+        }
+        if !inputs.raw_limits[motor] {
+            self.begin_limit_reset(motor);
+            return;
+        }
+        if inputs.safety_limits != one_hot(motor) {
+            self.fail(FaultCode::BounceLostLimitAttribution);
+            return;
+        }
+        if !inputs.machine.ready_for_pendant_jog() {
+            return;
+        }
+        let joint_jog = !inputs.machine.all_homed();
+        if !inputs.motion.ready_for_path(joint_jog) {
+            self.fail(FaultCode::MotionPathUnavailable);
+            return;
+        }
+        let start_position_pulses = match stepgen_position_pulses(
             inputs.counts_by_motor[motor],
             inputs.position_feedback_by_motor[motor],
         ) {
-            Ok(_) => {}
+            Ok(value) => value,
             Err(StepgenFeedbackError::Unavailable) => {
                 self.fail(FaultCode::BounceFeedbackUnavailable);
                 return;
@@ -203,25 +266,88 @@ impl LinuxCncPendantSupervisor {
                 self.fail(FaultCode::BounceFeedbackIncoherent);
                 return;
             }
-        }
-        let actual_delta = inputs.counts_by_motor[motor].wrapping_sub(start_count);
-        if actual_delta != -BOUNCE_PULSES {
-            self.fail(FaultCode::BounceCountMismatch);
+        };
+        let command = JogCommand {
+            axis: intent.axis,
+            joint_jog,
+            signed_delta_pulses: intent.delta_pulses as f64,
+            target_rate_mm_per_minute: intent.target_rate_mm_per_minute,
+        };
+        if !self.emit_jog(command, inputs.motion_command_ready) {
             return;
         }
-        if inputs.raw_limits[motor] {
-            self.fail(FaultCode::BounceLimitStillActive);
-            return;
-        }
+        let start_count = inputs.counts_by_motor[motor];
+        self.active = Some(ActiveJog {
+            intent,
+            joint_jog,
+            start_count,
+            start_position_pulses,
+            target_count: start_count.wrapping_add(intent.delta_pulses),
+            target_position_pulses: start_position_pulses + intent.delta_pulses as f64,
+            command_elapsed_ns: 0,
+            consumer_active_seen: false,
+            feedback_progress_seen: false,
+        });
+        self.pending = None;
+        self.transition(Phase::BounceReleaseJog);
+    }
+
+    fn begin_limit_reset(&mut self, motor: usize) {
+        self.active = None;
+        self.pending = None;
         self.limit_reset[motor] = true;
         self.transition(Phase::BounceResetAssert);
     }
 
-    pub(super) fn advance_motion(&mut self, period_ns: u64, inputs: &SupervisorInputs) {
-        if self.motion_not_before_ns > 0 {
-            self.motion_not_before_ns = self.motion_not_before_ns.saturating_sub(period_ns);
+    fn finish_unaccepted_manual_jog(&mut self) {
+        // LinuxCNC normally refuses an outward wheel increment at a Cartesian
+        // soft limit. No motion began, so this is an ordinary bounded manual
+        // input outcome rather than a machine fault or E-stop condition.
+        self.active = None;
+        self.pending = None;
+        self.transition(Phase::Idle);
+        self.interpreter.reset();
+    }
+
+    fn finish_bounce(&mut self, inputs: &SupervisorInputs) {
+        let (Some(motor), Some(_)) = (self.collision_motor, self.bounce_start_count) else {
+            self.fail(FaultCode::BounceLostLimitAttribution);
+            return;
+        };
+        let Some(active) = self.active else {
+            self.fail(FaultCode::BounceLostLimitAttribution);
+            return;
+        };
+        let actual_position_pulses = match stepgen_position_pulses(
+            inputs.counts_by_motor[motor],
+            inputs.position_feedback_by_motor[motor],
+        ) {
+            Ok(value) => value,
+            Err(StepgenFeedbackError::Unavailable) => {
+                self.fail(FaultCode::BounceFeedbackUnavailable);
+                return;
+            }
+            Err(StepgenFeedbackError::Incoherent) => {
+                self.fail(FaultCode::BounceFeedbackIncoherent);
+                return;
+            }
+        };
+        let target_error = actual_position_pulses - active.target_position_pulses;
+        if !manual_target_reached(target_error, active.intent.delta_pulses) {
+            return;
         }
-        if self.phase.bounce() {
+        if inputs.raw_limits[motor] {
+            self.active = None;
+            self.pending = None;
+            self.interpreter.reset();
+            self.transition(Phase::BounceReleaseWait);
+            return;
+        }
+        self.begin_limit_reset(motor);
+    }
+
+    pub(super) fn advance_motion(&mut self, period_ns: u64, inputs: &SupervisorInputs) {
+        if self.phase.timed_bounce() {
             self.phase_total_ns = self.phase_total_ns.saturating_add(period_ns);
             if self.phase_total_ns > BOUNCE_TIMEOUT_NS {
                 self.fail(FaultCode::BounceTimedOut);
@@ -257,31 +383,98 @@ impl LinuxCncPendantSupervisor {
             _ => {}
         }
 
+        if self.phase == Phase::BounceReleaseWait {
+            let Some(motor) = self.collision_motor else {
+                self.fail(FaultCode::BounceLostLimitAttribution);
+                return;
+            };
+            if !inputs.raw_limits[motor] {
+                self.begin_limit_reset(motor);
+            }
+            return;
+        }
+
         let Some(active) = self.active else {
-            if self.phase == Phase::Idle && self.pending.is_some() && inputs.command_channel_ready {
+            if self.phase == Phase::Idle && self.pending.is_some() && inputs.motion_command_ready {
                 if let Some(intent) = self.pending.take() {
                     self.start_jog(intent, inputs);
                 }
             }
             return;
         };
-        if !inputs.command_channel_ready
-            || !inputs.machine.axis_stopped[active.intent.axis.index()]
-            || self.motion_not_before_ns > 0
-        {
-            return;
+        if let Some(value) = self.active.as_mut() {
+            value.observe_motion(period_ns, inputs);
         }
+        let active = self.active.unwrap_or(active);
+
         match self.phase {
-            Phase::StoppingBounce => self.start_bounce_move(inputs),
-            Phase::Bouncing => self.finish_bounce(inputs),
-            Phase::StoppingReplace => {
-                self.active = None;
-                self.transition(Phase::Idle);
-                if let Some(intent) = self.pending.take() {
-                    self.start_jog(intent, inputs);
+            Phase::StoppingBounce
+            | Phase::StoppingReplace
+            | Phase::StoppingCancel
+            | Phase::BounceReleaseStopping => {
+                if self.phase_elapsed_ns >= MOTION_STOP_TIMEOUT_NS {
+                    self.fail(FaultCode::MotionStopTimedOut);
+                    return;
+                }
+                if !inputs.motion.all_jogs_stopped()
+                    || !inputs
+                        .motion
+                        .path_settled(active.intent.axis, active.joint_jog)
+                {
+                    return;
+                }
+                match self.phase {
+                    Phase::StoppingBounce => self.start_bounce_move(inputs),
+                    Phase::StoppingReplace => {
+                        self.active = None;
+                        self.transition(Phase::Idle);
+                        if let Some(intent) = self.pending.take() {
+                            self.start_jog(intent, inputs);
+                        }
+                    }
+                    Phase::StoppingCancel => {
+                        self.active = None;
+                        self.pending = None;
+                        self.transition(Phase::Idle);
+                    }
+                    Phase::BounceReleaseStopping => {
+                        self.active = None;
+                        self.pending = None;
+                        self.interpreter.reset();
+                        self.transition(Phase::BounceReleaseWait);
+                    }
+                    _ => {}
+                }
+            }
+            Phase::Bouncing | Phase::BounceReleaseJog => {
+                if !inputs.motion.ready_for_path(active.joint_jog) {
+                    self.fail(FaultCode::MotionPathUnavailable);
+                    return;
+                }
+                if !active.consumer_active_seen {
+                    if active.command_elapsed_ns >= MOTION_ACCEPT_TIMEOUT_NS {
+                        self.fail(FaultCode::JogCommandNotAccepted);
+                    }
+                    return;
+                }
+                if !inputs
+                    .motion
+                    .path_settled(active.intent.axis, active.joint_jog)
+                {
+                    return;
+                }
+                self.finish_bounce(inputs);
+                if matches!(self.phase, Phase::Bouncing | Phase::BounceReleaseJog)
+                    && active.command_elapsed_ns >= BOUNCE_TIMEOUT_NS
+                {
+                    self.fail(FaultCode::BounceCountMismatch);
                 }
             }
             Phase::Idle => {
+                if !inputs.motion.ready_for_path(active.joint_jog) {
+                    self.fail(FaultCode::MotionPathUnavailable);
+                    return;
+                }
                 let actual_position_pulses = match stepgen_position_pulses(
                     inputs.counts_by_motor[active.intent.motor],
                     inputs.position_feedback_by_motor[active.intent.motor],
@@ -296,12 +489,26 @@ impl LinuxCncPendantSupervisor {
                         return;
                     }
                 };
-                let target_error = actual_position_pulses - active.target_position_pulses;
-                if !target_error.is_finite()
-                    || target_error <= -JOG_TARGET_TOLERANCE_PULSES
-                    || target_error >= JOG_TARGET_TOLERANCE_PULSES
+                if !active.consumer_active_seen {
+                    if active.command_elapsed_ns >= MOTION_ACCEPT_TIMEOUT_NS {
+                        self.finish_unaccepted_manual_jog();
+                    }
+                    return;
+                }
+                if !inputs
+                    .motion
+                    .path_settled(active.intent.axis, active.joint_jog)
                 {
-                    self.fail(FaultCode::JogCountMismatch);
+                    if active.command_elapsed_ns >= JOG_TIMEOUT_NS {
+                        self.fail(FaultCode::JogTimedOut);
+                    }
+                    return;
+                }
+                let target_error = actual_position_pulses - active.target_position_pulses;
+                if !manual_target_reached(target_error, active.intent.delta_pulses) {
+                    if active.command_elapsed_ns >= JOG_TIMEOUT_NS {
+                        self.fail(FaultCode::JogCountMismatch);
+                    }
                     return;
                 }
                 self.active = None;
@@ -310,17 +517,12 @@ impl LinuxCncPendantSupervisor {
                     self.start_jog(intent, inputs);
                 }
             }
-            Phase::StoppingCancel => {
-                self.active = None;
-                self.pending = None;
-                self.transition(Phase::Idle);
-            }
             _ => {}
         }
     }
 
     pub(super) fn drain_pending(&mut self, inputs: &SupervisorInputs) {
-        if self.phase != Phase::Idle || !inputs.command_channel_ready || self.pending.is_none() {
+        if self.phase != Phase::Idle || !inputs.motion_command_ready || self.pending.is_none() {
             return;
         }
         let intent = self.pending.take();

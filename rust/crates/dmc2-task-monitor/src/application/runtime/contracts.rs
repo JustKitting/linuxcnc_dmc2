@@ -2,6 +2,8 @@ use std::ffi::CString;
 
 use crate::application::diagnostic_state::DiagnosticState;
 use crate::application::error_channel::{ErrorChannelFault, ErrorChannelRead, ErrorMessageRecord};
+use crate::application::hal::PublisherError;
+use crate::application::journal_error::JournalError;
 use crate::application::nml::{PollCodes, PollOutcome, TransportStatus};
 use crate::diagnostics::DiagnosticReport;
 use crate::snapshot::NativeSnapshot;
@@ -39,7 +41,7 @@ pub(super) trait JournalSink {
         &mut self,
         transport: TransportStatus,
         record: &ErrorMessageRecord,
-    ) -> Result<u64, String>;
+    ) -> Result<u64, JournalError>;
 }
 
 pub(super) trait HalSink {
@@ -53,7 +55,7 @@ pub(super) trait HalSink {
         transport: TransportStatus,
         diagnostics: &DiagnosticReport,
         diagnostic_state: &mut DiagnosticState,
-    );
+    ) -> Result<(), PublisherError>;
 }
 
 pub(super) trait RuntimeReporter {

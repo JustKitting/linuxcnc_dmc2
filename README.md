@@ -9,9 +9,8 @@ LinuxCNC on Raspberry Pi -> Ethernet -> Mesa 7I95T -> machine I/O and axes
 ```
 
 LinuxCNC is the only Mesa owner. The Nano is an input bridge; it does not run
-LinuxCNC, load HostMot2, or command an axis by itself. The preserved
-`reference/legacy_controller/control.py` direct-Mesa program must never run at
-the same time as this LinuxCNC profile.
+LinuxCNC, load HostMot2, or command an axis by itself. Obsolete direct-Mesa and
+offline reference controllers are not part of this repository.
 
 ## Repository layout
 
@@ -19,14 +18,12 @@ the same time as this LinuxCNC profile.
 - `live/`: the accepted LinuxCNC profile, HAL, UI, and NC programs.
 - `rust/crates/`: realtime policy, LinuxCNC interfaces, serial bridge, and task
   diagnostics split into independent crates and responsibility modules.
-- `python/`: AXIS-required presentation and offline-validation packages; never
-  the live launch or motion-control boundary.
+- `python/dmc2_axis/`: AXIS-required presentation only; never the live launch
+  or motion-control boundary.
 - `firmware/`: Nano source and Mesa firmware images.
-- `tests/`: configuration, UI, operation, and preserved-behavior suites.
-- `scripts/`: build, verification, installation, readiness, and launch entry
-  points.
+- `tests/linuxcnc-motion/`: isolated real-LinuxCNC motion-consumer fixture.
+- `scripts/`: release build, real motion verification, and module installation.
 - `docs/`: architecture, signal audits, and historical machine notes.
-- `reference/`: non-live earlier implementations retained for comparison.
 - `archive/local/`: ignored one-off diagnostic programs and the preserved old
   home-directory VCS history.
 - `artifacts/`: ignored hardware captures, firmware builds, and backups.
@@ -34,10 +31,7 @@ the same time as this LinuxCNC profile.
   project scratch files.
 - `vendor/`: the clean, commit-locked official LinuxCNC 2.9.10 checkout.
 
-The enforced dependency rules and runtime data flow are documented in
-`docs/architecture.md`. `scripts/check_source_layout.sh` rejects oversized
-production modules, Python in the live HAL path, generated caches, and live
-dependencies on archived or temporary files.
+The runtime data flow is documented in `docs/architecture.md`.
 
 ## Accepted provisional machine profile
 
@@ -63,10 +57,11 @@ the accepted sequence as one LinuxCNC homing operation:
 3. Finish 0.25 mm in the negative direction at 0.25 mm/s: exactly 250 pulses
    away from the switch coordinate.
 
-The status panel's **HOME ALL** button is a momentary route to
-`halui.home-all`; it invokes this same configured LinuxCNC sequence. It does
-not contain a second homing implementation or substitute different motion
-values.
+The Manual Control tab's compact **Homing:** section presents the catalogued
+**Home All** control and Known/Unknown position indicators beneath the stock
+spindle controls. Its button retains AXIS's existing Home All command binding;
+it invokes this same configured LinuxCNC sequence and does not contain a second
+homing implementation or substitute different motion values.
 
 IN11, IN9, and IN10 are each shared as that joint's positive limit and home
 switch. The normal Cartesian limits stay at 300/173/135 mm; only each joint's
@@ -76,7 +71,8 @@ homing range reaches its accepted switch coordinate 0.25 mm farther positive.
 
 `live/pendant.hal`, the compiled `dmc2-serial-bridge`, the compiled
 `dmc2-task-monitor`, and the no-`std` `dmc2_rt.so` realtime component provide
-pendant input through LinuxCNC's native HALUI/motion interfaces. Python has no
+pendant input through LinuxCNC's native servo-thread wheel-jog interface. HALUI
+is used only for acknowledged machine-state requests; Python has no
 authority in the live pendant motion path and no component directly writes a
 Mesa motion command.
 
@@ -106,14 +102,17 @@ read, configuration-cleanup, and close failures; the bridge reports each
 failure instead of collapsing or discarding it.
 
 - The side button must be held to jog.
-- x1 requests 10 pulses at 5000 pulses/s (the preceding 2500 rate x2).
-- x10 requests 100 pulses at 75000 pulses/s (the preceding 15000 rate x5).
-- x100 requests 1000 pulses at 300000 pulses/s (the preceding 30000 rate x10).
+- x1 issues a 10-pulse target at 5000 target pulses/s (the preceding 2500 rate x2).
+- x10 issues a 100-pulse target at 75000 target pulses/s (the preceding 15000 rate x5).
+- x100 issues a 1000-pulse target at 300000 target pulses/s (the preceding 30000 rate x10).
 
-The requested jog velocity and the accepted machine velocity ceiling are
-separate settings. The LinuxCNC profile still limits every axis and the
-trajectory planner to 30 mm/s; this rate change does not raise that ceiling or
-change acceleration, jog distance, or limit-bounce behavior.
+These are rates for pacing the finite wheel-count target into LinuxCNC, not a
+claim that the physical axis reaches those velocities during a short move.
+LinuxCNC 2.9.10's wheel-jog HAL API has no numeric per-command velocity pin.
+Its planner still limits every axis to 30 mm/s and 50 mm/s², so acceleration,
+distance, and the machine ceiling remain authoritative. The compiled timeout
+envelope is derived from those live INI planner limits and the target-issuance
+durations, with the existing two-second floor retained.
 
 - LinuxCNC retains the 50 mm/s² axis/joint acceleration limit. HostMot2's
   redundant stepgen acceleration limiter is disabled (`maxaccel=0`) so the
@@ -171,16 +170,18 @@ blocks only the toward direction, the negative bounce direction remains
 permitted, and either other limit blocks the active motor. During that already
 attributed pendant operation only, the directional gate replaces LinuxCNC's
 default machine-off hard-limit response. One negative 250-pulse recovery jog is
-then requested at 1500 pulses/s. The supervisor requires the Mesa
-generated-count delta to be exactly -250 and the raw switch to clear before it
-resets only that safety latch. Homing and non-pendant motion retain the normal
-hard-limit input path. If startup finds exactly one matching raw-and-latched
-limit, the supervisor attributes that switch before enabling LinuxCNC and runs
-the same exact negative 250-pulse bounce at 1500 pulses/s; this prevents an
-already-active switch from locking out its own recovery direction. A
-wrong-axis, multiple, unattributed, non-exact,
-uncleared, or timed-out event faults closed instead of inventing a recovery
-move.
+then issued at 1500 target pulses/s. The supervisor requires the Mesa
+feedback to finish within the same 20% tolerance as other manual pendant
+positioning. If the raw switch clears, it resets only that safety latch. If the
+exact automatic backoff completes while the raw switch remains active, no
+additional motion is invented: the controller retains attribution, keeps
+LinuxCNC's native hard-limit input masked, and accepts only deadman-held pendant
+detents on that same axis in the negative/away direction. Other axes and the
+toward direction remain blocked. Once the raw input clears, the latch resets and
+normal pendant control returns. Homing and non-pendant motion retain the normal
+hard-limit input path. Startup uses the same recovery when it finds exactly one
+matching raw-and-latched limit. Wrong-axis, multiple, unattributed, incoherent,
+or timed-out motion still faults closed.
 
 After a pendant E-stop, recovery requires exactly:
 
@@ -188,10 +189,12 @@ After a pendant E-stop, recovery requires exactly:
 X+x10 -> X+x1 -> OFF -> clockwise -> counterclockwise -> 3 complete side-button clicks
 ```
 
-The gesture itself is input-only. Only after it completes does the supervisor
-permit the external E-stop chain and request LinuxCNC E-stop reset/machine-on.
-A 100 ms realtime heartbeat watchdog faults the E-stop chain if the userspace
-controller freezes.
+The pendant has no separate E-stop state. Pressing its physical E-stop drops
+the gate feeding LinuxCNC's canonical `estop_latch`, so the standard AXIS
+E-stop state is asserted. After physical release, either AXIS Reset or the
+completed pendant gesture re-arms that same latch. The pendant gesture also
+requests Machine On; AXIS Reset does not. A 100 ms realtime heartbeat watchdog
+faults the same E-stop chain if the userspace controller freezes.
 
 ## AXIS status panel
 
@@ -200,21 +203,25 @@ the startup gate, LinuxCNC state, Nano link, and limits are ready. Selecting it
 first requests Pendant Mode; the PyVCP panel appears only after the controller
 returns its post-arm `control-ready` acknowledgement. The request is removed
 and the panel is hidden only when the controller itself becomes unavailable.
-During an expected limit collision and exact backoff, the control session
-remains available and the panel stays open while `control-ready` temporarily
-drops; it returns automatically after the bounce clears the latch.
+During an expected limit collision, automatic backoff, or attributed manual
+release, the control session remains available and the panel stays open while
+`control-ready` temporarily drops; it returns automatically after the raw
+switch clears and the bounce resets the latch.
 Bounce completion requires the latch-reset output to remain high for 10 ms,
 then remain low for another 10 ms before the controller returns to idle. Fault
 and E-stop paths force every latch-reset output low, preventing a completed or
 interrupted bounce from masking the next physical limit event.
 The supervisor also reads each HostMot2 stepgen's fractional position feedback.
 It places the negative-bounce endpoint in the middle of the target integer
-count bucket, so HostMot2 emits exactly 250 negative pulses even when the
-accumulator begins on an integer boundary; the final integer count delta is
-still checked before the limit latch can be reset.
-The exact LinuxCNC `Jog aborted by jog-stop-immediate` operator notification
-produced by that intentional realtime stop is suppressed in AXIS, while every
-other error remains visible. The panel shows:
+count bucket and evaluates completion against the 20% manual-motion tolerance
+before deciding whether to reset the latch or await an operator-commanded
+release increment.
+The exact LinuxCNC `Jog aborted by jog-stop-immediate` and
+`Jog aborted by jog-stop` operator notifications produced by the controller's
+intentional realtime limit stop and controlled pendant cancellation are
+suppressed in AXIS, while every other error remains visible. A homing-state
+cancellation publishes the controlled stop only once while LinuxCNC
+decelerates and settles. The panel shows:
 
 - top-level control-ready, fault, recovery, jog, and limit-backoff state;
 - LinuxCNC X/Y/Z machine-coordinate feedback;
@@ -224,13 +231,21 @@ other error remains visible. The panel shows:
 - OUT5 probe-power state;
 - Nano connection, link, wheel-decoder, E-stop, deadman, and selector status;
 - only physical selector positions, with X/X1, Y/X10, and Z/X100 vertically
-  aligned; and
-- a **HOME ALL** button routed to the accepted X-then-Y-then-Z sequence.
+  aligned.
+
+Known/Unknown homing state is deliberately outside the pendant panel. It stays
+visible with **Home All** in the Manual Control tab's compact **Homing:** row.
 
 `CLEAR SEEN` resets only the five display-history latches. It
 does not clear a motion-safety latch or bypass a limit.
 
-## LinuxCNC puck-contact test — no motion
+The always-visible **CLEAR FAULT** toolbar button sends LinuxCNC's canonical
+E-stop Reset request; it does not use a separate reset state. After the
+physical pendant E-stop is released, this clears a retained controller fault
+and re-arms the same canonical latch. It does not home, move an axis, start the
+spindle, or turn Machine On.
+
+## LinuxCNC contact-connectivity tests — no motion
 
 USER-OBSERVED ACTUAL calibration facts currently recorded:
 
@@ -238,24 +253,27 @@ USER-OBSERVED ACTUAL calibration facts currently recorded:
 - the installed cutter marking is **10mm-60L**; and
 - the puck sits directly on the machine plate for the planned Z reference.
 
-The operator-facing connectivity test is the **PUCK CONNECTIVITY TEST - NO
+The operator-facing connectivity test is the **CONTACT CONNECTIVITY - NO
 MOTION** row in the LinuxCNC panel. It works while the machine is unhomed and
 does not request homing, axis motion, or spindle motion. The spindle must
-already be stopped. IN0 drives both `motion.probe-input` and
-`motion.digital-in-00`.
+already be stopped. IN0 is the puck contact; IN1 is the DMC2 side-probe
+contact. IN0 also drives `motion.probe-input` and `motion.digital-in-00`.
 
-To run it, first separate the cutter and puck and press **CLEAR SEEN**. Press
-**START TEST**, then manually touch the installed cutter to the puck. The
-yellow **ACTIVE** and OUT5 indicators show the finite test-power window. A
-real IN0 contact sets the orange **Puck / IN0 SEEN** indicator and removes the
-test-power request immediately. **STOP TEST** also removes the request. With
-no contact or stop request, the realtime one-shot removes it after exactly 300
-seconds; another START press cannot extend an active window.
+Each contact is tested in a separate run. First separate the grounded clip or
+clipped tool from both contact surfaces and press **CLEAR SEEN**. Press **START
+TEST**, then touch the grounded clip or clipped tool to either the puck or the
+DMC2 side probe. The yellow **ACTIVE** and OUT5 indicators show the finite
+test-power window. A real IN0 contact sets **Puck / IN0 SEEN**; a real IN1
+contact sets **DMC2 probe / IN1 SEEN**. Either contact removes the test-power
+request immediately. **STOP TEST** also removes the request. With no contact
+or stop request, the realtime one-shot removes it after exactly 300 seconds;
+another START press cannot extend an active window. Clear the display latch
+and start a new run before testing the other contact.
 
 `motion.digital-in-01` reports that internal OUT5 gate state; it is not the
-physical Mesa IN1 terminal. The panel test's START and STOP pins connect only
-to the realtime one-shot/output gate, never to a joint, axis, homing pin, or
-motion command.
+physical Mesa IN1 terminal. The panel test's START and STOP pins and both
+contact inputs connect only to the realtime one-shot/output gate and display
+latches, never to a joint, axis, homing pin, or motion command.
 
 `live/nc_files/puck-contact-no-motion-test.ngc` remains as a deeper
 interpreter-path verification using LinuxCNC `M64`, `M65`, and `M66`. Because
@@ -315,9 +333,14 @@ the H100 through Mesa PktUART channel 1 and `hm2_modbus`. The realtime
 sequencer writes and verifies the frequency while holding STOP, releases the
 direction command only after exact `0201H` readback, reports actual RPM and
 `at-speed` from the VFD, and sends STOP before clearing frequency. The
-user-verified top-down physical mapping is H100 `0001H` = CCW and H100
-`0004H` = CW, so LinuxCNC follows the milling standard by mapping `M3` to
-`0004H` (CW) and `M4` to `0001H` (CCW).
+user-verified top-down physical mapping is H100 explicit Forward `0002H` =
+CCW and H100 Reverse `0004H` = CW, so LinuxCNC follows the milling standard by
+mapping `M3` to `0004H` (CW) and `M4` to `0002H` (CCW). The generic H100
+Operation value `0001H` is not used as a direction command because it does not
+clear a previously selected direction. Direction-qualified running and
+at-speed feedback require H100 `0210H` to match that requested mapping. A
+mismatch prevents cutting startup; a direction mismatch after confirmed
+running latches a typed spindle fault and commands STOP.
 
 The stock DMC2 Mini spindle is published as 2.2 kW and 24,000 RPM. A matching
 DMC2 Mini/H100 installation records F004=400 Hz, F005=400 Hz, F011=100 Hz,
@@ -331,9 +354,12 @@ commanded/output frequency 0, and VFD fault 0. The INI maps 24,000 RPM to
 The reusable `live/nc_files/dmc2_spindle_test.ngc` operation takes the test
 speed as its argument instead of embedding one speed. The direct LinuxCNC call
 is `o<dmc2_spindle_test> call [RPM]`. It starts from stopped feedback, commands
-the requested valid RPM with `M3`, waits for the H100 running and at-speed
-feedback, commands `M5`, and does not finish until the H100 reports stopped.
-It contains no X/Y/Z motion.
+the requested valid RPM with `M3`, requires H100 direction feedback to confirm
+the physically verified clockwise state, waits for at-speed feedback, commands
+`M5`, and does not finish until the H100 reports stopped.
+It contains no X/Y/Z motion. Beside AXIS's stock spindle controls, `Actual RPM`
+displays the same H100 output-frequency feedback used by
+`spindle.0.speed-in`; it remains visible while the pendant panel is closed.
 
 ## Deliberately disabled or deferred
 
@@ -355,38 +381,57 @@ It contains no X/Y/Z motion.
 These are non-blocking for the accepted axis/pendant/GUI profile and remain
 explicitly disabled—not silently guessed.
 
-## Hardware-free validation
+## Isolated real-LinuxCNC validation
 
-The complete verification command opens neither USB serial nor Mesa hardware:
+The complete verifier refuses to run while another LinuxCNC realtime host is
+active. It opens neither USB serial nor Mesa hardware:
 
 ```bash
 cd <project-root>
 scripts/verify.sh
 ```
 
-That command also runs the sibling H100 project's complete hardware-free gate:
-the Rust HAL lifecycle/interface tests and 122,880-case sequencer invariant
-matrix, 100% of the pure Modbus protocol's executable lines, exact
-recompilation of every Mesa Modbus map, and two byte-identical normalized
-realtime-module builds.
-The compiled launcher has its own LLVM 19 instrumentation gate requiring zero
-missed production regions, functions, or lines, including its real
-filesystem/process adapter and standard executable entry point.
-
+It builds the complete Rust release with warnings denied, verifies that all
+deployed DMC2 binaries byte-match that release, and starts LinuxCNC 2.9.10 with
+real `motmod` plus a software step generator. A PTY supplies raw P3 packets to
+the deployed serial bridge. The fixture sources the same pendant input and
+motion HAL contracts as the live profile and observes LinuxCNC-owned joint
+commands and downstream step counts. Its 20 data-driven moves cover X/Y/Z,
+x1/x10/x100, both directions, and consecutive X/x1 commands. Three additional
+paths exercise real LinuxCNC jog-stop handling, the production controller's
+X/Y/Z limit bounce, toleranced completion, raw-limit-held recovery, restricted
+away-direction x1 jog, native hard-limit masking, and safety-latch reset. The
+same run starts real LinuxCNC 2.9.10 homemod while a real jog is active and
+requires exactly one controlled-stop event across the complete level-active
+homing interval. A separate real homemod path holds a shared home/positive-limit
+input active long enough to cross multiple task-monitor publications and
+requires the production diagnostic journal to remain free of hard-limit
+warnings during that joint's homing state. It then validates every real
+task-monitor error-journal event with the production AXIS suppression policy,
+requires exactly one controlled stop and three immediate stops while leaving
+unrelated LinuxCNC messages visible, and forbids LinuxCNC's native
+joint-limit error. It loads no
+HostMot2 driver, so it cannot address the physical Mesa card or prove physical
+switch or motor behavior.
 `native/bin/dmc2-linuxcnc` is the standard compiled launcher. With no argument
-it performs validation only. The literal `--live` flag is required before it
+it validates launch inputs and deployment identity only. The literal `--live`
+flag is required before it
 can replace itself with LinuxCNC, and it checks for a conflicting LinuxCNC,
 HAL, or legacy direct-Mesa owner first. No Python launcher or Python subprocess
 exists in either live-launch path.
 
-The realtime-module installer refuses to run while `rtapi_app` is active,
-stages and byte-checks both `dmc2_rt.so` and `h100_spindle.so` beside their
-installed targets, takes byte-verified rollback copies, and uses atomic
-same-filesystem renames. Both replacements form one transaction: any commit,
+For live mode, the compiled launcher first proves no LinuxCNC/HAL owner is
+active, invokes the realtime-module installer automatically only when required,
+and re-verifies both installed module files before starting LinuxCNC. No
+separate module-install command is part of the operator workflow. The installer
+refuses to run while `rtapi_app` is active, stages and byte-checks both
+`dmc2_rt.so` and `h100_spindle.so` beside their installed targets, takes
+byte-verified rollback copies, and uses atomic same-filesystem renames. Both
+replacements form one transaction: any commit,
 verification, host-state, exit, or signal failure restores every changed
 target, while an incomplete rollback preserves its recovery files. The
-launcher then byte-compares both installed modules against the exact
-offline-tested release artifacts. Abnormal process-probe results fail
+launcher then byte-compares both installed modules against the exact release
+artifacts. Abnormal process-probe results fail
 installation instead of being treated as proof that LinuxCNC is stopped.
 
 For a live GUI/controller that is owned by the user service manager instead of
@@ -405,16 +450,6 @@ LinuxCNC 2.9.10's legacy automatic probe also requires the absent
 `/sys/kernel/realtime` file. `/usr/bin/rtapi_app` must remain root-owned and
 setuid (`root:root`, mode `4755`) or LinuxCNC will deliberately fall back to
 POSIX non-realtime scheduling.
-
-The optional hardware-free HAL integration check is:
-
-```bash
-cd <project-root>/sim
-halrun offline_hal_smoke.hal
-```
-
-`sim/monitor.ini` uses replayed pendant packets, fake positions, and no
-hardware driver. Its numerical motion values are simulation-only.
 
 ## Sources
 

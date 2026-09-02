@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=DMC2 LinuxCNC
+Comment=Launch the DMC2 Mini LinuxCNC controller
+Exec=/home/kit/linuxcnc_dmc2/native/bin/dmc2-linuxcnc --live --persistent
+TryExec=/home/kit/linuxcnc_dmc2/native/bin/dmc2-linuxcnc
+Path=/home/kit/linuxcnc_dmc2
+Icon=linuxcncicon
+Terminal=false
+StartupNotify=false
+Categories=Utility;Engineering;X-CNC;
+Keywords=DMC2;CNC;LinuxCNC;
+X-AppStream-Ignore=true

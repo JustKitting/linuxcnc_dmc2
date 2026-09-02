@@ -1,7 +1,0 @@
-# Offline-only replay stream. It does not open the Nano, Mesa, or LinuxCNC motion.
-BOOT,P3,MYST1474-001,MONITOR_ONLY
-P3,1,20,0,0,0,0,X,X1,0,0,1
-P3,2,40,1,4,0,1,X,X1,1,0,1
-P3,3,60,1,4,0,0,X,X1,1,0,1
-P3,4,80,0,0,0,-1,X,X1,1,0,1
-P3,5,100,0,0,0,0,X,X1,0,0,1

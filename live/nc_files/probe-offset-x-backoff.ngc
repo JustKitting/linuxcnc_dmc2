@@ -1,0 +1,9 @@
+%
+(DMC2 X PROBE-OFFSET CONTACT BACKOFF)
+(Exactly +X 1.00 mm at 0.10 mm/s. No Y, Z, or spindle command.)
+
+G21 G91 G94
+G1 X1.00 F6.00
+G90
+M2
+%

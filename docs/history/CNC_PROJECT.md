@@ -1,5 +1,9 @@
 # CNC control project
 
+> Historical snapshot only. Its offline-validation and launcher-state claims
+> were invalidated on 2026-08-27 and are not current verification evidence.
+> See `docs/2026-08-27-false-jog-completion-postmortem.md`.
+
 ## USER-CONFIRMED motor command resolution — 2026-08-22
 
 - All three motor DIP banks SW1..SW5 are `ON/OFF/ON/OFF/OFF`, selecting 4000

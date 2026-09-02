@@ -17,7 +17,8 @@
 # input plus digital input 0 for the explicitly no-motion contact test.
 # OUT5 can be controlled by LinuxCNC digital output 0 through the separate
 # program-running gate or by the finite panel connectivity-test window in
-# machine.hal.  This file contains no probing motion.
+# machine.hal. The panel test watches both IN0 and IN1 and contains no probing
+# motion.
 
 # Raw isolated inputs are used so that the realtime display latches see short
 # events before any userspace GUI polling.
@@ -30,16 +31,18 @@ net dmc2-puck-live    => motion.probe-input motion.digital-in-00
 
 # M64/M65 P0 owns the program request.  The realtime AND gate prevents that
 # request from reaching the final OR unless LinuxCNC reports a running
-# program.  The second OR source is the finite panel connectivity test.
-# A real puck contact resets that test source immediately.
+# program. The second OR source is the finite panel connectivity test. A real
+# puck or side-probe contact resets that test source immediately.
 setp hm2_7i95.0.ssr.00.invert-05 false
 net dmc2-probe-power-request motion.digital-out-00 => dmc2-probe-power-gate.in0
 net dmc2-probe-program-power-enabled dmc2-probe-power-gate.out => dmc2-probe-power-source-or.in0
-net dmc2-puck-test-active dmc2-puck-test-window.out => dmc2-probe-power-source-or.in1
+net dmc2-contact-test-active dmc2-contact-test-window.out => dmc2-probe-power-source-or.in1
 net dmc2-probe-power-enabled dmc2-probe-power-source-or.out => hm2_7i95.0.ssr.00.out-05 motion.digital-in-01
-net dmc2-puck-live => dmc2-puck-test-reset-or.in0
-net dmc2-puck-test-reset dmc2-puck-test-reset-or.out => dmc2-puck-test-window.reset
-net dmc2-puck-test-time-left dmc2-puck-test-window.time-left
+net dmc2-puck-live => dmc2-contact-test-detected-or.in0
+net dmc2-probe-live => dmc2-contact-test-detected-or.in1
+net dmc2-contact-test-detected dmc2-contact-test-detected-or.out => dmc2-contact-test-reset-or.in0
+net dmc2-contact-test-reset dmc2-contact-test-reset-or.out => dmc2-contact-test-window.reset
+net dmc2-contact-test-time-left <= dmc2-contact-test-window.time-left
 
 # Display generated pulse counts with the confirmed axis-to-stepgen mapping:
 # X=motor/stepgen 1, Y=motor/stepgen 0, Z=motor/stepgen 2.

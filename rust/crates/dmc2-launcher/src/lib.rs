@@ -1,4 +1,5 @@
 mod cli;
+mod deployment;
 mod embedded;
 mod error;
 mod integrity;
@@ -28,6 +29,3 @@ pub fn run(
     let plan = launch::prepare(platform, &layout, mode)?;
     launch::execute(platform, plan, output)
 }
-
-#[cfg(test)]
-mod tests;

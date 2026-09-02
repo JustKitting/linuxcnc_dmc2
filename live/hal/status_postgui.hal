@@ -3,10 +3,10 @@
 # LinuxCNC-owned pendant motion supervisor.
 net dmc2-pendant-mode-enabled axisui.pendant-mode-enabled => dmc2-pendant-control.pendant-mode-enabled
 net dmc2-controller-available     => axisui.controller-available
-net dmc2-position-known           dmc2-pendant-control.position-known   => pyvcp.position-known
-net dmc2-position-unknown         dmc2-pendant-control.position-unknown => pyvcp.position-unknown
+net dmc2-position-known           dmc2-pendant-control.position-known   => axisui.position-known
+net dmc2-position-unknown         dmc2-pendant-control.position-unknown => axisui.position-unknown
 net dmc2-controller-ready         => axisui.controller-ready pyvcp.controller-ready
-net dmc2-controller-fault         => pyvcp.controller-fault
+net dmc2-controller-fault         => axisui.controller-fault pyvcp.controller-fault
 net dmc2-controller-recovery      => pyvcp.controller-recovery
 net dmc2-controller-jog-active    => pyvcp.controller-jog-active
 net dmc2-controller-bounce-active => pyvcp.controller-bounce-active
@@ -24,14 +24,14 @@ net dmc2-linuxcnc-unknown-code dmc2-task-monitor.unknown-code-active => pyvcp.li
 net dmc2-controller-estop-reset-request => halui.estop.reset
 net dmc2-controller-machine-on-request  => halui.machine.on
 
-# Momentary operator request for LinuxCNC's configured HOME_SEQUENCE order:
-# joint 0 / X, then joint 1 / Y, then joint 2 / Z.
-net dmc2-home-all-request pyvcp.home-all => halui.home-all
-
 # LinuxCNC machine-coordinate feedback (units are supplied by the final INI).
 net dmc2-x-position halui.axis.x.pos-feedback => pyvcp.x-position
 net dmc2-y-position halui.axis.y.pos-feedback => pyvcp.y-position
 net dmc2-z-position halui.axis.z.pos-feedback => pyvcp.z-position
+
+# Live RPM calculated from the H100 output-frequency readback. AXIS displays
+# this beside its stock spindle controls even when the pendant panel is closed.
+net dmc2-spindle-speed-feedback => axisui.spindle-actual-rpm
 
 # Mesa-generated pulse counts, converted to floats for PyVCP number widgets.
 net dmc2-x-generated-pulses => pyvcp.x-generated-pulses
@@ -53,11 +53,12 @@ net dmc2-probe-power-enabled => pyvcp.probe-power-enabled
 
 # This no-motion connectivity test is available while unhomed. START opens
 # the already configured OUT5 power path for no more than 300 seconds. A real
-# IN0 contact or STOP resets the realtime window immediately.
-net dmc2-puck-test-start pyvcp.puck-test-start => dmc2-puck-test-window.in
-net dmc2-puck-test-stop pyvcp.puck-test-stop => dmc2-puck-test-reset-or.in1
-net dmc2-puck-test-active => pyvcp.puck-test-active
-net dmc2-puck-test-time-left => pyvcp.puck-test-time-left
+# IN0 puck contact, IN1 side-probe contact, or STOP resets the realtime window
+# immediately.
+net dmc2-contact-test-start pyvcp.contact-test-start => dmc2-contact-test-window.in
+net dmc2-contact-test-stop pyvcp.contact-test-stop => dmc2-contact-test-reset-or.in1
+net dmc2-contact-test-active => pyvcp.contact-test-active
+net dmc2-contact-test-time-left => pyvcp.contact-test-time-left
 
 # The separate G-code source remains false while LinuxCNC is idle or aborted;
 # the finite panel-test source above intentionally remains available unhomed.

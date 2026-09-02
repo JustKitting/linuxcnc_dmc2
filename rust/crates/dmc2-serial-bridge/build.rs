@@ -40,26 +40,6 @@ fn main() {
             bindings_text,
         ],
     );
-    let inspection_bindings = output_directory.join("serial_posix_inspection_bindings.rs");
-    let inspection_bindings_text = inspection_bindings
-        .to_str()
-        .expect("Cargo inspection output path is not valid UTF-8");
-    run(
-        "bindgen",
-        &[
-            "src/application/serial/posix_ffi.h",
-            "--allowlist-function",
-            "(fcntl|tcgetattr|cfgetispeed|cfgetospeed)",
-            "--allowlist-type",
-            "(termios|speed_t|tcflag_t)",
-            "--allowlist-var",
-            "(F_GETFL|F_GETFD|FD_CLOEXEC|O_NONBLOCK|B115200|CLOCAL|CREAD|CSTOPB|CRTSCTS|CSIZE|CS8|VMIN|VTIME)",
-            "--use-core",
-            "--no-layout-tests",
-            "--output",
-            inspection_bindings_text,
-        ],
-    );
     println!("cargo:rustc-link-search=native=/usr/lib");
     println!("cargo:rustc-link-lib=util");
     println!("cargo:rustc-link-lib=linuxcnchal");

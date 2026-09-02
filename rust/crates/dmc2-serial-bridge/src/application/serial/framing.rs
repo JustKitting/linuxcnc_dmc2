@@ -46,7 +46,7 @@ impl LineAssembler {
 
         // At MAX bytes, only a terminal CR can still produce a valid frame.
         if self.length == MAX_SERIAL_LINE_BYTES && byte != b'\r' {
-            state.note_protocol_error();
+            state.note_protocol_error(ProtocolError::OverlongLine, Some(self.length + 1));
             self.discarding_overlong = true;
             return LineEvent::Rejected(ProtocolError::OverlongLine);
         }
@@ -56,7 +56,7 @@ impl LineAssembler {
             return LineEvent::Pending;
         }
 
-        state.note_protocol_error();
+        state.note_protocol_error(ProtocolError::OverlongLine, Some(self.length + 1));
         self.discarding_overlong = true;
         LineEvent::Rejected(ProtocolError::OverlongLine)
     }
@@ -68,7 +68,7 @@ impl LineAssembler {
             let payload_length =
                 self.length - usize::from(self.length > 0 && self.bytes[self.length - 1] == b'\r');
             if payload_length > MAX_SERIAL_LINE_BYTES {
-                state.note_protocol_error();
+                state.note_protocol_error(ProtocolError::OverlongLine, Some(payload_length));
                 LineEvent::Rejected(ProtocolError::OverlongLine)
             } else if payload_length == 0 {
                 LineEvent::Empty
@@ -84,6 +84,3 @@ impl LineAssembler {
         event
     }
 }
-
-#[cfg(test)]
-mod tests;

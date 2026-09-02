@@ -87,7 +87,12 @@ pub(super) fn evaluate(snapshot: &NativeSnapshot, report: &mut DiagnosticReport)
                 "LinuxCNC reports a joint amplifier/following fault",
             );
         }
-        if joint.min_hard_limit == 1 || joint.max_hard_limit == 1 {
+        // This machine's positive home switch is also its positive hard-limit
+        // input. LinuxCNC intentionally reports that input during both the
+        // search and latch phases, and HOME_IGNORE_LIMITS authorizes exactly
+        // that same-joint condition while `homing` is true. Retain hard-limit
+        // diagnostics at every other time.
+        if joint.homing != 1 && (joint.min_hard_limit == 1 || joint.max_hard_limit == 1) {
             issue(
                 report,
                 Severity::Warning,

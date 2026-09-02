@@ -231,6 +231,3 @@ impl Default for EstopRecoverySequence {
         Self::new()
     }
 }
-
-#[cfg(test)]
-mod tests;

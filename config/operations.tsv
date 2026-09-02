@@ -1,0 +1,18 @@
+DMC2_OPERATION_CATALOG	1
+id	kind	label	driver	target	ui_scope	effects	prerequisites
+machine.estop	control	E-stop	linuxcnc.task-state	estop	base-toolbar	state-change	running-session
+machine.estop-reset	control	Reset E-stop	linuxcnc.task-state	estop-reset	base-toolbar	state-change	running-session;physical-estop-released
+machine.on	control	Machine On	linuxcnc.task-state	on	base-toolbar	state-change	running-session;estop-clear
+machine.off	control	Machine Off	linuxcnc.task-state	off	base-toolbar	state-change	running-session
+machine.abort	control	Abort	linuxcnc.abort	-	base-toolbar	motion-stop;spindle-stop	running-session
+controller.clear-fault	control	Clear Fault	linuxcnc.task-state	estop-reset	base-toolbar	fault-clear;state-change	running-session;physical-estop-released
+machine.home-all	control	Home All	linuxcnc.home-all	-	manual-tab-homing	axis-motion	running-session;estop-clear;machine-on;interpreter-idle
+program.puck-contact-no-motion	program	Puck Contact - No Motion	linuxcnc.program	live/nc_files/puck-contact-no-motion-test.ngc	program-menu	probe-power	running-session;estop-clear;machine-on
+program.tool-height-first	program	Tool Height - First Slow Test	linuxcnc.program	live/nc_files/tool-height-first-test.ngc	program-menu	axis-motion;probe-power	running-session;estop-clear;machine-on;all-homed
+program.tool-height-homing-style	program	Tool Height - Double Touch	linuxcnc.program	live/nc_files/tool-height-homing-style-test.ngc	program-menu	axis-motion;probe-power	running-session;estop-clear;machine-on;all-homed
+program.probe-offset-x-side-touch	program	Probe Offset X - Side Probe Touch	linuxcnc.program	live/nc_files/probe-offset-x-side-touch.ngc	program-menu	axis-motion;probe-power	running-session;estop-clear;machine-on;all-homed
+program.probe-offset-x-backoff	program	Probe Offset X - Back Off	linuxcnc.program	live/nc_files/probe-offset-x-backoff.ngc	program-menu	axis-motion	running-session;estop-clear;machine-on;all-homed
+program.probe-offset-y-touch	program	Probe Offset Y - Contact Touch	linuxcnc.program	live/nc_files/probe-offset-y-touch.ngc	program-menu	axis-motion;probe-power	running-session;estop-clear;machine-on;all-homed
+program.spindle-test	program	Spindle Test	linuxcnc.program	live/nc_files/dmc2_spindle_test.ngc	program-menu	spindle	running-session;estop-clear;machine-on;all-homed
+program.log-top-25mm-hardwood	program	Hardwood Log Top - Remove 25 mm	linuxcnc.program	live/nc_files/log-top-25mm-hardwood.ngc	program-menu	axis-motion;spindle	running-session;estop-clear;machine-on;all-homed
+program.abort-cleanup	internal	Abort Cleanup	linuxcnc.program	live/nc_files/dmc2_abort.ngc	internal	probe-power-off	running-session

@@ -3,9 +3,6 @@ use std::fs;
 use std::path::{Path, PathBuf};
 use std::process::Command;
 
-#[path = "build/status_schema.rs"]
-mod status_schema;
-
 const EXPECTED_LINUXCNC_VERSION: &str = "2.9.10";
 const INCLUDE_ROOT: &str = "/usr/include/linuxcnc";
 const SOURCE_ROOT_RELATIVE: &str = "../../../vendor/linuxcnc-2.9.10";
@@ -59,23 +56,14 @@ fn main() {
         "status_channel.cc",
         "error_message_copy.cc",
         "error_channel.cc",
-        "tests/status_fixture_common.cc",
-        "tests/status_fixture_task.cc",
-        "tests/status_fixture_trajectory.cc",
-        "tests/status_fixture_motion_components.cc",
-        "tests/status_fixture_io.cc",
-        "tests/status_copy_fixture.cc",
-        "tests/error_message_fixture.cc",
     ];
 
     for path in [
         manifest.join("build.rs"),
-        manifest.join("build/status_schema.rs"),
         snapshot_header.clone(),
         error_message_header.clone(),
         native.join("status_copy.hh"),
         native.join("error_message_copy.hh"),
-        native.join("tests/status_fixture.hh"),
     ] {
         println!("cargo:rerun-if-changed={}", path.display());
     }
@@ -145,8 +133,6 @@ fn main() {
             "-std=c11",
         ],
     );
-    status_schema::generate(&snapshot_header, &output_directory);
-
     let error_bindings = output_directory.join("error_message_bindings.rs");
     run(
         "bindgen",

@@ -2,6 +2,7 @@ use std::ffi::OsString;
 use std::io::Write;
 
 use crate::cli::Mode;
+use crate::deployment;
 use crate::error::Error;
 use crate::layout::Layout;
 use crate::owner;
@@ -27,16 +28,22 @@ pub struct Plan {
 }
 
 pub fn prepare(platform: &dyn Platform, layout: &Layout, mode: Mode) -> Result<Plan, Error> {
-    let tools = validation::validate(platform, layout)?;
     let action = match mode {
-        Mode::Validate => Action::Validate,
+        Mode::Validate => {
+            validation::validate(platform, layout)?;
+            Action::Validate
+        }
         Mode::Direct => {
-            owner::assert_exclusive(platform)?;
+            let tools = validation::validate_live_inputs(platform, layout)?;
+            owner::prepare_exclusive_start(platform)?;
+            deployment::synchronize_realtime_modules(platform, layout)?;
             Action::Replace(direct_command(layout, tools.linuxcnc))
         }
         Mode::Persistent => {
-            owner::assert_exclusive(platform)?;
-            Action::Persistent(persistent_command(platform, layout)?)
+            let tools = validation::validate_live_inputs(platform, layout)?;
+            owner::prepare_exclusive_start(platform)?;
+            deployment::synchronize_realtime_modules(platform, layout)?;
+            Action::Persistent(persistent_command(platform, layout, tools.linuxcnc)?)
         }
     };
     Ok(Plan { action })
@@ -111,7 +118,11 @@ fn direct_command(layout: &Layout, linuxcnc: std::path::PathBuf) -> CommandSpec 
     command
 }
 
-fn persistent_command(platform: &dyn Platform, layout: &Layout) -> Result<CommandSpec, Error> {
+fn persistent_command(
+    platform: &dyn Platform,
+    layout: &Layout,
+    linuxcnc: std::path::PathBuf,
+) -> Result<CommandSpec, Error> {
     let mut command = CommandSpec::new(require_executable(platform, "systemd-run")?);
     for argument in [
         "--user",
@@ -128,12 +139,10 @@ fn persistent_command(platform: &dyn Platform, layout: &Layout) -> Result<Comman
     let mut working_directory = OsString::from("--working-directory=");
     working_directory.push(layout.project.join("live"));
     command.arguments.push(working_directory);
-    command.arguments.push(
-        layout
-            .project
-            .join("native/bin/dmc2-linuxcnc")
-            .into_os_string(),
-    );
-    command.arguments.push(OsString::from("--live"));
+    command.arguments.push(linuxcnc.into_os_string());
+    command.arguments.push(OsString::from("-r"));
+    command
+        .arguments
+        .push(layout.project.join("live/dmc2.ini").into_os_string());
     Ok(command)
 }

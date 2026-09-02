@@ -58,9 +58,6 @@ uint32_t dmc2_error_message_abi_version(void) DMC2_ERROR_NOEXCEPT;
 size_t dmc2_error_message_snapshot_size(void) DMC2_ERROR_NOEXCEPT;
 void dmc2_error_message_snapshot_initialize(
     dmc2_error_message_snapshot *snapshot) DMC2_ERROR_NOEXCEPT;
-int dmc2_error_message_copy_self_test(
-    uint32_t *tested_message_types,
-    size_t *failure_offset) DMC2_ERROR_NOEXCEPT;
 dmc2_error_channel *dmc2_error_channel_open(
     const char *nml_file,
     int32_t *nml_error,

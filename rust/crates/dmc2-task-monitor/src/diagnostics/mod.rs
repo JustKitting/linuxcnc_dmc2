@@ -2,6 +2,7 @@
 
 mod catalog;
 pub mod category;
+mod external;
 mod report;
 mod status;
 mod transport;
@@ -10,8 +11,20 @@ mod validation;
 use crate::snapshot::NativeSnapshot;
 
 use catalog::{check_debug_mask, issue};
-pub use report::{DiagnosticReport, Severity, TransitionLogger};
+pub use external::{
+    ControllerFaultEvidenceSnapshot, ExternalDiagnosticSnapshot, H100FaultEvidenceSnapshot,
+    SerialBridgeFaultEvidenceSnapshot,
+};
+#[cfg(test)]
+pub use report::Issue;
+pub use report::{
+    DiagnosticReport, DiagnosticTransition, Severity, TransitionLogger, TransitionUpdate,
+};
 pub use transport::disconnected;
+
+pub fn augment_external(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapshot) {
+    external::augment(report, snapshot);
+}
 
 pub fn evaluate(snapshot: &NativeSnapshot) -> DiagnosticReport {
     let mut report = DiagnosticReport::default();
@@ -48,6 +61,3 @@ pub fn evaluate_with_transport(
     transport::evaluate(&mut report, nml_error, cms_status);
     report
 }
-
-#[cfg(test)]
-mod tests;

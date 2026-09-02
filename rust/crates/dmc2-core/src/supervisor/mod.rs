@@ -11,10 +11,12 @@ mod model;
 
 pub use controller::{
     LinuxCncPendantSupervisor, Phase, BOUNCE_RATE_PULSES_PER_SECOND, BOUNCE_SPEED_MM_PER_MINUTE,
-    BOUNCE_TIMEOUT_NS, GATE_SETTLE_NS, JOG_TARGET_TOLERANCE_PULSES, LIMIT_RESET_NS,
-    LIMIT_RESET_TIMEOUT_NS, LIMIT_RESET_VALIDATE_NS, MOTION_SETTLE_NS,
+    BOUNCE_TIMEOUT_NS, GATE_SETTLE_NS, JOG_TARGET_TOLERANCE_RATIO, JOG_TIMEOUT_NS, LIMIT_RESET_NS,
+    LIMIT_RESET_TIMEOUT_NS, LIMIT_RESET_VALIDATE_NS, MOTION_ACCEPT_TIMEOUT_NS,
+    MOTION_STOP_TIMEOUT_NS,
 };
-pub use fault::FaultCode;
+pub use fault::{FaultCode, FaultEvidence, FaultRecord};
 pub use model::{
-    CommandEvent, JogCommand, LinkSnapshot, MachineSnapshot, SupervisorInputs, SupervisorOutputs,
+    CommandEvent, JogCommand, LinkSnapshot, MachineSnapshot, MotionSnapshot, SupervisorInputs,
+    SupervisorOutputs,
 };

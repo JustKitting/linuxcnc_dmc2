@@ -11,5 +11,9 @@ name = "dmc2-task-monitor"
 path = "src/main.rs"
 
 [dependencies]
+dmc2-core = { path = "../dmc2-core" }
+dmc2-diagnostics = { path = "../dmc2-diagnostics" }
 dmc2-hal-sys = { path = "../dmc2-hal-sys" }
 dmc2-linuxcnc-interface = { path = "../dmc2-linuxcnc-interface" }
+dmc2-serial-bridge = { path = "../dmc2-serial-bridge" }
+h100-spindle = { path = "../../../../h100_modbus/rust/crates/h100-spindle", default-features = false }

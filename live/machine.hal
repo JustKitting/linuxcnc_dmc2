@@ -2,7 +2,7 @@
 # Loaded only by dmc2.ini. Do not source from halrun.
 
 loadrt [KINS]KINEMATICS
-loadrt [EMCMOT]EMCMOT base_period_nsec=[EMCMOT]BASE_PERIOD servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS num_spindles=[TRAJ]SPINDLES
+loadrt [EMCMOT]EMCMOT base_period_nsec=[EMCMOT]BASE_PERIOD servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS num_spindles=[TRAJ]SPINDLES num_dio=5
 
 loadrt hostmot2
 loadrt hm2_eth board_ip=[DMC2]MESA_IP config="num_encoders=0 num_stepgens=3 num_pwmgens=0 num_3pwmgens=0 num_inmuxs=1 num_pktuarts=1"
@@ -13,12 +13,12 @@ loadrt dmc2_rt
 loadrt flipflop names=dmc2-safety-limit-x,dmc2-safety-limit-y,dmc2-safety-limit-z,dmc2-display-limit-x,dmc2-display-limit-y,dmc2-display-limit-z,dmc2-display-puck,dmc2-display-probe
 loadrt watchdog num_inputs=1
 loadrt and2 names=dmc2-controller-watchdog-and,dmc2-own-toward-block-m0,dmc2-own-toward-block-m1,dmc2-own-toward-block-m2,dmc2-command-blocked-m0,dmc2-command-blocked-m1,dmc2-command-blocked-m2,dmc2-hard-limit-x-enabled,dmc2-hard-limit-y-enabled,dmc2-hard-limit-z-enabled,dmc2-probe-power-gate
-loadrt or2 names=dmc2-other-limit-block-m0,dmc2-other-limit-block-m1,dmc2-other-limit-block-m2,dmc2-blocked-m0,dmc2-blocked-m1,dmc2-blocked-m2,dmc2-jog-stop-01,dmc2-jog-stop-all,dmc2-jog-stop-immediate-all,dmc2-probe-power-source-or,dmc2-puck-test-reset-or
+loadrt or2 names=dmc2-other-limit-block-m0,dmc2-other-limit-block-m1,dmc2-other-limit-block-m2,dmc2-blocked-m0,dmc2-blocked-m1,dmc2-blocked-m2,dmc2-jog-stop-01,dmc2-jog-stop-all,dmc2-jog-stop-immediate-all,dmc2-limit-recovery-owned,dmc2-probe-power-source-or,dmc2-contact-test-detected-or,dmc2-contact-test-reset-or
 loadrt not names=dmc2-pendant-jog-inactive
 loadrt mux2 names=dmc2-x-feedback-loss-guard,dmc2-y-feedback-loss-guard,dmc2-z-feedback-loss-guard
 loadrt estop_latch
 loadrt timedelay names=dmc2-servo-startup-delay
-loadrt oneshot names=dmc2-puck-test-window
+loadrt oneshot names=dmc2-contact-test-window
 
 # Read the card before every realtime consumer.
 addf hm2_7i95.0.read servo-thread
@@ -73,9 +73,11 @@ addf dmc2-jog-stop-01 servo-thread
 addf dmc2-jog-stop-all servo-thread
 addf dmc2-jog-stop-immediate-all servo-thread
 
-# During an attributed pendant jog/bounce, the directional gate above owns the
-# limit response.  At every other time the existing raw positive hard-limit
-# path remains connected.  Home-switch inputs always receive the raw signal.
+# During an attributed pendant jog/bounce/release, the directional gate above
+# owns the limit response. At every other time the existing raw positive
+# hard-limit path remains connected. Home-switch inputs always receive the raw
+# signal.
+addf dmc2-limit-recovery-owned servo-thread
 addf dmc2-pendant-jog-inactive servo-thread
 addf dmc2-hard-limit-x-enabled servo-thread
 addf dmc2-hard-limit-y-enabled servo-thread
@@ -100,11 +102,13 @@ addf h100-spindle servo-thread
 addf hm2_modbus.0.process servo-thread
 # OUT5 can be requested by either the program-running-gated G-code path or the
 # finite, explicitly operator-started no-motion panel test.  A real IN0 puck
-# contact or the panel STOP button resets the panel test immediately.  All of
-# this executes before the Mesa write sends the resulting state to the card.
+# contact, a real IN1 side-probe contact, or the panel STOP button resets the
+# panel test immediately. All of this executes before the Mesa write sends the
+# resulting state to the card.
 addf dmc2-probe-power-gate servo-thread
-addf dmc2-puck-test-reset-or servo-thread
-addf dmc2-puck-test-window servo-thread
+addf dmc2-contact-test-detected-or servo-thread
+addf dmc2-contact-test-reset-or servo-thread
+addf dmc2-contact-test-window servo-thread
 addf dmc2-probe-power-source-or servo-thread
 addf watchdog.set-timeouts servo-thread
 addf watchdog.process servo-thread
@@ -118,10 +122,10 @@ addf dmc2-servo-startup-delay servo-thread
 # Preserve the previously specified exact 300-second maximum test window.
 # A contact or STOP request ends it sooner; a second START edge cannot extend
 # an already active window.
-setp dmc2-puck-test-window.width 300.0
-setp dmc2-puck-test-window.retriggerable false
-setp dmc2-puck-test-window.rising true
-setp dmc2-puck-test-window.falling false
+setp dmc2-contact-test-window.width 300.0
+setp dmc2-contact-test-window.retriggerable false
+setp dmc2-contact-test-window.rising true
+setp dmc2-contact-test-window.falling false
 
 # USER-OBSERVED ACTUAL isolated input mapping and scan behavior.
 setp hm2_7i95.0.inmux.00.scan_rate 20000
@@ -152,7 +156,7 @@ setp hm2_7i95.0.stepgen.timer-number 1
 setp dmc2-servo-startup-delay.in true
 setp dmc2-servo-startup-delay.on-delay 0.100
 setp dmc2-servo-startup-delay.off-delay 0.000
-net dmc2-servo-startup-ready dmc2-servo-startup-delay.out
+net dmc2-servo-startup-ready <= dmc2-servo-startup-delay.out
 
 # Preserve the old per-motor limit truth table. Physical motor order is
 # motor 0=Y/IN9, motor 1=X/IN11, motor 2=Z/IN10.
@@ -194,7 +198,9 @@ net dmc2-jog-stop-immediate-live dmc2-jog-stop-immediate-all.out => motion.jog-s
 net dmc2-limit-x-live => joint.0.home-sw-in dmc2-hard-limit-x-enabled.in0
 net dmc2-limit-y-live => joint.1.home-sw-in dmc2-hard-limit-y-enabled.in0
 net dmc2-limit-z-live => joint.2.home-sw-in dmc2-hard-limit-z-enabled.in0
-net dmc2-controller-jog-active => dmc2-pendant-jog-inactive.in
+net dmc2-controller-jog-active => dmc2-limit-recovery-owned.in0
+net dmc2-controller-bounce-active => dmc2-limit-recovery-owned.in1
+net dmc2-controller-limit-recovery-owned dmc2-limit-recovery-owned.out => dmc2-pendant-jog-inactive.in
 net dmc2-pendant-jog-inactive-live dmc2-pendant-jog-inactive.out => dmc2-hard-limit-x-enabled.in1 dmc2-hard-limit-y-enabled.in1 dmc2-hard-limit-z-enabled.in1
 net dmc2-hard-limit-x-live dmc2-hard-limit-x-enabled.out => joint.0.pos-lim-sw-in
 net dmc2-hard-limit-y-live dmc2-hard-limit-y-enabled.out => joint.1.pos-lim-sw-in
@@ -262,9 +268,10 @@ net dmc2-controller-watchdog-enable => watchdog.enable-in
 net dmc2-controller-external-enable => dmc2-controller-watchdog-and.in0
 net dmc2-controller-watchdog-ok watchdog.ok-out => dmc2-controller-watchdog-and.in1
 net dmc2-external-estop-ok dmc2-controller-watchdog-and.out => estop-latch.0.ok-in
-net dmc2-user-estop-reset iocontrol.0.user-request-enable => estop-latch.0.reset h100-spindle.reset hm2_modbus.0.reset
+net dmc2-user-estop-reset iocontrol.0.user-request-enable => estop-latch.0.reset h100-spindle.reset hm2_modbus.0.reset dmc2-pendant-control.base-estop-reset
 net dmc2-estop-latched-ok estop-latch.0.ok-out => iocontrol.0.emc-enable-in
-net dmc2-mesa-watchdog-fault hm2_7i95.0.watchdog.has_bit => estop-latch.0.fault-in
+net dmc2-mesa-watchdog-fault <=> hm2_7i95.0.watchdog.has_bit
+net dmc2-mesa-watchdog-fault => estop-latch.0.fault-in
 
 # H100 spindle control over the already verified Mesa PktUART channel 1 link.
 # The exact expected F004/F005 and permitted minimum RPM are explicit INI
@@ -278,13 +285,19 @@ setp h100-spindle.expected-reference-f004-centihz [DMC2]SPINDLE_EXPECTED_F004_CE
 setp h100-spindle.expected-maximum-f005-centihz [DMC2]SPINDLE_EXPECTED_F005_CENTIHZ
 setp h100-spindle.at-speed-tolerance-hz [DMC2]SPINDLE_AT_SPEED_TOLERANCE_HZ
 
-net dmc2-spindle-machine-enabled motion.motion-enabled => h100-spindle.machine-enabled
+net dmc2-motion-enabled motion.motion-enabled => h100-spindle.machine-enabled
 net dmc2-spindle-run-request spindle.0.on => h100-spindle.run-request
 net dmc2-spindle-forward-request spindle.0.forward => h100-spindle.forward-request
 net dmc2-spindle-reverse-request spindle.0.reverse => h100-spindle.reverse-request
 net dmc2-spindle-speed-command spindle.0.speed-out-abs => h100-spindle.speed-command-rpm
 
-net dmc2-h100-link-fault hm2_modbus.0.fault => h100-spindle.link-fault
+# hm2_modbus owns communication retry policy. Its raw fault pin asserts for a
+# single failed transaction while it immediately retries that command. Do not
+# turn that transient indication into a spindle amplifier fault. The command
+# disabled pins below assert only after hm2_modbus observes five consecutive
+# failures; h100-spindle treats any disabled command as a latched fault.
+net dmc2-h100-transient-communication-fault hm2_modbus.0.fault
+setp h100-spindle.link-fault false
 net dmc2-h100-command-00-disabled hm2_modbus.0.command.00.disabled => h100-spindle.command-disabled0
 net dmc2-h100-command-01-disabled hm2_modbus.0.command.01.disabled => h100-spindle.command-disabled1
 net dmc2-h100-command-02-disabled hm2_modbus.0.command.02.disabled => h100-spindle.command-disabled2
@@ -322,6 +335,10 @@ net dmc2-h100-given-frequency h100-spindle.given-frequency => hm2_modbus.0.h100.
 
 net dmc2-spindle-at-speed h100-spindle.at-speed => spindle.0.at-speed motion.digital-in-02
 net dmc2-spindle-running h100-spindle.running => motion.digital-in-03
+# M66 P4 is deliberately separate from generic running feedback. It becomes
+# true only when LinuxCNC requested M3 and H100 0210H confirms the physically
+# verified clockwise drive-direction selection.
+net dmc2-spindle-clockwise-running h100-spindle.forward-running => motion.digital-in-04
 net dmc2-spindle-speed-feedback h100-spindle.speed-feedback-rpm => spindle.0.speed-in
 net dmc2-spindle-amplifier-fault h100-spindle.fault-latched => spindle.0.amp-fault-in
 

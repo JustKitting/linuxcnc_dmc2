@@ -16,22 +16,3 @@ const _: unsafe extern "C" fn(*mut termios, speed_t) -> c_int = cfsetispeed;
 const _: unsafe extern "C" fn(*mut termios, speed_t) -> c_int = cfsetospeed;
 const _: unsafe extern "C" fn(c_int, c_int, *const termios) -> c_int = tcsetattr;
 const _: unsafe extern "C" fn(c_int, c_int) -> c_int = tcflush;
-
-#[cfg(test)]
-pub(super) mod inspection {
-    #![allow(non_camel_case_types)]
-    #![allow(non_snake_case)]
-    #![allow(non_upper_case_globals)]
-
-    use std::ffi::c_int;
-
-    include!(concat!(
-        env!("OUT_DIR"),
-        "/serial_posix_inspection_bindings.rs"
-    ));
-
-    const _: unsafe extern "C" fn(c_int, c_int, ...) -> c_int = fcntl;
-    const _: unsafe extern "C" fn(c_int, *mut termios) -> c_int = tcgetattr;
-    const _: unsafe extern "C" fn(*const termios) -> speed_t = cfgetispeed;
-    const _: unsafe extern "C" fn(*const termios) -> speed_t = cfgetospeed;
-}

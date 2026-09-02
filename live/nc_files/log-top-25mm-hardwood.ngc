@@ -1,29 +1,34 @@
 %
 (DMC2 MINI - REMOVE EXACTLY 25.00 MM FROM HARDWOOD LOG TOP)
 (CONFIRMED CUT: 10 MM SINGLE-INSERT 10MM-60L, M3/CW, 18000 RPM)
-(LOG CUTTING RECTANGLE: X 34..262 MM, Y 0..173 MM)
+(LOG CUTTING RECTANGLE: X 34..262 MM, Y 0.01..172.99 MM)
+(RESUME: OPERATOR DIRECTED PASSES 1 THROUGH 3 TO BE SKIPPED)
+(NEXT CUT: BEGIN ROUGH PASS 4 AT MACHINE Z119)
 (PHYSICAL SIDE MARGINS: 34 MM RIGHT, 38 MM LEFT)
 (ROUGHING: 6 PASSES X 4.00 MM, 8.00 MM STEPOVER)
 (FINISHING: 1 PASS X 1.00 MM, 2.00 MM STEPOVER)
-(XY/RAMP/RETRACT FEED: 1500 MM/MIN)
+(XY/RAMP/RETRACT FEED: 750 MM/MIN - HALF OF THE PRIOR 1500 MM/MIN)
 (START: EXACT MACHINE HOME X300 Y173 Z135)
 (END CUT PLANE: MACHINE Z110; THEN STRAIGHT Z RETRACT TO Z135)
 
 #<x_home> = 300.0
 #<x_min> = 34.0
 #<x_max> = 262.0
-#<y_min> = 0.0
-#<y_max> = 173.0
+#<y_home> = 173.0
+#<y_min> = 0.01
+#<y_max> = 172.99
 #<z_start> = 135.0
 #<z_final> = 110.0
 #<total_depth> = 25.0
 #<rough_stepdown> = 4.0
 #<rough_passes> = 6
+#<completed_rough_passes> = 3
 #<rough_stepover> = 8.0
 #<finish_stepdown> = 1.0
 #<finish_stepover> = 2.0
-#<feed_mm_min> = 1500.0
+#<feed_mm_min> = 750.0
 #<spindle_rpm> = 18000.0
+#<spindle_transition_timeout_seconds> = #<_ini[dmc2]spindle_test_transition_timeout_seconds>
 #<position_tolerance> = 0.010
 
 G21 G90 G94
@@ -36,7 +41,7 @@ o<dmc2_log_start_x> if [ABS[#<_abs_x> - #<x_home>] GT #<position_tolerance>]
     (DEBUG,DMC2 LOG CUT REFUSED: start X must be machine 300.000 mm)
     M2
 o<dmc2_log_start_x> endif
-o<dmc2_log_start_y> if [ABS[#<_abs_y> - #<y_max>] GT #<position_tolerance>]
+o<dmc2_log_start_y> if [ABS[#<_abs_y> - #<y_home>] GT #<position_tolerance>]
     (DEBUG,DMC2 LOG CUT REFUSED: start Y must be machine 173.000 mm)
     M2
 o<dmc2_log_start_y> endif
@@ -55,19 +60,29 @@ o<dmc2_log_pass_depth_check> if [ABS[[#<rough_passes> * #<rough_stepdown>] + #<f
     M2
 o<dmc2_log_pass_depth_check> endif
 
-#<pass_number> = 0
-#<depth_removed> = 0.0
-#<current_x> = #<x_home>
-#<current_y> = #<y_max>
-#<y_direction> = -1.0
+#<pass_number> = #<completed_rough_passes>
+#<depth_removed> = [#<completed_rough_passes> * #<rough_stepdown>]
+#<current_x> = #<x_max>
+#<current_y> = #<y_min>
+#<y_direction> = 1.0
 
 (M3 is the physically verified top-down clockwise mapping.)
-(LinuxCNC waits for spindle.0.at-speed before the first G1 cutting move.)
+(No cutting move is permitted before both direction and speed feedback pass.)
 S#<spindle_rpm> M3
+M66 P4 L3 Q#<spindle_transition_timeout_seconds>
+o<dmc2_log_clockwise_confirmed> if [#5399 LT 0]
+    M5
+    (abort,DMC2 LOG CUT FAILED: H100 did not confirm clockwise rotation)
+o<dmc2_log_clockwise_confirmed> endif
+M66 P2 L3 Q#<spindle_transition_timeout_seconds>
+o<dmc2_log_at_speed_confirmed> if [#5399 LT 0]
+    M5
+    (abort,DMC2 LOG CUT FAILED: spindle did not reach the requested RPM)
+o<dmc2_log_at_speed_confirmed> endif
 
-(At Z home, move 38 mm from physical left home to the log's left edge.)
+(At Z home, move to the operator-directed beginning corner of rough pass 4.)
+G53 G1 Y#<y_min> F#<feed_mm_min>
 G53 G1 X#<x_max> F#<feed_mm_min>
-#<current_x> = #<x_max>
 
 o<dmc2_log_passes> while [#<pass_number> LT [#<rough_passes> + 1]]
     #<pass_number> = [#<pass_number> + 1]

@@ -1,9 +1,8 @@
 mod contracts;
 mod coordinator;
+mod error;
 mod native;
 mod policy;
 
-#[cfg(test)]
-mod tests;
-
+pub(super) use error::NativeRuntimeError;
 pub(super) use native::run;

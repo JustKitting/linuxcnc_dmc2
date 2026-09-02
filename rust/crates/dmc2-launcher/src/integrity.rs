@@ -22,6 +22,12 @@ pub fn validate_embedded_inputs(platform: &dyn Platform, layout: &Layout) -> Res
 }
 
 pub fn deployments(layout: &Layout) -> Vec<(PathBuf, PathBuf)> {
+    let mut deployments = realtime_deployments(layout);
+    deployments.extend(userspace_deployments(layout));
+    deployments
+}
+
+pub fn realtime_deployments(layout: &Layout) -> Vec<(PathBuf, PathBuf)> {
     vec![
         (
             PathBuf::from("/usr/lib/linuxcnc/modules/dmc2_rt.so"),
@@ -31,6 +37,11 @@ pub fn deployments(layout: &Layout) -> Vec<(PathBuf, PathBuf)> {
             PathBuf::from("/usr/lib/linuxcnc/modules/h100_spindle.so"),
             layout.h100.join("target/release/h100_spindle.so"),
         ),
+    ]
+}
+
+pub fn userspace_deployments(layout: &Layout) -> Vec<(PathBuf, PathBuf)> {
+    vec![
         (
             layout.project.join("native/bin/dmc2-serial-bridge"),
             layout
@@ -45,11 +56,58 @@ pub fn deployments(layout: &Layout) -> Vec<(PathBuf, PathBuf)> {
             layout.project.join("native/bin/dmc2-linuxcnc"),
             layout.project.join("rust/target/release/dmc2-linuxcnc"),
         ),
+        (
+            layout.project.join("native/bin/dmc2ctl"),
+            layout.project.join("rust/target/release/dmc2ctl"),
+        ),
     ]
 }
 
 pub fn validate_deployments(platform: &dyn Platform, layout: &Layout) -> Result<(), Error> {
-    for (deployed, staged) in deployments(layout) {
+    validate_deployment_set(platform, deployments(layout))
+}
+
+pub fn validate_realtime_deployments(
+    platform: &dyn Platform,
+    layout: &Layout,
+) -> Result<(), Error> {
+    validate_deployment_set(platform, realtime_deployments(layout))
+}
+
+pub fn validate_userspace_deployments(
+    platform: &dyn Platform,
+    layout: &Layout,
+) -> Result<(), Error> {
+    validate_deployment_set(platform, userspace_deployments(layout))
+}
+
+pub fn realtime_deployments_current(
+    platform: &dyn Platform,
+    layout: &Layout,
+) -> Result<bool, Error> {
+    for (deployed, staged) in realtime_deployments(layout) {
+        require_regular_file(platform, &staged)?;
+        match platform.is_regular_file(&deployed) {
+            Ok(true) => {
+                if read(platform, &deployed)? != read(platform, &staged)? {
+                    return Ok(false);
+                }
+            }
+            Ok(false) => return Err(Error::NotRegularFile(deployed)),
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(false),
+            Err(error) => {
+                return Err(Error::os("inspect regular file", deployed, error));
+            }
+        }
+    }
+    Ok(true)
+}
+
+fn validate_deployment_set(
+    platform: &dyn Platform,
+    deployments: Vec<(PathBuf, PathBuf)>,
+) -> Result<(), Error> {
+    for (deployed, staged) in deployments {
         require_regular_file(platform, &deployed)?;
         require_regular_file(platform, &staged)?;
         if read(platform, &deployed)? != read(platform, &staged)? {

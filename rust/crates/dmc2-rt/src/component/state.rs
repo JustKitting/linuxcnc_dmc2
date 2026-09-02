@@ -1,4 +1,4 @@
-use dmc2_core::halui::HaluiCommandSequencer;
+use dmc2_core::motion::NativeMotionCommandChannel;
 use dmc2_core::runtime::RuntimeController;
 use dmc2_core::supervisor::MachineSnapshot;
 
@@ -36,7 +36,7 @@ impl CachedTaskSnapshot {
 pub(super) struct ComponentState {
     pub(super) pins: *mut Pins,
     pub(super) runtime: RuntimeController,
-    pub(super) sequencer: HaluiCommandSequencer,
+    pub(super) motion_commands: NativeMotionCommandChannel,
     pub(super) task: CachedTaskSnapshot,
 }
 
@@ -45,7 +45,7 @@ impl ComponentState {
         Self {
             pins,
             runtime: RuntimeController::new(),
-            sequencer: HaluiCommandSequencer::new(),
+            motion_commands: NativeMotionCommandChannel::new(),
             task: CachedTaskSnapshot::safe(),
         }
     }

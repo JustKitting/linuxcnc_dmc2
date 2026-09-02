@@ -66,8 +66,8 @@
       "id": "operator_home_all_button",
       "blocking": true,
       "status": "implemented_offline",
-      "value": "Momentary pyvcp.home-all output connected directly to halui.home-all",
-      "reason": "The operator button invokes LinuxCNC's existing configured HOME_SEQUENCE 0/1/2 path for X then Y then Z; no second homing sequence or substituted motion values were introduced."
+      "value": "Catalogued Home All control with Known/Unknown indicators in the Manual Control tab's Homing section",
+      "reason": "The Manual-tab button retains AXIS's existing Home All command binding, which invokes LinuxCNC's configured HOME_SEQUENCE 0/1/2 path for X then Y then Z; no second homing sequence or substituted motion values were introduced."
     },
     {
       "id": "pendant_latest_wins_motion_backend",
@@ -120,22 +120,22 @@
       "id": "estop_recovery_policy_integration",
       "blocking": true,
       "status": "implemented_offline",
-      "value": "X+x10 -> X+x1 -> OFF -> CW -> CCW -> three complete side-button clicks",
-      "reason": "Recovery remains input-only; the external E-stop gate stays false until the exact gesture completes, then LinuxCNC reset/on is requested."
+      "value": "One canonical LinuxCNC E-stop latch: physical pendant press trips it; AXIS Reset or X+x10 -> X+x1 -> OFF -> CW -> CCW -> three complete side-button clicks resets it after physical release",
+      "reason": "The pendant has no duplicate E-stop state. Its physical switch drops the gate feeding LinuxCNC's estop_latch. AXIS Reset and the pendant recovery gesture re-arm that same latch; only the pendant gesture additionally restores Machine On."
     },
     {
       "id": "probe_contact_motion_behavior",
       "blocking": false,
       "status": "implemented_offline",
-      "value": "Puck IN0 is connected to motion.probe-input plus motion.digital-in-00; the first explicitly approved moving test probes only Z at 0.1 mm/s from recorded X/Y and returns to machine Z home after contact; IN1 remains status-only",
-      "reason": "The separate no-motion path remains available, while tool-height-first-test.ngc is the deliberately slow first live G38.2 validation and does not alter coordinates or the tool table."
+      "value": "The shared no-motion OUT5 connectivity test monitors puck IN0 and DMC2 side-probe IN1 and removes power on either contact; puck IN0 is connected to motion.probe-input plus motion.digital-in-00; the first explicitly approved moving test probes only Z at 0.1 mm/s from recorded X/Y and returns to machine Z home after contact; IN1 remains status-only for motion",
+      "reason": "The general panel test validates either contact in a separate no-motion run, while tool-height-first-test.ngc is the deliberately slow first live G38.2 validation and does not alter coordinates or the tool table."
     },
     {
       "id": "probe_power_operation_policy",
       "blocking": false,
       "status": "implemented_offline",
       "value": "M64/M65 P0 request OUT5 through a realtime program-running gate; motion.digital-in-01 reports the gate state; normal completion, timeout, and ON_ABORT_COMMAND clear the request",
-      "reason": "The no-motion panel test has an exact 300-second maximum contact window. The moving first test enables OUT5 only after its operator gate and removes it before the Z-home return; the abort handler remains the fallback cleanup."
+      "reason": "The no-motion panel test has an exact 300-second maximum window and removes OUT5 immediately on IN0 or IN1 contact. The moving first test enables OUT5 only after its operator gate and removes it before the Z-home return; the abort handler remains the fallback cleanup."
     },
     {
       "id": "motor_alarm_input_mapping_and_polarity",
@@ -154,9 +154,9 @@
     {
       "id": "spindle_hardware_control",
       "blocking": false,
-      "status": "verified_stopped_ready",
-      "value": "LinuxCNC M3/M4/S/M5 is routed through a direction-aware realtime H100 sequencer and hm2_modbus on Mesa PktUART channel 1; 24000 RPM maps to verified DMC2 F004/F005 raw 4000 (400.0 Hz), with a 6000 RPM software minimum; startup writes STOP then zero, RUN waits for 0201H readback; the user-verified top-down installation mapping is H100 0001H=physical CCW and 0004H=physical CW, so standard mill M3 writes 0004H, M4 writes 0001H, and M5 writes STOP before clearing frequency",
-      "reason": "On 2026-08-24 the stopped one-time write changed live F004/F005 from raw 500/500 to 4000/4000, and the restarted LinuxCNC profile read back observed=expected=4000, ready=true, block-code=0, STOP=8, commanded/output frequency=0, and VFD fault=0. No spindle RUN was sent during this verification."
+      "status": "verified_live_direction_and_speed_feedback",
+      "value": "LinuxCNC M3/M4/S/M5 is routed through a direction-aware realtime H100 sequencer and hm2_modbus on Mesa PktUART channel 1; 24000 RPM maps to verified DMC2 F004/F005 raw 4000 (400.0 Hz), with a 6000 RPM software minimum; startup writes STOP then zero, RUN waits for 0201H readback; the user-verified top-down installation mapping is H100 explicit Forward 0002H=physical CCW and H100 Reverse 0004H=physical CW, so standard mill M3 writes 0004H, M4 writes 0002H, and M5 writes STOP before clearing frequency; cutting programs require H100 direction feedback to confirm M3/CW before motion, and a direction mismatch after confirmed running latches a typed fault and commands STOP",
+      "reason": "On 2026-08-24 the stopped one-time write changed live F004/F005 from raw 500/500 to 4000/4000. On 2026-08-28 physical observation and continuous LinuxCNC/H100 traces confirmed M3 command 0004H with status 000DH as top-down clockwise, M4 command 0002H with status 0009H as top-down counterclockwise, and M5 command 0008H returning frequency to zero with fault and block codes remaining zero."
     },
     {
       "id": "integrated_hardware_validation",
@@ -178,10 +178,11 @@
     "probe_power_switch": "OUT5",
     "spindle_direction": {
       "view": "top-down from spindle/head toward tool and workpiece",
-      "h100_0200_0001": "physical counterclockwise",
+      "h100_0200_0001": "generic operation only; not accepted as a direction-safe command",
+      "h100_0200_0002": "physical counterclockwise",
       "h100_0200_0004": "physical clockwise",
       "linuxcnc_m3": "physical clockwise via H100 0200H=0004H",
-      "linuxcnc_m4": "physical counterclockwise via H100 0200H=0001H"
+      "linuxcnc_m4": "physical counterclockwise via H100 0200H=0002H"
     },
     "puck_height_mm": 19.40,
     "puck_reference_surface": "machine plate",

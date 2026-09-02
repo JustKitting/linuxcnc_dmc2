@@ -92,5 +92,3 @@ deadman, or E-stop state.
 - `monitor.py`: P3 monitor with no CNC control imports.
 - `raw_mapper/raw_mapper.ino` and `raw_monitor.py`: the earlier empirical
   mapping tools.
-- `../../reference/legacy_controller/`: the preserved direct-control
-  implementation used only as a behavioral reference.

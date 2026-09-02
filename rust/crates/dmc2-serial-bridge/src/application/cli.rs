@@ -1,4 +1,6 @@
 use std::env;
+use std::ffi::OsString;
+use std::fmt;
 
 const DEFAULT_COMPONENT: &str = "dmc2-pendant";
 const DEFAULT_PORT: &str = "/dev/ttyUSB0";
@@ -11,53 +13,105 @@ pub(super) struct Arguments {
     pub(super) port: String,
     pub(super) baud: u32,
     pub(super) timeout_ms: u64,
-    pub(super) validate: bool,
 }
 
-pub(super) fn arguments() -> Result<Arguments, String> {
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub(crate) enum CliError {
+    NonUtf8Argument { index: usize, value: OsString },
+    MissingValue { option: String },
+    InvalidUnsigned { option: &'static str, value: String },
+    UnknownArgument { argument: String },
+    ZeroPacketTimeout,
+    UnsupportedBaud { observed: u32 },
+}
+
+impl fmt::Display for CliError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::NonUtf8Argument { index, value } => write!(
+                formatter,
+                "SERIAL_BRIDGE_ARGUMENT_NOT_UTF8: index={} value={value:?}; action: pass UTF-8 command-line arguments",
+                index + 1
+            ),
+            Self::MissingValue { option } => write!(formatter, "{option} requires a value"),
+            Self::InvalidUnsigned { option, .. } => {
+                write!(formatter, "{option} must be an unsigned integer")
+            }
+            Self::UnknownArgument { argument } => write!(formatter, "unknown argument: {argument}"),
+            Self::ZeroPacketTimeout => {
+                formatter.write_str("--packet-timeout-ms must be positive")
+            }
+            Self::UnsupportedBaud { .. } => {
+                formatter.write_str("this audited bridge accepts exactly 115200 baud")
+            }
+        }
+    }
+}
+
+pub(super) fn arguments() -> Result<Arguments, CliError> {
+    parse(env::args_os().skip(1))
+}
+
+fn next_value(
+    items: &mut impl Iterator<Item = (usize, OsString)>,
+    option: &str,
+) -> Result<String, CliError> {
+    let Some((index, raw_value)) = items.next() else {
+        return Err(CliError::MissingValue {
+            option: option.to_owned(),
+        });
+    };
+    raw_value
+        .into_string()
+        .map_err(|value| CliError::NonUtf8Argument { index, value })
+}
+
+fn parse(items: impl IntoIterator<Item = OsString>) -> Result<Arguments, CliError> {
     let mut result = Arguments {
         component: DEFAULT_COMPONENT.to_owned(),
         port: DEFAULT_PORT.to_owned(),
         baud: DEFAULT_BAUD,
         timeout_ms: DEFAULT_TIMEOUT_MS,
-        validate: false,
     };
-    let mut items = env::args().skip(1);
-    while let Some(argument) = items.next() {
-        let value = |items: &mut std::iter::Skip<std::env::Args>| {
-            items
-                .next()
-                .ok_or_else(|| format!("{argument} requires a value"))
-        };
+    let mut items = items.into_iter().enumerate();
+    while let Some((index, raw_argument)) = items.next() {
+        let argument = raw_argument
+            .into_string()
+            .map_err(|value| CliError::NonUtf8Argument { index, value })?;
         match argument.as_str() {
-            "--component" => result.component = value(&mut items)?,
-            "--port" => result.port = value(&mut items)?,
+            "--component" => result.component = next_value(&mut items, &argument)?,
+            "--port" => result.port = next_value(&mut items, &argument)?,
             "--baud" => {
-                result.baud = value(&mut items)?
-                    .parse()
-                    .map_err(|_| "--baud must be an unsigned integer".to_owned())?;
+                let raw = next_value(&mut items, &argument)?;
+                result.baud = raw.parse().map_err(|_| CliError::InvalidUnsigned {
+                    option: "--baud",
+                    value: raw,
+                })?;
             }
             "--packet-timeout-ms" => {
-                result.timeout_ms = value(&mut items)?
-                    .parse()
-                    .map_err(|_| "--packet-timeout-ms must be an unsigned integer".to_owned())?;
+                let raw = next_value(&mut items, &argument)?;
+                result.timeout_ms = raw.parse().map_err(|_| CliError::InvalidUnsigned {
+                    option: "--packet-timeout-ms",
+                    value: raw,
+                })?;
             }
-            "--validate" => result.validate = true,
             "--help" | "-h" => {
                 println!(
                     "Usage: dmc2-serial-bridge [--component NAME] [--port PATH] \
-                     [--baud 115200] [--packet-timeout-ms N] [--validate]"
+                     [--baud 115200] [--packet-timeout-ms N]"
                 );
                 std::process::exit(0);
             }
-            _ => return Err(format!("unknown argument: {argument}")),
+            _ => return Err(CliError::UnknownArgument { argument }),
         }
     }
     if result.timeout_ms == 0 {
-        return Err("--packet-timeout-ms must be positive".to_owned());
+        return Err(CliError::ZeroPacketTimeout);
     }
     if result.baud != DEFAULT_BAUD {
-        return Err("this audited bridge accepts exactly 115200 baud".to_owned());
+        return Err(CliError::UnsupportedBaud {
+            observed: result.baud,
+        });
     }
     Ok(result)
 }

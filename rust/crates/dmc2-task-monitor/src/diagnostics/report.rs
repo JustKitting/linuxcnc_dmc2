@@ -1,11 +1,9 @@
 //! Diagnostic result model and edge-triggered logging.
 
-use std::collections::BTreeSet;
-
-#[cfg(test)]
 use std::collections::BTreeMap;
 
 use super::category;
+use dmc2_diagnostics::{diagnostic_catalog, valid_diagnostic_domain, valid_symbolic_identity};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Severity {
@@ -24,14 +22,112 @@ impl Severity {
 
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Issue {
-    pub severity: Severity,
-    pub category: u64,
-    pub source: String,
-    pub domain: &'static str,
-    pub domain_id: u32,
-    pub value: i64,
-    pub name: Option<&'static str>,
-    pub detail: &'static str,
+    severity: Severity,
+    category: u64,
+    source: String,
+    domain: &'static str,
+    domain_id: u32,
+    value: i64,
+    name: Option<&'static str>,
+    detail: &'static str,
+    operator_action: &'static str,
+    /// Complete captured context for this exact assertion. This is persisted
+    /// with the identity/cause/action so an operator never has to reconstruct
+    /// a numeric failure from a separate pin lookup.
+    evidence: String,
+    // Prevent construction outside this module. Every issue must pass the
+    // complete identity/cause/action/evidence contract in `Issue::new`.
+    _validated: (),
+}
+
+impl Issue {
+    #[allow(clippy::too_many_arguments)]
+    pub(crate) fn new(
+        severity: Severity,
+        category: u64,
+        source: impl Into<String>,
+        domain: &'static str,
+        domain_id: u32,
+        value: i64,
+        name: Option<&'static str>,
+        detail: &'static str,
+        operator_action: &'static str,
+        evidence: impl Into<String>,
+    ) -> Self {
+        let source = source.into();
+        let evidence = evidence.into();
+        assert!(category != 0, "diagnostic category must be nonzero");
+        assert!(!source.is_empty(), "diagnostic source must be present");
+        assert!(
+            valid_diagnostic_domain(domain),
+            "diagnostic domain {domain:?} must be lowercase ASCII snake case"
+        );
+        assert!(!detail.is_empty(), "diagnostic cause must be present");
+        assert!(
+            !operator_action.is_empty(),
+            "diagnostic operator action must be present"
+        );
+        assert!(!evidence.is_empty(), "diagnostic evidence must be present");
+        if let Some(identity) = name {
+            assert!(
+                valid_symbolic_identity(identity),
+                "known diagnostic identity {identity:?} must be an uppercase symbolic name"
+            );
+        }
+        Self {
+            severity,
+            category,
+            source,
+            domain,
+            domain_id,
+            value,
+            name,
+            detail,
+            operator_action,
+            evidence,
+            _validated: (),
+        }
+    }
+
+    pub(crate) const fn severity(&self) -> Severity {
+        self.severity
+    }
+
+    pub(crate) const fn category(&self) -> u64 {
+        self.category
+    }
+
+    pub(crate) fn source(&self) -> &str {
+        &self.source
+    }
+
+    pub(crate) const fn domain(&self) -> &'static str {
+        self.domain
+    }
+
+    pub(crate) const fn domain_id(&self) -> u32 {
+        self.domain_id
+    }
+
+    pub(crate) const fn value(&self) -> i64 {
+        self.value
+    }
+
+    pub(crate) const fn name(&self) -> Option<&'static str> {
+        self.name
+    }
+
+    pub(crate) const fn detail(&self) -> &'static str {
+        self.detail
+    }
+
+    pub(crate) const fn operator_action(&self) -> &'static str {
+        self.operator_action
+    }
+
+    pub(crate) fn evidence(&self) -> &str {
+        &self.evidence
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -39,7 +135,7 @@ pub struct DiagnosticReport {
     pub active_error_mask: u64,
     pub active_warning_mask: u64,
     pub unknown_domain_mask: u64,
-    pub issues: Vec<Issue>,
+    issues: Vec<Issue>,
     #[cfg(test)]
     covered_fields: BTreeMap<String, &'static str>,
 }
@@ -77,6 +173,15 @@ impl DiagnosticReport {
             .unwrap_or(u32::MAX)
     }
 
+    #[cfg(test)]
+    pub(crate) fn issues(&self) -> &[Issue] {
+        &self.issues
+    }
+
+    pub(crate) fn issue_count(&self) -> usize {
+        self.issues.len()
+    }
+
     pub(super) fn push(&mut self, issue: Issue) {
         match issue.severity {
             Severity::Warning => self.active_warning_mask |= issue.category,
@@ -108,7 +213,71 @@ impl DiagnosticReport {
 
 #[derive(Default)]
 pub struct TransitionLogger {
-    active: BTreeSet<Issue>,
+    active: BTreeMap<IssueIdentity, Issue>,
+}
+
+#[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
+struct IssueIdentity {
+    severity: Severity,
+    category: u64,
+    source: String,
+    domain: &'static str,
+    domain_id: u32,
+    value: i64,
+    name: Option<&'static str>,
+    detail: &'static str,
+    operator_action: &'static str,
+}
+
+impl From<&Issue> for IssueIdentity {
+    fn from(issue: &Issue) -> Self {
+        Self {
+            severity: issue.severity,
+            category: issue.category,
+            source: issue.source.clone(),
+            domain: issue.domain,
+            domain_id: issue.domain_id,
+            value: issue.value,
+            name: issue.name,
+            detail: issue.detail,
+            operator_action: issue.operator_action,
+        }
+    }
+}
+
+diagnostic_catalog! {
+    pub enum TransitionAction: i32 {
+        Clear = -1 => (
+            "CLEAR",
+            "clear",
+            "the previously active diagnostic condition is no longer present",
+            "retain the transition history; no action is required solely because it cleared"
+        ),
+        Assert = 1 => (
+            "ASSERT",
+            "assert",
+            "the diagnostic condition became active",
+            "follow the diagnostic's specific operator action"
+        )
+    }
+}
+
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct DiagnosticTransition {
+    pub action: TransitionAction,
+    pub issue: Issue,
+}
+
+impl DiagnosticTransition {
+    pub fn identity(&self) -> String {
+        self.issue.name.map(str::to_owned).unwrap_or_else(|| {
+            format!(
+                "UNKNOWN_{}(raw={})",
+                self.issue.domain.to_ascii_uppercase(),
+                self.issue.value
+            )
+        })
+    }
 }
 
 #[derive(Clone, Debug, Default)]
@@ -116,40 +285,66 @@ pub struct TransitionUpdate {
     pub count: u32,
     pub latest: Option<Issue>,
     pub latest_action: i32,
+    pub events: Vec<DiagnosticTransition>,
 }
 
 impl TransitionLogger {
     pub fn update(&mut self, report: &DiagnosticReport) -> TransitionUpdate {
-        let next = report.issues.iter().cloned().collect::<BTreeSet<_>>();
+        let mut next = BTreeMap::new();
         let mut update = TransitionUpdate::default();
-        for issue in next.difference(&self.active) {
-            log_issue("assert", issue);
+        for issue in &report.issues {
+            let identity = IssueIdentity::from(issue);
+            if next.contains_key(&identity) {
+                continue;
+            }
+            if let Some(active) = self.active.get(&identity) {
+                next.insert(identity, active.clone());
+                continue;
+            }
+            let event = DiagnosticTransition {
+                action: TransitionAction::Assert,
+                issue: issue.clone(),
+            };
+            log_issue(&event);
             update.count = update.count.saturating_add(1);
             update.latest = Some(issue.clone());
-            update.latest_action = 1;
+            update.latest_action = event.action.wire_code();
+            update.events.push(event);
+            next.insert(identity, issue.clone());
         }
-        for issue in self.active.difference(&next) {
-            log_issue("clear", issue);
+        for (identity, issue) in &self.active {
+            if next.contains_key(identity) {
+                continue;
+            }
+            let event = DiagnosticTransition {
+                action: TransitionAction::Clear,
+                issue: issue.clone(),
+            };
+            log_issue(&event);
             update.count = update.count.saturating_add(1);
             update.latest = Some(issue.clone());
-            update.latest_action = -1;
+            update.latest_action = event.action.wire_code();
+            update.events.push(event);
         }
         self.active = next;
         update
     }
 }
 
-fn log_issue(action: &str, issue: &Issue) {
+fn log_issue(event: &DiagnosticTransition) {
+    let issue = &event.issue;
     eprintln!(
-        "DMC2_LINUXCNC_DIAGNOSTIC action={} severity={} category=0x{:016x} source={} domain={} domain_id={} code={} name={} detail={:?}",
-        action,
+        "DMC2_LINUXCNC_DIAGNOSTIC transition={} severity={} category=0x{:016x} source={} domain={} domain_id={} code={} identity={:?} cause={:?} operator_action={:?} evidence={:?}",
+        event.action.hal_slug(),
         issue.severity.as_str(),
         issue.category,
         issue.source,
         issue.domain,
         issue.domain_id,
         issue.value,
-        issue.name.unwrap_or("UNKNOWN"),
+        event.identity(),
         issue.detail,
+        issue.operator_action,
+        issue.evidence,
     );
 }

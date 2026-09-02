@@ -11,6 +11,7 @@ use super::contracts::{
     ErrorConnector, ErrorReader, HalSink, JournalSink, RuntimeReporter, StatusConnector,
     StatusReader,
 };
+use super::error::RuntimeError;
 use super::policy::{publication_policy, PublicationPolicy};
 
 pub(super) const RECONNECT_PERIOD: Duration = Duration::from_secs(1);
@@ -78,7 +79,7 @@ where
         }
     }
 
-    pub(super) fn cycle(&mut self, now: Instant) -> Result<(), String> {
+    pub(super) fn cycle(&mut self, now: Instant) -> Result<(), RuntimeError> {
         self.open_due_channels(now);
         self.drain_error_channel(now)?;
 
@@ -107,10 +108,10 @@ where
                     outcome.transport,
                     &report,
                     &mut self.diagnostic_state,
-                );
+                )?;
             }
             PublicationPolicy::WaitForFirstStatus => {}
-            PublicationPolicy::SafeKeepStatus => self.publish_safe(),
+            PublicationPolicy::SafeKeepStatus => self.publish_safe()?,
             PublicationPolicy::SafeDropStatus => {
                 let outcome = status_outcome.expect("drop policy requires a status outcome");
                 self.fault_transport = outcome.transport;
@@ -136,7 +137,7 @@ where
                     outcome.transport,
                     &report,
                     &mut self.diagnostic_state,
-                );
+                )?;
             }
         }
         Ok(())
@@ -165,7 +166,7 @@ where
         }
     }
 
-    fn drain_error_channel(&mut self, now: Instant) -> Result<(), String> {
+    fn drain_error_channel(&mut self, now: Instant) -> Result<(), RuntimeError> {
         let mut error_fault = None;
         if let Some(reader) = self.error_reader.as_mut() {
             for _ in 0..MAX_ERROR_MESSAGES_PER_CYCLE {
@@ -195,7 +196,10 @@ where
         Ok(())
     }
 
-    fn fail_closed<T>(&mut self, error: String) -> Result<T, String> {
+    fn fail_closed<T>(
+        &mut self,
+        error: crate::application::journal_error::JournalError,
+    ) -> Result<T, RuntimeError> {
         self.status_reader = None;
         self.error_reader = None;
         self.fault_transport = TransportStatus {
@@ -203,11 +207,16 @@ where
             cms_status: self.codes.cms_status_not_set,
         };
         self.hal.increment_poll_errors();
-        self.publish_safe();
-        Err(error)
+        match self.publish_safe() {
+            Ok(()) => Err(RuntimeError::ErrorJournal(error)),
+            Err(publication) => Err(RuntimeError::FailClosedPublication {
+                primary: error,
+                publication,
+            }),
+        }
     }
 
-    fn publish_safe(&mut self) {
+    fn publish_safe(&mut self) -> Result<(), crate::application::hal::PublisherError> {
         let report = diagnostics::disconnected(
             self.fault_transport.nml_error,
             self.fault_transport.cms_status,
@@ -219,7 +228,7 @@ where
             self.fault_transport,
             &report,
             &mut self.diagnostic_state,
-        );
+        )
     }
 
     #[cfg(test)]

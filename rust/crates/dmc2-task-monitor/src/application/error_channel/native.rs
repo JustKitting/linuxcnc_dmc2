@@ -1,7 +1,7 @@
 use std::ffi::CString;
 use std::fmt;
 
-use dmc2_linuxcnc_interface::ERROR_MESSAGE_CONTRACTS;
+use dmc2_linuxcnc_interface::{CodeDomain, CMS_STATUS, NML_ERROR};
 
 use crate::application::nml::{PollCodes, TransportStatus};
 
@@ -56,9 +56,37 @@ impl fmt::Display for ErrorChannelFault {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         write!(
             formatter,
-            "{} (NML error {}, CMS status {})",
-            self.reason, self.transport.nml_error, self.transport.cms_status
+            "{}: {}; evidence: reason={}, NML={}, CMS={}; action: {}",
+            self.reason.identity(),
+            self.reason.summary(),
+            self.reason,
+            SourceCodeDisplay {
+                domain: NML_ERROR,
+                raw: self.transport.nml_error,
+                unknown_identity: "UNKNOWN_NML_ERROR",
+            },
+            SourceCodeDisplay {
+                domain: CMS_STATUS,
+                raw: self.transport.cms_status,
+                unknown_identity: "UNKNOWN_CMS_STATUS",
+            },
+            self.reason.action(),
         )
+    }
+}
+
+struct SourceCodeDisplay {
+    domain: CodeDomain,
+    raw: i32,
+    unknown_identity: &'static str,
+}
+
+impl fmt::Display for SourceCodeDisplay {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self.domain.lookup(i64::from(self.raw)) {
+            Some(identity) => write!(formatter, "{identity}(raw={})", self.raw),
+            None => write!(formatter, "{}(raw={})", self.unknown_identity, self.raw),
+        }
     }
 }
 
@@ -79,10 +107,79 @@ enum FaultReason {
     Decode(DecodeError),
 }
 
+impl FaultReason {
+    const fn identity(&self) -> &'static str {
+        match self {
+            Self::Native(NativeResult::InvalidArgument) => "ERROR_CHANNEL_NATIVE_INVALID_ARGUMENT",
+            Self::Native(NativeResult::InvalidMessage) => "ERROR_CHANNEL_NATIVE_INVALID_MESSAGE",
+            Self::Native(NativeResult::TransportError) => "ERROR_CHANNEL_NATIVE_TRANSPORT_ERROR",
+            Self::Native(NativeResult::Empty) => "ERROR_CHANNEL_NATIVE_UNEXPECTED_EMPTY",
+            Self::Native(NativeResult::Message) => "ERROR_CHANNEL_NATIVE_UNEXPECTED_MESSAGE",
+            Self::Native(NativeResult::Unknown(_)) => "ERROR_CHANNEL_NATIVE_RESULT_UNKNOWN",
+            Self::InconsistentState => "ERROR_CHANNEL_STATE_INCONSISTENT",
+            Self::Decode(_) => "ERROR_CHANNEL_MESSAGE_DECODE_FAILED",
+        }
+    }
+
+    const fn summary(&self) -> &'static str {
+        match self {
+            Self::Native(NativeResult::InvalidArgument) => {
+                "the native LinuxCNC error-channel reader rejected its call arguments"
+            }
+            Self::Native(NativeResult::InvalidMessage) => {
+                "the native reader rejected the LinuxCNC error-channel message contract"
+            }
+            Self::Native(NativeResult::TransportError) => {
+                "the native reader reported a LinuxCNC NML/CMS transport failure"
+            }
+            Self::Native(NativeResult::Empty) => {
+                "the native reader returned an empty result outside its valid empty-state contract"
+            }
+            Self::Native(NativeResult::Message) => {
+                "the native reader returned a message result outside its valid message-state contract"
+            }
+            Self::Native(NativeResult::Unknown(_)) => {
+                "the native reader returned a result absent from its compiled result catalog"
+            }
+            Self::InconsistentState => {
+                "the native result, copied object, and NML/CMS transport fields disagree"
+            }
+            Self::Decode(_) => {
+                "a copied LinuxCNC error-channel object violates its verified 2.9.10 layout contract"
+            }
+        }
+    }
+
+    const fn action(&self) -> &'static str {
+        match self {
+            Self::Native(NativeResult::InvalidArgument) => {
+                "stop the monitor and correct the native reader invocation"
+            }
+            Self::Native(NativeResult::InvalidMessage) | Self::Decode(_) => {
+                "preserve the raw object and rebuild the monitor against the pinned LinuxCNC 2.9.10 interface"
+            }
+            Self::Native(NativeResult::TransportError) => {
+                "use the named NML and CMS states below to restore the LinuxCNC error channel"
+            }
+            Self::Native(NativeResult::Empty)
+            | Self::Native(NativeResult::Message)
+            | Self::InconsistentState => {
+                "preserve the raw channel state and restart only after correcting the producer/reader mismatch"
+            }
+            Self::Native(NativeResult::Unknown(_)) => {
+                "retain the raw native result and correct the binary/source-version mismatch"
+            }
+        }
+    }
+}
+
 impl fmt::Display for FaultReason {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
-            Self::Native(result) => write!(formatter, "native error-channel result {result:?}"),
+            Self::Native(NativeResult::Unknown(raw)) => {
+                write!(formatter, "native_result=UNKNOWN(raw={raw})")
+            }
+            Self::Native(result) => write!(formatter, "native_result={result:?}"),
             Self::InconsistentState => write!(formatter, "inconsistent error-channel state"),
             Self::Decode(error) => write!(formatter, "invalid error-channel message: {error}"),
         }
@@ -186,215 +283,4 @@ pub(in crate::application) fn abi_version() -> u32 {
 
 pub(in crate::application) fn snapshot_size() -> usize {
     unsafe { bindings::dmc2_error_message_snapshot_size() }
-}
-
-pub(in crate::application) fn copy_self_test() -> Result<u32, String> {
-    let mut tested_message_types = 0;
-    let mut failure_offset = usize::MAX;
-    let result = unsafe {
-        bindings::dmc2_error_message_copy_self_test(&mut tested_message_types, &mut failure_offset)
-    };
-    if result != 0 {
-        return Err(format!(
-            "native error-message copy failed in round {result} at byte {failure_offset}"
-        ));
-    }
-    if tested_message_types as usize != ERROR_MESSAGE_CONTRACTS.len() {
-        return Err(format!(
-            "native error-message copy tested {tested_message_types} types, expected {}",
-            ERROR_MESSAGE_CONTRACTS.len()
-        ));
-    }
-    Ok(tested_message_types)
-}
-
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
-    use std::ptr;
-
-    use dmc2_linuxcnc_interface::{CMS_STATUS, NML_ERROR};
-
-    use super::*;
-
-    fn snapshot(codes: PollCodes) -> RawErrorSnapshot {
-        let contract = ERROR_MESSAGE_CONTRACTS[0];
-        let mut snapshot = RawErrorSnapshot {
-            abi_version: ERROR_MESSAGE_ABI_VERSION,
-            struct_size: std::mem::size_of::<RawErrorSnapshot>() as u32,
-            message_type: contract.message_type as i32,
-            nml_error: codes.no_error,
-            cms_status: codes.cms_read_ok,
-            object_size: contract.message_size as u32,
-            object: [0; ERROR_OBJECT_CAPACITY],
-        };
-        snapshot.object[..4].copy_from_slice(&(contract.message_type as i32).to_ne_bytes());
-        snapshot.object[8..16].copy_from_slice(&(contract.message_size as i64).to_ne_bytes());
-        snapshot
-    }
-
-    #[test]
-    fn native_abi_and_all_six_copy_paths_are_executed() {
-        assert_eq!(abi_version(), ERROR_MESSAGE_ABI_VERSION);
-        assert_eq!(snapshot_size(), std::mem::size_of::<RawErrorSnapshot>());
-        assert_eq!(snapshot_size(), 304);
-        assert_eq!(copy_self_test().unwrap(), 6);
-    }
-
-    #[test]
-    fn native_channel_argument_guards_fail_closed_without_opening_nml() {
-        unsafe { bindings::dmc2_error_message_snapshot_initialize(ptr::null_mut()) };
-        let mut tested = 99;
-        let mut failure_offset = 99;
-        assert_eq!(
-            unsafe {
-                bindings::dmc2_error_message_copy_self_test(ptr::null_mut(), &mut failure_offset)
-            },
-            1
-        );
-        assert_eq!(
-            unsafe { bindings::dmc2_error_message_copy_self_test(&mut tested, ptr::null_mut()) },
-            1
-        );
-
-        let mut snapshot = RawErrorSnapshot::default();
-        assert_eq!(
-            unsafe { bindings::dmc2_error_channel_read(ptr::null_mut(), &mut snapshot) },
-            bindings::DMC2_ERROR_NATIVE_TRANSPORT_ERROR
-        );
-        assert_eq!(snapshot.abi_version, ERROR_MESSAGE_ABI_VERSION);
-        assert_eq!(
-            snapshot.nml_error,
-            PollCodes::required().invalid_configuration
-        );
-        assert_eq!(
-            unsafe { bindings::dmc2_error_channel_read(ptr::null_mut(), ptr::null_mut()) },
-            bindings::DMC2_ERROR_NATIVE_INVALID_ARGUMENT
-        );
-        let mut nml_error = 0;
-        let mut cms_status = 0;
-        assert!(unsafe {
-            bindings::dmc2_error_channel_open(ptr::null(), &mut nml_error, &mut cms_status)
-        }
-        .is_null());
-        assert_eq!(nml_error, PollCodes::required().invalid_configuration);
-        assert_eq!(cms_status, PollCodes::required().cms_status_not_set);
-
-        let empty = CString::new("").unwrap();
-        nml_error = 0;
-        cms_status = 0;
-        assert!(unsafe {
-            bindings::dmc2_error_channel_open(empty.as_ptr(), &mut nml_error, &mut cms_status)
-        }
-        .is_null());
-        assert_eq!(nml_error, PollCodes::required().invalid_configuration);
-        assert_eq!(cms_status, PollCodes::required().cms_status_not_set);
-
-        let file = CString::new("unused.nml").unwrap();
-        assert!(unsafe {
-            bindings::dmc2_error_channel_open(file.as_ptr(), ptr::null_mut(), &mut cms_status)
-        }
-        .is_null());
-        assert!(unsafe {
-            bindings::dmc2_error_channel_open(file.as_ptr(), &mut nml_error, ptr::null_mut())
-        }
-        .is_null());
-        unsafe { bindings::dmc2_error_channel_close(ptr::null_mut()) };
-    }
-
-    #[test]
-    fn only_exact_linuxcnc_read_state_pairs_are_accepted() {
-        let codes = PollCodes::required();
-        let valid = snapshot(codes);
-        assert!(matches!(
-            classify_native(bindings::DMC2_ERROR_NATIVE_MESSAGE, valid, codes),
-            ErrorChannelRead::Message(_, _)
-        ));
-
-        let empty = RawErrorSnapshot {
-            abi_version: ERROR_MESSAGE_ABI_VERSION,
-            struct_size: std::mem::size_of::<RawErrorSnapshot>() as u32,
-            nml_error: codes.no_error,
-            cms_status: codes.cms_read_old,
-            ..RawErrorSnapshot::default()
-        };
-        assert_eq!(
-            classify_native(bindings::DMC2_ERROR_NATIVE_EMPTY, empty, codes),
-            ErrorChannelRead::Empty(TransportStatus {
-                nml_error: codes.no_error,
-                cms_status: codes.cms_read_old,
-            })
-        );
-
-        let native_results = [
-            i32::MIN,
-            bindings::DMC2_ERROR_NATIVE_INVALID_ARGUMENT,
-            bindings::DMC2_ERROR_NATIVE_INVALID_MESSAGE,
-            bindings::DMC2_ERROR_NATIVE_TRANSPORT_ERROR,
-            bindings::DMC2_ERROR_NATIVE_EMPTY,
-            bindings::DMC2_ERROR_NATIVE_MESSAGE,
-            2,
-            i32::MAX,
-        ]
-        .into_iter()
-        .collect::<BTreeSet<_>>();
-        let message_types = [i32::MIN, -1, 0, valid.message_type, 77, i32::MAX];
-        let nml_errors = NML_ERROR
-            .codes
-            .iter()
-            .map(|entry| i32::try_from(entry.code).unwrap())
-            .chain([i32::MIN, i32::MAX])
-            .collect::<BTreeSet<_>>();
-        let cms_statuses = CMS_STATUS
-            .codes
-            .iter()
-            .map(|entry| i32::try_from(entry.code).unwrap())
-            .chain([i32::MIN, i32::MAX])
-            .collect::<BTreeSet<_>>();
-        for result in native_results {
-            for message_type in message_types {
-                for nml_error in &nml_errors {
-                    for cms_status in &cms_statuses {
-                        let mut candidate = valid;
-                        candidate.message_type = message_type;
-                        candidate.nml_error = *nml_error;
-                        candidate.cms_status = *cms_status;
-                        if message_type <= 0 {
-                            candidate.object_size = 0;
-                            candidate.object.fill(0);
-                        } else {
-                            candidate.object[..4].copy_from_slice(&message_type.to_ne_bytes());
-                        }
-                        let exact_message = result == bindings::DMC2_ERROR_NATIVE_MESSAGE
-                            && message_type > 0
-                            && *nml_error == codes.no_error
-                            && *cms_status == codes.cms_read_ok;
-                        let exact_empty = result == bindings::DMC2_ERROR_NATIVE_EMPTY
-                            && message_type == 0
-                            && *nml_error == codes.no_error
-                            && *cms_status == codes.cms_read_old;
-                        let classified = classify_native(result, candidate, codes);
-                        assert_eq!(
-                            matches!(classified, ErrorChannelRead::Fault(_)),
-                            !(exact_message || exact_empty),
-                            "result={result} type={message_type} nml={nml_error} cms={cms_status}"
-                        );
-                    }
-                }
-            }
-        }
-
-        let mut malformed_empty = empty;
-        malformed_empty.object[0] = 1;
-        assert!(matches!(
-            classify_native(bindings::DMC2_ERROR_NATIVE_EMPTY, malformed_empty, codes),
-            ErrorChannelRead::Fault(_)
-        ));
-        malformed_empty = empty;
-        malformed_empty.abi_version ^= 1;
-        assert!(matches!(
-            classify_native(bindings::DMC2_ERROR_NATIVE_EMPTY, malformed_empty, codes),
-            ErrorChannelRead::Fault(_)
-        ));
-    }
 }

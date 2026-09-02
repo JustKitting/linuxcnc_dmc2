@@ -1,260 +1,224 @@
-use std::ptr;
-
 use dmc2_hal_sys as hal;
+use dmc2_linuxcnc_interface::{CMS_STATUS, NML_ERROR};
 
-pub(super) const SNAPSHOT_GENERATION_PIN: &str = "snapshot-generation";
-pub(super) const CONNECTION_BIT_OUTPUT_PINS: [&str; 2] = ["connected", "fault"];
-pub(super) const RUNTIME_U32_OUTPUT_PINS: [&str; 3] =
-    ["task-heartbeat", "publications", "poll-errors"];
-pub(super) const DIAGNOSTIC_BIT_OUTPUT_PINS: [&str; 5] = [
-    "nml-error-known",
-    "cms-status-known",
-    "linuxcnc-error-active",
-    "linuxcnc-warning-active",
-    "unknown-code-active",
-];
-pub(super) const DIAGNOSTIC_U32_OUTPUT_PINS: [&str; 17] = [
-    "active-error-mask-low",
-    "active-error-mask-high",
-    "active-warning-mask-low",
-    "active-warning-mask-high",
-    "latched-error-mask-low",
-    "latched-error-mask-high",
-    "latched-warning-mask-low",
-    "latched-warning-mask-high",
-    "unknown-domain-mask-low",
-    "unknown-domain-mask-high",
-    "diagnostic-count",
-    "unknown-code-count",
-    "diagnostic-transitions",
-    "latest-code-low",
-    "latest-code-high",
-    "snapshot-abi-version",
-    "snapshot-struct-size",
-];
-pub(super) const DIAGNOSTIC_S32_OUTPUT_PINS: [&str; 5] = [
-    "nml-error-code",
-    "cms-status-code",
-    "latest-code-domain",
-    "latest-severity",
-    "latest-action",
-];
-pub(super) const CLEAR_LATCHED_INPUT_PIN: &str = "clear-latched";
-pub(super) const MACHINE_BIT_OUTPUT_PINS: [&str; 6] = [
-    "machine-on",
-    "estopped",
-    "manual-mode",
-    "joint-mode",
-    "teleop-mode",
-    "interp-idle",
-];
+pub(super) const NML_ERROR_KIND_COUNT: usize = NML_ERROR.codes.len();
+pub(super) const CMS_STATUS_KIND_COUNT: usize = CMS_STATUS.codes.len();
 
-pub(super) struct HalPins {
-    pub(super) snapshot_generation: *mut hal::hal_u32_t,
-    pub(super) connected: *mut hal::hal_bit_t,
-    pub(super) fault: *mut hal::hal_bit_t,
-    pub(super) task_heartbeat: *mut hal::hal_u32_t,
-    pub(super) publications: *mut hal::hal_u32_t,
-    pub(super) poll_errors: *mut hal::hal_u32_t,
-    pub(super) nml_error_code: *mut hal::hal_s32_t,
-    pub(super) nml_error_known: *mut hal::hal_bit_t,
-    pub(super) cms_status_code: *mut hal::hal_s32_t,
-    pub(super) cms_status_known: *mut hal::hal_bit_t,
-    pub(super) linuxcnc_error_active: *mut hal::hal_bit_t,
-    pub(super) linuxcnc_warning_active: *mut hal::hal_bit_t,
-    pub(super) unknown_code_active: *mut hal::hal_bit_t,
-    pub(super) active_error_mask_low: *mut hal::hal_u32_t,
-    pub(super) active_error_mask_high: *mut hal::hal_u32_t,
-    pub(super) active_warning_mask_low: *mut hal::hal_u32_t,
-    pub(super) active_warning_mask_high: *mut hal::hal_u32_t,
-    pub(super) latched_error_mask_low: *mut hal::hal_u32_t,
-    pub(super) latched_error_mask_high: *mut hal::hal_u32_t,
-    pub(super) latched_warning_mask_low: *mut hal::hal_u32_t,
-    pub(super) latched_warning_mask_high: *mut hal::hal_u32_t,
-    pub(super) unknown_domain_mask_low: *mut hal::hal_u32_t,
-    pub(super) unknown_domain_mask_high: *mut hal::hal_u32_t,
-    pub(super) diagnostic_count: *mut hal::hal_u32_t,
-    pub(super) unknown_code_count: *mut hal::hal_u32_t,
-    pub(super) diagnostic_transitions: *mut hal::hal_u32_t,
-    pub(super) latest_code_domain: *mut hal::hal_s32_t,
-    pub(super) latest_code_low: *mut hal::hal_u32_t,
-    pub(super) latest_code_high: *mut hal::hal_u32_t,
-    pub(super) latest_severity: *mut hal::hal_s32_t,
-    pub(super) latest_action: *mut hal::hal_s32_t,
-    pub(super) clear_latched: *mut hal::hal_bit_t,
-    pub(super) snapshot_abi_version: *mut hal::hal_u32_t,
-    pub(super) snapshot_struct_size: *mut hal::hal_u32_t,
-    pub(super) machine_on: *mut hal::hal_bit_t,
-    pub(super) estopped: *mut hal::hal_bit_t,
-    pub(super) manual_mode: *mut hal::hal_bit_t,
-    pub(super) joint_mode: *mut hal::hal_bit_t,
-    pub(super) teleop_mode: *mut hal::hal_bit_t,
-    pub(super) interp_idle: *mut hal::hal_bit_t,
-    pub(super) homed: [*mut hal::hal_bit_t; 3],
-    pub(super) homing: [*mut hal::hal_bit_t; 3],
-    pub(super) axis_stopped: [*mut hal::hal_bit_t; 3],
+hal::userspace_hal_pin_catalog! {
+    pub(super) struct ControllerFaultEvidencePins;
+    error = super::registration::RegistrationError;
+    register = super::registration::new_pin;
+    pins {
+    valid: bit in => "ctl-fault-data-b00-in";
+    axis_valid: bit in => "ctl-fault-data-b01-in";
+    axis: bit[3] in => ["ctl-fault-data-b02-in", "ctl-fault-data-b03-in", "ctl-fault-data-b04-in"];
+    motor_valid: bit in => "ctl-fault-data-b05-in";
+    start_count_valid: bit in => "ctl-fault-data-b06-in";
+    target_count_valid: bit in => "ctl-fault-data-b07-in";
+    observed_count_valid: bit in => "ctl-fault-data-b08-in";
+    target_position_valid: bit in => "ctl-fault-data-b09-in";
+    observed_position_valid: bit in => "ctl-fault-data-b10-in";
+    position_error_valid: bit in => "ctl-fault-data-b11-in";
+    expected_limit_mask_valid: bit in => "ctl-fault-data-b12-in";
+    elapsed_valid: bit in => "ctl-fault-data-b13-in";
+    timeout_valid: bit in => "ctl-fault-data-b14-in";
+    link_connected: bit in => "ctl-fault-data-b15-in";
+    serial_fault: bit in => "ctl-fault-data-b16-in";
+    quadrature_fault: bit in => "ctl-fault-data-b17-in";
+    pendant_estop_pressed: bit in => "ctl-fault-data-b18-in";
+    machine_on: bit in => "ctl-fault-data-b19-in";
+    machine_estopped: bit in => "ctl-fault-data-b20-in";
+    manual_mode: bit in => "ctl-fault-data-b21-in";
+    joint_mode: bit in => "ctl-fault-data-b22-in";
+    teleop_mode: bit in => "ctl-fault-data-b23-in";
+    interp_idle: bit in => "ctl-fault-data-b24-in";
+    motion_command_ready: bit in => "ctl-fault-data-b25-in";
+    task_heartbeat_age_valid: bit in => "ctl-fault-data-b26-in";
+    pendant_packet_age_valid: bit in => "ctl-fault-data-b27-in";
+    mesa_phase_valid: bit in => "ctl-fault-data-b28-in";
+    controller_watchdog_phase_valid: bit in => "ctl-fault-data-b29-in";
+    motion_enabled: bit in => "ctl-fault-data-b30-in";
+    motion_teleop_mode: bit in => "ctl-fault-data-b31-in";
+    motion_coord_mode: bit in => "ctl-fault-data-b32-in";
+    motion_in_position: bit in => "ctl-fault-data-b33-in";
+    motion_jog_active: bit in => "ctl-fault-data-b34-in";
+    consumer_active_seen: bit in => "ctl-fault-data-b35-in";
+    feedback_progress_seen: bit in => "ctl-fault-data-b36-in";
+    motor: s32 in => "ctl-fault-data-s00-in";
+    start_count: s32 in => "ctl-fault-data-s01-in";
+    target_count: s32 in => "ctl-fault-data-s02-in";
+    observed_count: s32 in => "ctl-fault-data-s03-in";
+    counts_by_motor: s32[3] in => ["ctl-fault-data-s07-in", "ctl-fault-data-s08-in", "ctl-fault-data-s09-in"];
+    supervisor_phase: s32 in => "ctl-fault-data-s04-in";
+    mesa_phase: s32 in => "ctl-fault-data-s05-in";
+    controller_watchdog_phase: s32 in => "ctl-fault-data-s06-in";
+    raw_limit_mask: u32 in => "ctl-fault-data-u00-in";
+    safety_limit_mask: u32 in => "ctl-fault-data-u01-in";
+    expected_limit_mask: u32 in => "ctl-fault-data-u02-in";
+    homed_mask: u32 in => "ctl-fault-data-u03-in";
+    homing_mask: u32 in => "ctl-fault-data-u04-in";
+    stopped_mask: u32 in => "ctl-fault-data-u05-in";
+    axis_wheel_jog_active_mask: u32 in => "ctl-fault-data-u06-in";
+    joint_wheel_jog_active_mask: u32 in => "ctl-fault-data-u07-in";
+    joint_in_position_mask: u32 in => "ctl-fault-data-u08-in";
+    target_position_pulses: float in => "ctl-fault-data-f00-in";
+    observed_position_pulses: float in => "ctl-fault-data-f01-in";
+    position_error_pulses: float in => "ctl-fault-data-f02-in";
+    position_feedback_by_motor: float[3] in => ["ctl-fault-data-f07-in", "ctl-fault-data-f08-in", "ctl-fault-data-f09-in"];
+    elapsed_seconds: float in => "ctl-fault-data-f03-in";
+    timeout_seconds: float in => "ctl-fault-data-f04-in";
+    task_heartbeat_age_seconds: float in => "ctl-fault-data-f05-in";
+    pendant_packet_age_seconds: float in => "ctl-fault-data-f06-in";
+    }
+    groups {}
 }
 
-impl HalPins {
-    pub(super) const fn empty() -> Self {
-        Self {
-            snapshot_generation: ptr::null_mut(),
-            connected: ptr::null_mut(),
-            fault: ptr::null_mut(),
-            task_heartbeat: ptr::null_mut(),
-            publications: ptr::null_mut(),
-            poll_errors: ptr::null_mut(),
-            nml_error_code: ptr::null_mut(),
-            nml_error_known: ptr::null_mut(),
-            cms_status_code: ptr::null_mut(),
-            cms_status_known: ptr::null_mut(),
-            linuxcnc_error_active: ptr::null_mut(),
-            linuxcnc_warning_active: ptr::null_mut(),
-            unknown_code_active: ptr::null_mut(),
-            active_error_mask_low: ptr::null_mut(),
-            active_error_mask_high: ptr::null_mut(),
-            active_warning_mask_low: ptr::null_mut(),
-            active_warning_mask_high: ptr::null_mut(),
-            latched_error_mask_low: ptr::null_mut(),
-            latched_error_mask_high: ptr::null_mut(),
-            latched_warning_mask_low: ptr::null_mut(),
-            latched_warning_mask_high: ptr::null_mut(),
-            unknown_domain_mask_low: ptr::null_mut(),
-            unknown_domain_mask_high: ptr::null_mut(),
-            diagnostic_count: ptr::null_mut(),
-            unknown_code_count: ptr::null_mut(),
-            diagnostic_transitions: ptr::null_mut(),
-            latest_code_domain: ptr::null_mut(),
-            latest_code_low: ptr::null_mut(),
-            latest_code_high: ptr::null_mut(),
-            latest_severity: ptr::null_mut(),
-            latest_action: ptr::null_mut(),
-            clear_latched: ptr::null_mut(),
-            snapshot_abi_version: ptr::null_mut(),
-            snapshot_struct_size: ptr::null_mut(),
-            machine_on: ptr::null_mut(),
-            estopped: ptr::null_mut(),
-            manual_mode: ptr::null_mut(),
-            joint_mode: ptr::null_mut(),
-            teleop_mode: ptr::null_mut(),
-            interp_idle: ptr::null_mut(),
-            homed: [ptr::null_mut(); 3],
-            homing: [ptr::null_mut(); 3],
-            axis_stopped: [ptr::null_mut(); 3],
-        }
+hal::userspace_hal_pin_catalog! {
+    pub(super) struct SerialBridgeFaultEvidencePins;
+    error = super::registration::RegistrationError;
+    register = super::registration::new_pin;
+    pins {
+    protocol_error_valid: bit in => "ser-fault-data-b00-in";
+    line_bytes_valid: bit in => "ser-fault-data-b01-in";
+    previous_sequence_valid: bit in => "ser-fault-data-b02-in";
+    observed_sequence_valid: bit in => "ser-fault-data-b03-in";
+    packet_age_valid: bit in => "ser-fault-data-b04-in";
+    timeout_valid: bit in => "ser-fault-data-b05-in";
+    previous_quadrature_errors_valid: bit in => "ser-fault-data-b06-in";
+    observed_quadrature_errors_valid: bit in => "ser-fault-data-b07-in";
+    operating_system_error_valid: bit in => "ser-fault-data-b08-in";
+    transport_contract_result_valid: bit in => "ser-fault-data-b09-in";
+    protocol_error_code: s32 in => "ser-fault-data-s00-in";
+    operating_system_error: s32 in => "ser-fault-data-s01-in";
+    line_bytes: u32 in => "ser-fault-data-u00-in";
+    previous_sequence: u32 in => "ser-fault-data-u01-in";
+    observed_sequence: u32 in => "ser-fault-data-u02-in";
+    previous_quadrature_errors: u32 in => "ser-fault-data-u03-in";
+    observed_quadrature_errors: u32 in => "ser-fault-data-u04-in";
+    transport_contract_result_low: u32 in => "ser-fault-data-u05-in";
+    transport_contract_result_high: u32 in => "ser-fault-data-u06-in";
+    packet_age_ms: float in => "ser-fault-data-f00-in";
+    timeout_ms: float in => "ser-fault-data-f01-in";
     }
+    groups {}
 }
 
-#[cfg(test)]
-mod tests {
-    use std::collections::BTreeSet;
-
-    use super::*;
-
-    #[derive(Clone, Copy, Debug, Eq, PartialEq)]
-    enum Kind {
-        Bit,
-        S32,
-        U32,
+hal::userspace_hal_pin_catalog! {
+    pub(super) struct H100FaultEvidencePins;
+    error = super::registration::RegistrationError;
+    register = super::registration::new_pin;
+    pins {
+    valid: bit in => "h100-fault-data-b00-in";
+    context_fault_latched_before: bit in => "h100-fault-data-b01-in";
+    context_fault_record_present_before: bit in => "h100-fault-data-b02-in";
+    machine_enabled: bit in => "h100-fault-data-b03-in";
+    run_request: bit in => "h100-fault-data-b04-in";
+    forward_request: bit in => "h100-fault-data-b05-in";
+    reverse_request: bit in => "h100-fault-data-b06-in";
+    reset: bit in => "h100-fault-data-b07-in";
+    link_fault: bit in => "h100-fault-data-b08-in";
+    command_disabled: bit in => "h100-fault-data-b09-in";
+    state_before: s32 in => "h100-fault-data-s00-in";
+    context_fault_code_before: u32 in => "h100-fault-data-u00-in";
+    context_fault_record_code_before: u32 in => "h100-fault-data-u01-in";
+    control_mode_f001: u32 in => "h100-fault-data-u02-in";
+    frequency_source_f002: u32 in => "h100-fault-data-u03-in";
+    reference_f004_centihz: u32 in => "h100-fault-data-u04-in";
+    maximum_f005_centihz: u32 in => "h100-fault-data-u05-in";
+    lower_limit_f011_centihz: u32 in => "h100-fault-data-u06-in";
+    panel_stop_f024: u32 in => "h100-fault-data-u07-in";
+    slave_address_f163: u32 in => "h100-fault-data-u08-in";
+    baud_selector_f164: u32 in => "h100-fault-data-u09-in";
+    data_mode_f165: u32 in => "h100-fault-data-u10-in";
+    frequency_decimals_f169: u32 in => "h100-fault-data-u11-in";
+    output_frequency_decihz: u32 in => "h100-fault-data-u12-in";
+    current_vfd_fault: u32 in => "h100-fault-data-u13-in";
+    main_status: u32 in => "h100-fault-data-u14-in";
+    given_frequency_readback: u32 in => "h100-fault-data-u15-in";
+    expected_reference_f004_centihz: u32 in => "h100-fault-data-u16-in";
+    expected_maximum_f005_centihz: u32 in => "h100-fault-data-u17-in";
+    calculated_frequency_register: u32 in => "h100-fault-data-u18-in";
+    speed_command_rpm: float in => "h100-fault-data-f00-in";
+    rated_rpm: float in => "h100-fault-data-f01-in";
+    minimum_rpm: float in => "h100-fault-data-f02-in";
+    maximum_rpm: float in => "h100-fault-data-f03-in";
+    at_speed_tolerance_hz: float in => "h100-fault-data-f04-in";
+    calculated_frequency_hz: float in => "h100-fault-data-f05-in";
     }
+    groups {}
+}
 
-    #[derive(Clone, Debug, Eq, PartialEq)]
-    struct Spec {
-        name: String,
-        kind: Kind,
-        direction: &'static str,
+hal::userspace_hal_pin_catalog! {
+    pub(super) struct HalPins;
+    error = super::registration::RegistrationError;
+    register = super::registration::new_pin;
+    pins {
+    snapshot_generation: u32 out => "snapshot-generation";
+    connected: bit out => "connected";
+    fault: bit out => "fault";
+    task_heartbeat: u32 out => "task-heartbeat";
+    publications: u32 out => "publications";
+    poll_errors: u32 out => "poll-errors";
+    nml_error_code: s32 out => "nml-error-code";
+    nml_error_known: bit out => "nml-error-known";
+    nml_error_unknown: bit out => "nml-error-unknown";
+    nml_error_kind: bit[NML_ERROR_KIND_COUNT] out => std::array::from_fn::<String, NML_ERROR_KIND_COUNT, _>(|index| format!("nml-kind-{index}"));
+    cms_status_code: s32 out => "cms-status-code";
+    cms_status_known: bit out => "cms-status-known";
+    cms_status_unknown: bit out => "cms-status-unknown";
+    cms_status_kind: bit[CMS_STATUS_KIND_COUNT] out => std::array::from_fn::<String, CMS_STATUS_KIND_COUNT, _>(|index| format!("cms-kind-{index}"));
+    linuxcnc_error_active: bit out => "linuxcnc-error-active";
+    linuxcnc_warning_active: bit out => "linuxcnc-warning-active";
+    unknown_code_active: bit out => "unknown-code-active";
+    active_error_mask_low: u32 out => "active-error-mask-low";
+    active_error_mask_high: u32 out => "active-error-mask-high";
+    active_warning_mask_low: u32 out => "active-warning-mask-low";
+    active_warning_mask_high: u32 out => "active-warning-mask-high";
+    latched_error_mask_low: u32 out => "latched-error-mask-low";
+    latched_error_mask_high: u32 out => "latched-error-mask-high";
+    latched_warning_mask_low: u32 out => "latched-warning-mask-low";
+    latched_warning_mask_high: u32 out => "latched-warning-mask-high";
+    unknown_domain_mask_low: u32 out => "unknown-domain-mask-low";
+    unknown_domain_mask_high: u32 out => "unknown-domain-mask-high";
+    diagnostic_count: u32 out => "diagnostic-count";
+    unknown_code_count: u32 out => "unknown-code-count";
+    diagnostic_transitions: u32 out => "diagnostic-transitions";
+    latest_code_domain: s32 out => "latest-code-domain";
+    latest_code_low: u32 out => "latest-code-low";
+    latest_code_high: u32 out => "latest-code-high";
+    latest_journal_sequence_low: u32 out => "latest-journal-sequence-low";
+    latest_journal_sequence_high: u32 out => "latest-journal-sequence-high";
+    latest_severity: s32 out => "latest-severity";
+    latest_action: s32 out => "latest-action";
+    latest_code_known: bit out => "latest-code-known";
+    latest_code_unknown: bit out => "latest-code-unknown";
+    clear_latched: bit in => "clear-latched";
+    serial_bridge_fault_valid_in: bit in => "serial-bridge-fault-valid-in";
+    spindle_fault_latched_in: bit in => "spindle-fault-latched-in";
+    controller_fault_snapshot_generation_in: u32 in => "ctl-fd-generation-in";
+    controller_fault_code_in: s32 in => "controller-fault-code-in";
+    serial_bridge_snapshot_generation_in: u32 in => "ser-fd-generation-in";
+    serial_bridge_fault_code_in: s32 in => "serial-bridge-fault-code-in";
+    h100_diagnostic_snapshot_generation_in: u32 in => "h100-fd-generation-in";
+    spindle_fault_code_in: u32 in => "spindle-fault-code-in";
+    spindle_block_code_in: u32 in => "spindle-block-code-in";
+    h100_vfd_fault_code_in: u32 in => "h100-vfd-fault-code-in";
+    h100_main_status_in: u32 in => "h100-main-status-in";
+    snapshot_abi_version: u32 out => "snapshot-abi-version";
+    snapshot_struct_size: u32 out => "snapshot-struct-size";
+    machine_on: bit out => "machine-on";
+    estopped: bit out => "estopped";
+    manual_mode: bit out => "manual-mode";
+    joint_mode: bit out => "joint-mode";
+    teleop_mode: bit out => "teleop-mode";
+    interp_idle: bit out => "interp-idle";
+    homed: bit[3] out => std::array::from_fn::<String, 3, _>(|index| format!("joint-{index}-homed"));
+    homing: bit[3] out => std::array::from_fn::<String, 3, _>(|index| format!("joint-{index}-homing"));
+    axis_stopped: bit[3] out => std::array::from_fn::<String, 3, _>(|index| format!("axis-{index}-stopped"));
     }
-
-    fn spec(name: impl Into<String>, kind: Kind, direction: &'static str) -> Spec {
-        Spec {
-            name: name.into(),
-            kind,
-            direction,
-        }
-    }
-
-    fn schema() -> Vec<Spec> {
-        let mut pins = vec![spec(SNAPSHOT_GENERATION_PIN, Kind::U32, "out")];
-        pins.extend(CONNECTION_BIT_OUTPUT_PINS.map(|name| spec(name, Kind::Bit, "out")));
-        pins.extend(RUNTIME_U32_OUTPUT_PINS.map(|name| spec(name, Kind::U32, "out")));
-        pins.extend(DIAGNOSTIC_BIT_OUTPUT_PINS.map(|name| spec(name, Kind::Bit, "out")));
-        pins.extend(DIAGNOSTIC_U32_OUTPUT_PINS.map(|name| spec(name, Kind::U32, "out")));
-        pins.extend(DIAGNOSTIC_S32_OUTPUT_PINS.map(|name| spec(name, Kind::S32, "out")));
-        pins.push(spec(CLEAR_LATCHED_INPUT_PIN, Kind::Bit, "in"));
-        pins.extend(MACHINE_BIT_OUTPUT_PINS.map(|name| spec(name, Kind::Bit, "out")));
-        for index in 0..3 {
-            pins.push(spec(format!("joint-{index}-homed"), Kind::Bit, "out"));
-            pins.push(spec(format!("joint-{index}-homing"), Kind::Bit, "out"));
-            pins.push(spec(format!("axis-{index}-stopped"), Kind::Bit, "out"));
-        }
-        pins
-    }
-
-    #[test]
-    fn exported_hal_schema_is_exact_complete_and_unique() {
-        let expected = [
-            ("snapshot-generation", Kind::U32, "out"),
-            ("connected", Kind::Bit, "out"),
-            ("fault", Kind::Bit, "out"),
-            ("task-heartbeat", Kind::U32, "out"),
-            ("publications", Kind::U32, "out"),
-            ("poll-errors", Kind::U32, "out"),
-            ("nml-error-known", Kind::Bit, "out"),
-            ("cms-status-known", Kind::Bit, "out"),
-            ("linuxcnc-error-active", Kind::Bit, "out"),
-            ("linuxcnc-warning-active", Kind::Bit, "out"),
-            ("unknown-code-active", Kind::Bit, "out"),
-            ("active-error-mask-low", Kind::U32, "out"),
-            ("active-error-mask-high", Kind::U32, "out"),
-            ("active-warning-mask-low", Kind::U32, "out"),
-            ("active-warning-mask-high", Kind::U32, "out"),
-            ("latched-error-mask-low", Kind::U32, "out"),
-            ("latched-error-mask-high", Kind::U32, "out"),
-            ("latched-warning-mask-low", Kind::U32, "out"),
-            ("latched-warning-mask-high", Kind::U32, "out"),
-            ("unknown-domain-mask-low", Kind::U32, "out"),
-            ("unknown-domain-mask-high", Kind::U32, "out"),
-            ("diagnostic-count", Kind::U32, "out"),
-            ("unknown-code-count", Kind::U32, "out"),
-            ("diagnostic-transitions", Kind::U32, "out"),
-            ("latest-code-low", Kind::U32, "out"),
-            ("latest-code-high", Kind::U32, "out"),
-            ("snapshot-abi-version", Kind::U32, "out"),
-            ("snapshot-struct-size", Kind::U32, "out"),
-            ("nml-error-code", Kind::S32, "out"),
-            ("cms-status-code", Kind::S32, "out"),
-            ("latest-code-domain", Kind::S32, "out"),
-            ("latest-severity", Kind::S32, "out"),
-            ("latest-action", Kind::S32, "out"),
-            ("clear-latched", Kind::Bit, "in"),
-            ("machine-on", Kind::Bit, "out"),
-            ("estopped", Kind::Bit, "out"),
-            ("manual-mode", Kind::Bit, "out"),
-            ("joint-mode", Kind::Bit, "out"),
-            ("teleop-mode", Kind::Bit, "out"),
-            ("interp-idle", Kind::Bit, "out"),
-            ("joint-0-homed", Kind::Bit, "out"),
-            ("joint-0-homing", Kind::Bit, "out"),
-            ("axis-0-stopped", Kind::Bit, "out"),
-            ("joint-1-homed", Kind::Bit, "out"),
-            ("joint-1-homing", Kind::Bit, "out"),
-            ("axis-1-stopped", Kind::Bit, "out"),
-            ("joint-2-homed", Kind::Bit, "out"),
-            ("joint-2-homing", Kind::Bit, "out"),
-            ("axis-2-stopped", Kind::Bit, "out"),
-        ]
-        .map(|(name, kind, direction)| spec(name, kind, direction));
-        let actual = schema();
-        assert_eq!(actual, expected);
-        assert_eq!(actual.len(), 49);
-        assert_eq!(
-            actual
-                .iter()
-                .map(|pin| pin.name.as_str())
-                .collect::<BTreeSet<_>>()
-                .len(),
-            actual.len(),
-            "HAL pin suffixes must be unique"
-        );
+    groups {
+        controller_fault_evidence: ControllerFaultEvidencePins;
+        serial_bridge_fault_evidence: SerialBridgeFaultEvidencePins;
+        h100_fault_evidence: H100FaultEvidencePins;
     }
 }

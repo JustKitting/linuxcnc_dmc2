@@ -1,15 +1,34 @@
 use std::ffi::OsString;
+use std::path::{Path, PathBuf};
 
 use crate::error::{Error, OwnerMatch};
 use crate::platform::{CommandSpec, Platform};
 use crate::validation::{require_executable, run};
 
 pub const CONFLICT_PATTERNS: &[&str] = &[
-    "[l]inuxcnc.*dmc2.ini",
+    "[/]usr/bin/[l]inuxcnc([[:space:]]|$)",
+    "[l]inuxcncsvr",
+    "[m]illtask",
+    "[d]mc2-serial-bridge",
+    "[d]mc2-task-monitor",
     "[p]endant_cnc/control.py.*--live",
     "[h]alrun",
     "[r]tapi_app",
 ];
+pub const LINUXCNC_LOCK_PATH: &str = "/tmp/linuxcnc.lock";
+
+pub fn prepare_exclusive_start(platform: &dyn Platform) -> Result<(), Error> {
+    assert_exclusive(platform)?;
+    let lock = Path::new(LINUXCNC_LOCK_PATH);
+    platform.remove_file_if_exists(lock).map_err(|error| {
+        Error::os(
+            "remove proven-stale LinuxCNC lock",
+            PathBuf::from(lock),
+            error,
+        )
+    })?;
+    Ok(())
+}
 
 pub fn assert_exclusive(platform: &dyn Platform) -> Result<(), Error> {
     let pgrep = require_executable(platform, "pgrep")?;

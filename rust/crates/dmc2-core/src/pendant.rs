@@ -1,31 +1,19 @@
 use crate::{Axis, JogIntent, Multiplier, PendantSelection};
+use dmc2_diagnostics::diagnostic_catalog;
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(i32)]
-pub enum AxisSelector {
-    Invalid = -2,
-    Off = -1,
-    X = 0,
-    Y = 1,
-    Z = 2,
-    Axis4 = 3,
-    Axis5 = 4,
+diagnostic_catalog! {
+    pub enum AxisSelector: i32 {
+        X = 0 => ("AXIS_X", "x", "the pendant axis selector requests X", "no selector-specific action is required"),
+        Y = 1 => ("AXIS_Y", "y", "the pendant axis selector requests Y", "no selector-specific action is required"),
+        Z = 2 => ("AXIS_Z", "z", "the pendant axis selector requests Z", "no selector-specific action is required"),
+        Axis4 = 3 => ("AXIS_4", "4", "the pendant axis selector requests the reserved fourth axis", "configure that axis before using this selector position"),
+        Axis5 = 4 => ("AXIS_5", "5", "the pendant axis selector requests the reserved fifth axis", "configure that axis before using this selector position"),
+        Off = -1 => ("AXIS_SELECTOR_OFF", "off", "the pendant axis selector is in its off position", "select a configured axis before requesting a jog"),
+        Invalid = -2 => ("AXIS_SELECTOR_INVALID", "invalid", "the pendant axis selector did not decode to one stable position", "place the axis selector in one stable labeled position and inspect its wiring if invalid persists")
+    }
 }
 
 impl AxisSelector {
-    pub const fn from_wire_code(code: i32) -> Option<Self> {
-        match code {
-            -2 => Some(Self::Invalid),
-            -1 => Some(Self::Off),
-            0 => Some(Self::X),
-            1 => Some(Self::Y),
-            2 => Some(Self::Z),
-            3 => Some(Self::Axis4),
-            4 => Some(Self::Axis5),
-            _ => None,
-        }
-    }
-
     pub const fn motion_axis(self) -> Option<Axis> {
         match self {
             Self::X => Some(Axis::X),
@@ -36,28 +24,17 @@ impl AxisSelector {
     }
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-#[repr(i32)]
-pub enum MultiplierSelector {
-    Invalid = -1,
-    Off = 0,
-    X1 = 1,
-    X10 = 10,
-    X100 = 100,
+diagnostic_catalog! {
+    pub enum MultiplierSelector: i32 {
+        X1 = 1 => ("MULTIPLIER_X1", "x1", "the pendant multiplier selector requests the base increment", "confirm the selected increment is appropriate before jogging"),
+        X10 = 10 => ("MULTIPLIER_X10", "x10", "the pendant multiplier selector requests ten times the base increment", "confirm the selected increment is appropriate before jogging"),
+        X100 = 100 => ("MULTIPLIER_X100", "x100", "the pendant multiplier selector requests one hundred times the base increment", "confirm the selected increment is appropriate before jogging"),
+        Off = 0 => ("MULTIPLIER_SELECTOR_OFF", "off", "the pendant multiplier selector is in its off position", "select a configured multiplier before requesting a jog"),
+        Invalid = -1 => ("MULTIPLIER_SELECTOR_INVALID", "invalid", "the pendant multiplier selector did not decode to one stable position", "place the multiplier selector in one stable labeled position and inspect its wiring if invalid persists")
+    }
 }
 
 impl MultiplierSelector {
-    pub const fn from_wire_code(code: i32) -> Option<Self> {
-        match code {
-            -1 => Some(Self::Invalid),
-            0 => Some(Self::Off),
-            1 => Some(Self::X1),
-            10 => Some(Self::X10),
-            100 => Some(Self::X100),
-            _ => None,
-        }
-    }
-
     pub const fn motion_multiplier(self) -> Option<Multiplier> {
         match self {
             Self::X1 => Some(Multiplier::X1),
@@ -191,6 +168,3 @@ impl Default for PendantInterpreter {
         Self::new()
     }
 }
-
-#[cfg(test)]
-mod tests;

@@ -55,27 +55,6 @@
       </table>
     </labelframe>
 
-    <labelframe text="POSITION AND HOMING" font='("Helvetica", 10, "bold")'
-                padx="8" pady="4">
-      <hbox>
-        <boxexpand expand="no"/>
-        <boxfill fill="none"/>
-        <boxanchor anchor="w"/>
-        <button halpin='"home-all"' text='"HOME ALL"'
-                font='("Helvetica", 10, "bold")' width="12" padx="8" pady="2"/>
-        <label text='"      "' font='("Helvetica", 10)' width="6" anchor='"w"'/>
-        <label text='"KNOWN"' font='("Helvetica", 10, "bold")'
-               width="8" anchor='"w"'/>
-        <rectled halpin='"position-known"' height="16" width="22"
-                 on_color='"green"' off_color='"gray35"'/>
-        <label text='"      "' font='("Helvetica", 10)' width="6" anchor='"w"'/>
-        <label text='"UNKNOWN"' font='("Helvetica", 10, "bold")'
-               width="10" anchor='"w"'/>
-        <rectled halpin='"position-unknown"' height="16" width="22"
-                 on_color='"red"' off_color='"gray35"'/>
-      </hbox>
-    </labelframe>
-
     <hbox>
       <boxfill fill="both"/>
       <labelframe text="MACHINE COORDINATES (mm)" font='("Helvetica", 10, "bold")'
@@ -189,28 +168,28 @@
       </labelframe>
     </hbox>
 
-    <labelframe text="PUCK CONNECTIVITY TEST - NO MOTION"
+    <labelframe text="CONTACT CONNECTIVITY - NO MOTION"
                 font='("Helvetica", 10, "bold")' padx="8" pady="5">
       <hbox>
         <boxexpand expand="no"/>
         <boxfill fill="none"/>
         <boxanchor anchor="w"/>
-        <button halpin='"puck-test-start"' text='"START TEST"'
+        <button halpin='"contact-test-start"' text='"START TEST"'
                 font='("Helvetica", 10, "bold")' width="12" padx="8" pady="2"/>
         <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
-        <button halpin='"puck-test-stop"' text='"STOP TEST"'
+        <button halpin='"contact-test-stop"' text='"STOP TEST"'
                 font='("Helvetica", 10, "bold")' width="12" padx="8" pady="2"/>
         <label text='"      "' font='("Helvetica", 10)' width="6" anchor='"w"'/>
         <label text='"ACTIVE"' font='("Helvetica", 10, "bold")'
                width="8" anchor='"w"'/>
-        <led halpin='"puck-test-active"' size="16"
+        <led halpin='"contact-test-active"' size="16"
              on_color='"yellow"' off_color='"gray35"'/>
         <label text='"      "' font='("Helvetica", 10)' width="6" anchor='"w"'/>
         <label text='"Seconds left"' font='("Helvetica", 10)'
                width="12" anchor='"w"'/>
-        <number halpin='"puck-test-time-left"' format='"6.1f"'
+        <number halpin='"contact-test-time-left"' format='"6.1f"'
                 font='("Helvetica", 10, "bold")' width="8" anchor='"w"'/>
-        <label text='"      PASS = Puck / IN0 SEEN"' font='("Helvetica", 10, "bold")'
+        <label text='"      PASS = IN0 or IN1 SEEN"' font='("Helvetica", 10, "bold")'
                width="29" anchor='"w"'/>
       </hbox>
     </labelframe>

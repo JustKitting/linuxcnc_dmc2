@@ -1,0 +1,56 @@
+%
+(DMC2 Y PROBE-OFFSET: SELECTED CONTACT INPUT TO FIXED PUCK)
+(Authorized values: -Y 40.00 mm maximum at 0.10 mm/s.)
+(After contact: +Y 1.00 mm at 0.10 mm/s.)
+(No X, Z, or spindle command is present.)
+
+#<maximum_travel_mm> = 40.00
+#<approach_feed_mm_min> = 6.00
+#<backoff_distance_mm> = 1.00
+#<backoff_feed_mm_min> = 6.00
+
+G21 G91 G94
+
+M65 P0
+M66 P1 L4 Q1.0
+o<dmc2_y_probe_initial_power_off> if [#5399 LT 0]
+    (DEBUG,DMC2 Y PROBE REFUSED: OUT5 gate did not report off)
+    G90
+    M2
+o<dmc2_y_probe_initial_power_off> endif
+
+M64 P0
+M66 P1 L3 Q1.0
+o<dmc2_y_probe_power_on> if [#5399 LT 0]
+    M65 P0
+    (DEBUG,DMC2 Y PROBE REFUSED: OUT5 gate did not report on)
+    G90
+    M2
+o<dmc2_y_probe_power_on> endif
+
+o<dmc2_y_probe_initial_open> if [#<_hal[motion.probe-input]> NE 0]
+    M65 P0
+    (DEBUG,DMC2 Y PROBE REFUSED: selected contact input is already active)
+    G90
+    M2
+o<dmc2_y_probe_initial_open> endif
+
+(Exactly -Y, maximum 40.00 mm, at 6.00 mm/min = 0.10 mm/s.)
+G38.2 Y[-#<maximum_travel_mm>] F#<approach_feed_mm_min>
+#<probe_contact_machine_y> = #5062
+(DEBUG,DMC2 Y PROBE CONTACT: Y = #<probe_contact_machine_y> mm)
+
+(Exactly +Y 1.00 mm at 6.00 mm/min = 0.10 mm/s.)
+G1 Y#<backoff_distance_mm> F#<backoff_feed_mm_min>
+#<backoff_machine_y> = #<_abs_y>
+
+M65 P0
+M66 P1 L4 Q1.0
+o<dmc2_y_probe_final_power_off> if [#5399 LT 0]
+    (DEBUG,DMC2 Y PROBE WARNING: OUT5 gate did not report off after backoff)
+o<dmc2_y_probe_final_power_off> endif
+
+G90
+(DEBUG,DMC2 Y PROBE BACKOFF COMPLETE: machine Y = #<backoff_machine_y> mm)
+M2
+%

@@ -9,7 +9,8 @@ use crate::application::diagnostic_state::DiagnosticState;
 use crate::application::error_channel::{
     ErrorChannel, ErrorChannelFault, ErrorChannelRead, ErrorJournal, ErrorMessageRecord,
 };
-use crate::application::hal::HalPublisher;
+use crate::application::hal::{HalPublisher, PublisherError};
+use crate::application::journal_error::JournalError;
 use crate::application::nml::{PollCodes, PollOutcome, StatusChannel, TransportStatus};
 use crate::diagnostics::DiagnosticReport;
 use crate::snapshot::NativeSnapshot;
@@ -19,6 +20,7 @@ use super::contracts::{
     StatusReader,
 };
 use super::coordinator::RuntimeCoordinator;
+use super::error::{NativeRuntimeError, RequiredRuntimePath};
 
 const POLL_PERIOD: Duration = Duration::from_millis(10);
 
@@ -67,7 +69,7 @@ impl JournalSink for ErrorJournal {
         &mut self,
         transport: TransportStatus,
         record: &ErrorMessageRecord,
-    ) -> Result<u64, String> {
+    ) -> Result<u64, JournalError> {
         ErrorJournal::append(self, transport, record)
     }
 }
@@ -85,7 +87,7 @@ impl HalSink for HalPublisher {
         transport: TransportStatus,
         diagnostics: &DiagnosticReport,
         diagnostic_state: &mut DiagnosticState,
-    ) {
+    ) -> Result<(), PublisherError> {
         HalPublisher::publish(
             self,
             snapshot,
@@ -94,7 +96,7 @@ impl HalSink for HalPublisher {
             transport,
             diagnostics,
             diagnostic_state,
-        );
+        )
     }
 }
 
@@ -124,18 +126,26 @@ impl RuntimeReporter for ConsoleReporter {
     }
 }
 
-pub(in crate::application) fn run(args: Arguments) -> Result<(), String> {
-    let error_journal_path = args.error_journal.ok_or_else(|| {
-        "runtime task monitor requires --error-journal PATH for lossless error ownership".to_owned()
-    })?;
-    let error_journal = ErrorJournal::create(&error_journal_path)?;
+pub(in crate::application) fn run(args: Arguments) -> Result<(), NativeRuntimeError> {
+    let error_journal_path = args
+        .error_journal
+        .ok_or(NativeRuntimeError::MissingRequiredPath(
+            RequiredRuntimePath::ErrorJournal,
+        ))?;
+    let codes = PollCodes::required();
+    let error_journal = ErrorJournal::create(&error_journal_path, codes)?;
     let nml_file = CString::new(args.nml_file.as_os_str().as_bytes())
-        .map_err(|_| "NML file path contained a NUL byte".to_owned())?;
-    let hal = HalPublisher::new(&args.component)?;
+        .map_err(NativeRuntimeError::NmlPathContainsNul)?;
+    let diagnostic_journal_path =
+        args.diagnostic_journal
+            .ok_or(NativeRuntimeError::MissingRequiredPath(
+                RequiredRuntimePath::DiagnosticJournal,
+            ))?;
+    let hal = HalPublisher::new(&args.component, &diagnostic_journal_path)?;
     let now = Instant::now();
     let mut runtime = RuntimeCoordinator::new(
         nml_file,
-        PollCodes::required(),
+        codes,
         NativeStatusConnector,
         NativeErrorConnector,
         error_journal,

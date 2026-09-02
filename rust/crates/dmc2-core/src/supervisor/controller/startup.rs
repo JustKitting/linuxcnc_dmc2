@@ -62,13 +62,17 @@ impl LinuxCncPendantSupervisor {
                 axis,
                 motor,
                 delta_pulses: -BOUNCE_PULSES,
-                speed_mm_per_minute: BOUNCE_SPEED_MM_PER_MINUTE,
+                target_rate_mm_per_minute: BOUNCE_SPEED_MM_PER_MINUTE,
             },
             joint_jog: !inputs.machine.all_homed(),
             start_count,
+            start_position_pulses: inputs.position_feedback_by_motor[motor] * PULSES_PER_MM as f64,
             target_count: start_count.wrapping_sub(BOUNCE_PULSES),
             target_position_pulses: inputs.position_feedback_by_motor[motor] * PULSES_PER_MM as f64
                 - BOUNCE_PULSES as f64,
+            command_elapsed_ns: 0,
+            consumer_active_seen: false,
+            feedback_progress_seen: false,
         });
         self.pending = None;
         self.collision_motor = Some(motor);

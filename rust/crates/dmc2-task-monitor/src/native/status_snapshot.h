@@ -266,10 +266,6 @@ uint32_t dmc2_task_status_snapshot_abi_version(void) DMC2_NOEXCEPT;
 size_t dmc2_task_status_snapshot_size(void) DMC2_NOEXCEPT;
 void dmc2_task_status_snapshot_initialize(
     dmc2_task_status_snapshot *snapshot) DMC2_NOEXCEPT;
-int dmc2_task_status_copy_self_test(
-    uint32_t *native_copy_fields,
-    size_t *failure_offset) DMC2_NOEXCEPT;
-uint32_t dmc2_task_status_copy_signature_rounds(void) DMC2_NOEXCEPT;
 dmc2_task_status_channel *dmc2_task_status_open(
     const char *nml_file,
     int32_t *nml_error,
