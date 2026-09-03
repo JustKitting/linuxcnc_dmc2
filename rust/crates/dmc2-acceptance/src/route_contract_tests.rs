@@ -63,11 +63,11 @@ fn hardwood_cut_cannot_reach_motion_before_clockwise_and_speed_confirmation() {
 }
 
 #[test]
-fn hardwood_resume_starts_at_layer_two_and_stays_inside_y_soft_limits() {
+fn hardwood_resume_starts_at_rough_pass_four_and_stays_inside_y_soft_limits() {
     assert!(HARDWOOD_ROUTE.contains("#<y_home> = 173.0"));
     assert!(HARDWOOD_ROUTE.contains("#<y_min> = 0.01"));
     assert!(HARDWOOD_ROUTE.contains("#<y_max> = 172.99"));
-    assert!(HARDWOOD_ROUTE.contains("#<completed_rough_passes> = 1"));
+    assert!(HARDWOOD_ROUTE.contains("#<completed_rough_passes> = 3"));
     assert!(HARDWOOD_ROUTE
         .contains("#<depth_removed> = [#<completed_rough_passes> * #<rough_stepdown>]"));
     assert!(HARDWOOD_ROUTE.contains("#<current_y> = #<y_min>"));
@@ -75,10 +75,10 @@ fn hardwood_resume_starts_at_layer_two_and_stays_inside_y_soft_limits() {
 
     let x_position = HARDWOOD_ROUTE
         .find("G53 G1 X#<x_max> F#<feed_mm_min>")
-        .expect("resume route must position X at the pass-2 start corner");
+        .expect("resume route must position X at the pass-4 start corner");
     let y_position = HARDWOOD_ROUTE
         .find("G53 G1 Y#<y_min> F#<feed_mm_min>")
-        .expect("resume route must position Y at the pass-2 start corner");
+        .expect("resume route must position Y at the pass-4 start corner");
     let pass_loop = HARDWOOD_ROUTE
         .find("o<dmc2_log_passes> while")
         .expect("resume route must retain the pass loop");
