@@ -96,12 +96,24 @@ a `milltask` owner departure during a root observed nonterminal is represented
 directly rather than inferred from a later stale heartbeat.
 
 For `milltask`, a matching LinuxCNC-generated `/tmp/backtrace.<pid>` is copied
-to the durable log directory before the terminal event is committed.
+to the durable log directory before the terminal event is committed. The same
+capture is performed by the session subreaper if an actual `milltask` workload
+is orphaned because its direct owner failed first.
 The process catalog also raises each tracked child's soft `RLIMIT_CORE` to its
 inherited hard limit before `exec`. The inherited and requested values plus the
 host's `core_pattern`, `core_uses_pid`, and `suid_dumpable` settings are
-recorded. This permits a kernel core for otherwise-uncaught dumpable crashes;
-it does not claim that a core exists when the wait status or host policy says
+recorded. When the retained `waitid` status reports a core-generating death,
+the owner resolves this host's file-based core policy, rejects a stale or
+non-regular source, opens it without following a symbolic link, verifies its
+device/inode identity and size, and synchronizes a PID/timestamp-named copy in
+the lifecycle-journal directory before `wait4` reaps the child. Keeping the
+child waitable during the potentially large copy means an outer subreaper can
+still recover its status if the direct owner itself fails. The terminal record
+contains the source and copy paths, source identity, size, selected working-
+directory evidence, and the exact failure state if no copy can be retained.
+Pipe handlers and
+percent-expanded core templates are identified explicitly rather than guessed.
+This does not claim that a core exists when the wait status or host policy says
 otherwise. In particular, the setuid `rtapi_app` remains subject to the host's
 setuid core-dump policy.
 
@@ -118,6 +130,15 @@ concurrent writers, Linux subreaper adoption, and zombie-safe owner identity.
 They also exercise an adopted descendant terminating while the session root
 continues to run and the LinuxCNC caught-fatal-signal behavior in which a
 matching SIGSEGV backtrace must override an apparent zero exit.
+Separate real SIGSEGV cases require a nonempty kernel core to be retained from
+both a direct child and an adopted session descendant. Static launch-coverage
+checks are bidirectional: every active live INI/HAL userspace launch must have
+a catalogued owner, every production direct-child catalog row must occur in the
+live profile, and the two hard-coded persistent processes must remain present
+in the pinned LinuxCNC source.
+An additional real-process case kills the direct owner with `SIGKILL`, then
+requires the outer subreaper to retain that exact owner status and the adopted
+workload's later `SIGSEGV` status and nonempty core.
 The complete lifecycle integration set is repeatedly run to cover the
 fork/`exec` classification race as well as the terminal path.
 Those tests establish the tracker mechanics. They are not a claim

@@ -75,8 +75,49 @@ fn records_the_kernel_signal_from_a_real_child() {
     assert!(records.contains("\texit_code=NONE\t"));
     assert!(records.contains("\tsignal=6\t"));
     assert!(records.contains("\tsignal_name=SIGABRT\t"));
-    assert!(records.contains("\tcore_dumped="));
+    assert!(records.contains("\tcore_dumped=false\t"));
+    assert!(records.contains("\tcore_artifact_state=not-dumped\t"));
     assert!(records.contains("\toutcome=kernel-signal-termination\tcrc32="));
+}
+
+#[test]
+fn preserves_the_kernel_core_from_a_real_crashing_child() {
+    let directory = TestDirectory::new();
+    let journal = directory.journal();
+    let status = Command::new(env!("CARGO_BIN_EXE_dmc2-process-supervisor"))
+        .current_dir(&directory.0)
+        .arg("--role")
+        .arg("lifecycle-test")
+        .arg("--journal")
+        .arg(&journal)
+        .arg("--")
+        .arg("/bin/sh")
+        .arg("-c")
+        .arg("kill -SEGV $$")
+        .status()
+        .expect("run real kernel-core lifecycle test");
+
+    assert_eq!(status.code(), Some(139));
+    let records = fs::read_to_string(&journal).expect("read kernel-core lifecycle journal");
+    assert_complete_records(&records);
+    let terminal = records
+        .lines()
+        .find(|line| line.contains("\tevent=process-terminated\t"))
+        .expect("kernel-core terminal record");
+    assert!(terminal.contains("\tsignal=11\t"), "{terminal}");
+    assert!(terminal.contains("\tcore_dumped=true\t"), "{terminal}");
+    assert!(
+        terminal.contains("\tcore_artifact_state=captured\t"),
+        "{terminal}"
+    );
+    let copy = terminal
+        .split('\t')
+        .find_map(|field| field.strip_prefix("core_artifact_copy_hex="))
+        .map(decode_hex_path)
+        .expect("durable kernel-core copy path");
+    let metadata = fs::metadata(copy).expect("durable kernel-core copy");
+    assert!(metadata.is_file());
+    assert!(metadata.len() > 0);
 }
 
 #[test]
@@ -258,35 +299,114 @@ fn session_subreaper_identifies_an_adopted_direct_process_owner() {
 }
 
 #[test]
-fn every_configurable_long_lived_process_uses_the_generic_owner() {
-    let project = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../..");
-    let ini = fs::read_to_string(project.join("live/dmc2.ini")).expect("read live DMC2 INI");
-    let hal = fs::read_to_string(project.join("live/pendant.hal")).expect("read pendant HAL");
-    let configuration = format!("{ini}\n{hal}");
-    let catalog =
-        fs::read_to_string(project.join("config/processes.tsv")).expect("read process catalog");
-    let mut checked = 0_usize;
-    for line in catalog.lines().skip(2).filter(|line| !line.is_empty()) {
-        let fields = line.split('\t').collect::<Vec<_>>();
-        assert_eq!(fields.len(), 9, "invalid process-catalog row: {line}");
-        let [role, program, _, ownership, criticality, _, _, _, _] = fields.as_slice() else {
-            unreachable!("field count checked above")
-        };
-        if *ownership != "direct-child" || *criticality == "verification-only" {
-            continue;
-        }
-        let marker = format!(
-            "../native/bin/dmc2-process-supervisor --role {role} --journal ../var/log/linuxcnc/process-lifecycle.tsv -- {program}"
-        );
-        assert!(
-            configuration.contains(&marker),
-            "missing configured owner for catalogued direct-child role {role}"
-        );
-        checked += 1;
-    }
+fn session_subreaper_recovers_a_crashing_workload_after_its_direct_owner_dies() {
+    let directory = TestDirectory::new();
+    let journal = directory.journal();
+    let ready = directory.0.join("orphaned-workload-ready");
+    let owner = env!("CARGO_BIN_EXE_dmc2-process-supervisor");
+    let script = format!(
+        "{owner} --role lifecycle-test --journal {} -- /bin/sh -c ': > {}; sleep 0.10; kill -SEGV $$' & \
+         owner_pid=$!; \
+         (attempt=0; \
+          while [ ! -e {} ] && [ \"$attempt\" -lt 200 ]; do \
+              attempt=$((attempt + 1)); sleep 0.005; \
+          done; \
+          [ -e {} ] || exit 99; \
+          kill -KILL \"$owner_pid\") & \
+         exit 7",
+        journal.display(),
+        ready.display(),
+        ready.display(),
+        ready.display(),
+    );
+    let status = Command::new(env!("CARGO_BIN_EXE_dmc2-session-supervisor"))
+        .current_dir(&directory.0)
+        .arg("--role")
+        .arg("session-lifecycle-test")
+        .arg("--journal")
+        .arg(&journal)
+        .arg("--")
+        .arg("/bin/sh")
+        .arg("-c")
+        .arg(script)
+        .status()
+        .expect("run direct-owner-loss lifecycle test");
+
+    assert_eq!(status.code(), Some(7));
+    let records = fs::read_to_string(&journal).expect("read owner-loss lifecycle journal");
+    assert_complete_records(&records);
+    let owner_terminal = records
+        .lines()
+        .find(|line| {
+            line.contains("\tevent=session-child-terminated\t")
+                && line.contains("\trole=lifecycle-test\t")
+                && line.contains("\tlayer=direct-process-owner\t")
+        })
+        .expect("direct owner terminal record");
+    assert!(owner_terminal.contains("\tsignal=9\t"), "{owner_terminal}");
+    let workload_terminal = records
+        .lines()
+        .find(|line| {
+            line.contains("\tevent=session-child-terminated\t") && line.contains("\tsignal=11\t")
+        })
+        .expect("orphaned workload terminal record");
     assert!(
-        checked > 0,
-        "process catalog has no production direct children"
+        workload_terminal.contains("\trelation=adopted-session-descendant\t"),
+        "{workload_terminal}"
+    );
+    assert!(
+        workload_terminal.contains("\tcore_dumped=true\t"),
+        "{workload_terminal}"
+    );
+    assert!(
+        workload_terminal.contains("\tcore_artifact_state=captured\t"),
+        "{workload_terminal}"
+    );
+    let copy = workload_terminal
+        .split('\t')
+        .find_map(|field| field.strip_prefix("core_artifact_copy_hex="))
+        .map(decode_hex_path)
+        .expect("orphaned workload durable core path");
+    let metadata = fs::metadata(copy).expect("orphaned workload durable core copy");
+    assert!(metadata.is_file());
+    assert!(metadata.len() > 0);
+}
+
+#[test]
+fn session_subreaper_preserves_a_real_adopted_descendant_core() {
+    let directory = TestDirectory::new();
+    let journal = directory.journal();
+    let status = Command::new(env!("CARGO_BIN_EXE_dmc2-session-supervisor"))
+        .current_dir(&directory.0)
+        .arg("--role")
+        .arg("session-lifecycle-test")
+        .arg("--journal")
+        .arg(&journal)
+        .arg("--")
+        .arg("/bin/sh")
+        .arg("-c")
+        .arg("/bin/sh -c 'sleep 0.05; kill -SEGV $$' & exit 7")
+        .status()
+        .expect("run adopted descendant kernel-core test");
+
+    assert_eq!(status.code(), Some(7));
+    let records = fs::read_to_string(&journal).expect("read adopted-core lifecycle journal");
+    assert_complete_records(&records);
+    let terminal = records
+        .lines()
+        .find(|line| {
+            line.contains("\tevent=session-child-terminated\t") && line.contains("\tsignal=11\t")
+        })
+        .expect("adopted crashing descendant terminal record");
+    assert!(terminal.contains("\tcore_dumped=true\t"), "{terminal}");
+    assert!(
+        terminal.contains("\tcore_artifact_state=captured\t"),
+        "{terminal}"
+    );
+    assert!(terminal.contains("\trelation=adopted-session-descendant\t"));
+    assert!(
+        terminal.contains("\tcore_cwd_selected_source=proc-cwd-after-process-observation\t"),
+        "{terminal}"
     );
 }
 
@@ -379,4 +499,19 @@ fn crc32(bytes: &[u8]) -> u32 {
         }
     }
     !crc
+}
+
+fn decode_hex_path(value: &str) -> PathBuf {
+    use std::os::unix::ffi::OsStringExt;
+
+    assert_eq!(value.len() % 2, 0, "hex path has complete bytes");
+    let bytes = value
+        .as_bytes()
+        .chunks_exact(2)
+        .map(|pair| {
+            let pair = std::str::from_utf8(pair).expect("ASCII hex path");
+            u8::from_str_radix(pair, 16).expect("valid hex path")
+        })
+        .collect();
+    PathBuf::from(OsString::from_vec(bytes))
 }

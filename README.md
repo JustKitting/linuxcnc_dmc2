@@ -438,10 +438,12 @@ artifacts. Abnormal process-probe results fail
 installation instead of being treated as proof that LinuxCNC is stopped.
 
 The driver overlay is pinned in `config/linuxcnc-driver-overlays.tsv`. It
-backports the `hm2_eth` portions of upstream commits `10dc650ad` and
-`cd8eb00ad`: bounds checks for queued Ethernet buffers and unconditional write
-queue reset after a failed `send()`. Upstream states that the old accumulating
-buffer path generated a segfault. The build verifies the pristine 2.9.10 base,
+backports the `hm2_eth` portions of upstream commits `10dc650ad`,
+`cd8eb00ad`, and `05de5742`: bounds checks for queued Ethernet buffers,
+unconditional write-queue reset after a failed `send()`, and initialization-
+aware read/write confirmation. Upstream states that the old accumulating
+buffer path generated a segfault; the third change prevents a false soft error
+before the first queued write. The build verifies the pristine 2.9.10 base,
 patch checksum, installed LinuxCNC version, and exported-symbol contract, then
 produces a reproducible staged module without editing the vendor checkout.
 
@@ -469,7 +471,8 @@ two DMC2 userspace adapters. Their shared, locked journal at
 `var/log/linuxcnc/process-lifecycle.tsv` retains catalogued ownership, exact
 invocations, zombie-safe owner identity, running and terminal-before-reap
 `/proc`/cgroup snapshots, independently checked `waitid` and `wait4` status,
-signal/core policy, and resource usage. The trackers do not
+signal/core policy, resource usage, matching LinuxCNC task backtraces, and
+identity-checked copies of file-based kernel cores. The trackers do not
 restart, stop, signal, or otherwise control the machine; see
 `docs/process-lifecycle-tracking.md` for the exact evidence boundary.
 

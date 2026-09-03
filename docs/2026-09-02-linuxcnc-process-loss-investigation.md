@@ -90,6 +90,14 @@ installed version, and ABI exports. Building stages an artifact only; live
 deployment and hardware behavior remain unverified until a separately ordered
 launch installs and loads it.
 
+A later upstream correction,
+`05de57424739e2b28e142015c69334a34faff329`, also applies cleanly after those
+two fixes. It prevents the queued-read path from comparing against
+uninitialized write-confirmation data before the first queued write, which
+could otherwise generate an invalid soft communication error. The overlay
+includes that exact change as fault-path hardening. It is not evidence for the
+historical `milltask` exit or `rtapi_app` SIGSEGV.
+
 ## Tracking correction
 
 Future launches use two independent ownership layers:
@@ -106,9 +114,12 @@ The corrected terminal path is deliberately two-stage:
 2. the tracker synchronizes the child's still-readable zombie `/proc` state,
    complete tracked-child membership, and cgroup resource/pressure counters;
 3. any matching LinuxCNC task backtrace is preserved;
-4. `wait4` then captures the authoritative raw status and complete resource
+4. a `waitid` status that reports a core-generating death causes the kernel
+   core to be identity-checked and copied into the durable journal directory
+   while the child remains waitable;
+5. `wait4` then captures the authoritative raw status and complete resource
    usage; and
-5. the journal records whether the independent `waitid` and `wait4`
+6. the journal records whether the independent `waitid` and `wait4`
    interpretations agree.
 
 Session terminal records include the LinuxCNC root PID and a separately
@@ -122,7 +133,10 @@ The session tracker also upgrades and journals an identity first seen in the
 fork-before-`exec` window, retaining both the temporary identity and final
 catalogued owner identity.
 Tracked children receive the data-selected soft core limit before `exec`, and
-the journal records both limits and the host core-dump policy.
+the journal records both limits and the host core-dump policy. A core copy is
+attempted by both the direct owner and session subreaper paths; absence,
+unsupported naming, external handling, rejection, and every copy failure are
+terminal data rather than silent omissions.
 
 All records are appended to
 `var/log/linuxcnc/process-lifecycle.tsv` under an exclusive lock, include a
@@ -139,7 +153,13 @@ Offline tests directly prove retained-zombie capture, real exit and signal
 status, `waitid`/`wait4` agreement, core-limit inheritance, concurrent journal
 writes, subreaper adoption, owner identity after death, descendant departure
 while the session root stays live, and preservation of a matching LinuxCNC
-SIGSEGV backtrace despite the child's later zero exit. They do not prove
+SIGSEGV backtrace despite the child's later zero exit. Real SIGSEGV tests also
+produce and preserve nonempty kernel cores through both the direct-owner and
+adopted-descendant paths. A direct-owner-loss case requires the outer
+subreaper to retain both the owner's real `SIGKILL` and its orphaned workload's
+later real `SIGSEGV` plus nonempty core. Bidirectional static checks reject a
+live INI/HAL userspace launch without a catalogued owner and reject a
+production direct catalog row without a live launch. These tests do not prove
 that the currently running older session used this new binary, nor do
 they establish the cause of the historical event. The live evidence boundary
 begins only after a separately authorized launch of the newly built tracker.
@@ -156,3 +176,4 @@ kernel signal auditing; it is not claimed by this implementation.
 - 2.9 backport: <https://github.com/LinuxCNC/linuxcnc/commit/ccb56bf04771713e800fde636de94a275d8143c2>
 - HostMot2 Ethernet bounds fix: <https://github.com/LinuxCNC/linuxcnc/commit/10dc650adf741da16f16ffe5a850e78b91aa3ec7>
 - HostMot2 failed-send queue reset: <https://github.com/LinuxCNC/linuxcnc/commit/cd8eb00ad7d31f81fd40e674987c6edbc3bed23c>
+- HostMot2 initialized write-confirmation tracking: <https://github.com/LinuxCNC/linuxcnc/commit/05de57424739e2b28e142015c69334a34faff329>

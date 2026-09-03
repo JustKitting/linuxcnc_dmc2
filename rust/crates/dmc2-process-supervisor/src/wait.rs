@@ -30,6 +30,10 @@ impl TerminalObservation {
         waitid_code_name(self.code)
     }
 
+    pub fn core_dumped(self) -> bool {
+        self.code == CLD_DUMPED
+    }
+
     pub fn event_fields(self, event: Event) -> Event {
         event
             .field("waitid_pid", self.pid)
@@ -107,15 +111,6 @@ impl WaitEvidence {
                 "rusage_involuntary_context_switches",
                 usage.involuntary_context_switches,
             )
-    }
-
-    pub fn kernel_outcome(self) -> &'static str {
-        match (self.status.signal(), self.status.code()) {
-            (Some(_), _) => "kernel-signal-termination",
-            (None, Some(0)) => "zero-exit",
-            (None, Some(_)) => "nonzero-exit",
-            _ => "unknown-wait-status",
-        }
     }
 }
 

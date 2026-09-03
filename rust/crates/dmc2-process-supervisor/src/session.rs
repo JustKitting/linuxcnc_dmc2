@@ -10,8 +10,10 @@ use std::process::{Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, SystemTimeError, UNIX_EPOCH};
 
-use crate::catalog::{self, Ownership, ProcessRole};
+use crate::backtrace::{self, BacktraceEvidence};
+use crate::catalog::{self, BacktraceKind, Ownership, ProcessRole};
 use crate::cli::{CliError, Invocation};
+use crate::core_artifact::{self, CoreArtifactEvidence, WorkingDirectoryEvidence};
 use crate::event::{encode_arguments, hex_bytes, Event};
 use crate::journal::{Journal, JournalError};
 use crate::limits::CoreDumpPlan;
@@ -87,6 +89,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
     verify_child_subreaper().map_err(SessionError::VerifySubreaper)?;
 
     let session_started_ns = unix_ns().map_err(SessionError::Clock)?;
+    let fallback_cwd = WorkingDirectoryEvidence::for_supervisor();
     let event = session_event(
         "session-supervisor-started",
         session_started_ns,
@@ -140,6 +143,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
     };
     let linuxcnc_pid = linuxcnc.id();
     let observed_at = Instant::now();
+    let observed_at_wall = SystemTime::now();
     let mut children = BTreeMap::new();
     let root = ObservedChild {
         role: invocation.role.name().to_owned(),
@@ -148,6 +152,8 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
         layer: "session-root",
         identity_source: "launcher-role",
         first_observed: observed_at,
+        first_observed_wall: observed_at_wall,
+        working_directory: WorkingDirectoryEvidence::for_process(linuxcnc_pid),
     };
     let event = child_started_event(supervisor_pid, linuxcnc_pid, &root);
     let mut retained_journal_errors = Vec::new();
@@ -176,6 +182,8 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
                             let event =
                                 child_reclassified_event(supervisor_pid, pid, existing, &observed);
                             observed.first_observed = existing.first_observed;
+                            observed.first_observed_wall = existing.first_observed_wall;
+                            observed.working_directory = existing.working_directory.clone();
                             append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
                             children.insert(pid, observed);
                         }
@@ -224,18 +232,35 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
                     } else {
                         "terminal-only"
                     };
-                    let child = children.get(&observation.pid).or(Some(&terminal_identity));
+                    let child = children.get(&observation.pid).unwrap_or(&terminal_identity);
                     let terminal_event = child_terminal_observed_event(
                         supervisor_pid,
                         linuxcnc_pid,
                         &session_root,
-                        child,
+                        Some(child),
                         &terminal_identity,
                         observation_state,
                         observation,
                         &children,
                     );
                     append_after_spawn(&mut journal, &terminal_event, &mut retained_journal_errors);
+                    let exit_ns = unix_ns_or_zero();
+                    let backtrace = session_backtrace(
+                        journal.path(),
+                        child,
+                        observation.pid,
+                        child.first_observed_wall,
+                        exit_ns,
+                    );
+                    let core_artifact = core_artifact::capture(
+                        journal.path(),
+                        observation.pid,
+                        observation.core_dumped(),
+                        &child.working_directory,
+                        &fallback_cwd,
+                        child.first_observed_wall,
+                        exit_ns,
+                    );
                     let evidence = match wait::reap_pid(observation.pid) {
                         Ok(evidence) => evidence,
                         Err(source) => {
@@ -264,8 +289,11 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
                         &session_root,
                         Some(&child),
                         observation_state,
+                        exit_ns,
                         observation,
                         evidence,
+                        &backtrace,
+                        &core_artifact,
                     );
                     append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
                     if evidence.pid == linuxcnc_pid {
@@ -335,6 +363,10 @@ fn child_started_event(supervisor_pid: u32, pid: u32, child: &ObservedChild) -> 
         .field("relation", child.relation)
         .field("layer", child.layer)
         .field("identity_source", child.identity_source)
+        .field(
+            "first_observed_unix_ns",
+            system_time_unix_ns(child.first_observed_wall),
+        )
         .field("child_pid", pid);
     let event = catalog_event_fields(event, child.catalog_role);
     process::child_event_fields(event, pid)
@@ -360,6 +392,10 @@ fn child_reclassified_event(
     .field("previous_relation", previous.relation)
     .field("previous_layer", previous.layer)
     .field("previous_identity_source", previous.identity_source)
+    .field(
+        "first_observed_unix_ns",
+        system_time_unix_ns(previous.first_observed_wall),
+    )
     .field(
         "elapsed_since_first_observed_ns",
         previous.first_observed.elapsed().as_nanos(),
@@ -403,6 +439,13 @@ fn child_terminal_observed_event(
         "terminal_identity_matches_initial",
         child.is_some_and(|child| child.role == terminal_identity.role),
     )
+    .field(
+        "first_observed_unix_ns",
+        child.map_or_else(
+            || "NONE".to_owned(),
+            |child| system_time_unix_ns(child.first_observed_wall).to_string(),
+        ),
+    )
     .field("observation_state", observation_state)
     .field("snapshot_phase", "terminal-before-reap");
     let event = session_root.event_fields(event, linuxcnc_pid);
@@ -418,8 +461,11 @@ fn child_terminated_event(
     session_root: &SessionRootObservation,
     child: Option<&ObservedChild>,
     observation_state: &'static str,
+    terminated_unix_ns: u128,
     observation: TerminalObservation,
     evidence: WaitEvidence,
+    backtrace: &BacktraceEvidence,
+    core_artifact: &CoreArtifactEvidence,
 ) -> Event {
     let (role, relation, observed_ns) = match child {
         Some(child) => (
@@ -431,7 +477,7 @@ fn child_terminated_event(
     };
     let event = session_event(
         "session-child-terminated",
-        unix_ns_or_zero(),
+        terminated_unix_ns,
         supervisor_pid,
     )
     .field("role", role)
@@ -442,13 +488,51 @@ fn child_terminated_event(
         child.map_or("unavailable-after-reap", |child| child.identity_source),
     )
     .field("observation_state", observation_state)
+    .field(
+        "first_observed_unix_ns",
+        child.map_or_else(
+            || "NONE".to_owned(),
+            |child| system_time_unix_ns(child.first_observed_wall).to_string(),
+        ),
+    )
     .field("elapsed_since_observed_ns", observed_ns)
     .field("waitid_wait4_consistent", observation.agrees_with(evidence));
     let event = session_root.event_fields(event, linuxcnc_pid);
     let event = catalog_event_fields(event, child.and_then(|child| child.catalog_role));
     let event = observation.event_fields(event);
-    let outcome = evidence.kernel_outcome();
-    evidence.event_fields(event).field("outcome", outcome)
+    let event = evidence.event_fields(event);
+    let event = backtrace.event_fields(event);
+    let event = core_artifact.event_fields(event);
+    let outcome = match (
+        evidence.status.signal(),
+        evidence.status.code(),
+        backtrace.reported_signal(),
+    ) {
+        (_, _, Some(8 | 11)) => "linuxcnc-handled-fatal-signal",
+        (Some(_), _, _) => "kernel-signal-termination",
+        (None, Some(0), _) => "zero-exit",
+        (None, Some(_), _) => "nonzero-exit",
+        _ => "unknown-wait-status",
+    };
+    event.field("outcome", outcome)
+}
+
+fn session_backtrace(
+    journal_path: &Path,
+    child: &ObservedChild,
+    child_pid: u32,
+    process_not_before: SystemTime,
+    exit_unix_ns: u128,
+) -> BacktraceEvidence {
+    if child.layer != "catalogued-workload" {
+        return BacktraceEvidence::NotApplicable;
+    }
+    match child.catalog_role.map(ProcessRole::backtrace) {
+        Some(BacktraceKind::LinuxCncTask) => {
+            backtrace::capture(journal_path, child_pid, process_not_before, exit_unix_ns)
+        }
+        Some(BacktraceKind::None) | None => BacktraceEvidence::NotApplicable,
+    }
 }
 
 #[derive(Debug)]
@@ -638,6 +722,7 @@ fn classify_child(pid: u32) -> ObservedChild {
         .and_then(|comm| catalog::identify_process_owner(comm).ok().flatten())
     {
         return ObservedChild::classified(
+            pid,
             role.name(),
             role,
             "direct-process-owner",
@@ -656,12 +741,14 @@ fn classify_child(pid: u32) -> ObservedChild {
                 .map(|role| (name, role))
         }) {
             Some((name, role)) => ObservedChild::classified(
+                pid,
                 name,
                 role,
                 "direct-process-owner",
                 "supervisor-command-line-role",
             ),
             None => ObservedChild::unknown(
+                pid,
                 "process-supervisor:unknown",
                 "direct-process-owner",
                 "unmatched",
@@ -670,15 +757,16 @@ fn classify_child(pid: u32) -> ObservedChild {
     }
     match catalog::identify_process(executable.as_deref().ok(), &cmdline, comm.as_deref()) {
         Ok(Some((role, source))) => {
-            ObservedChild::classified(role.name(), role, "catalogued-workload", source.name())
+            ObservedChild::classified(pid, role.name(), role, "catalogued-workload", source.name())
         }
         Ok(None) | Err(_) => match basename {
             Some(name) => ObservedChild::unknown(
+                pid,
                 format!("uncatalogued:{name}"),
                 "uncatalogued-descendant",
                 "proc-executable-basename-only",
             ),
-            None => ObservedChild::unknown("unknown", "unidentified-descendant", "unmatched"),
+            None => ObservedChild::unknown(pid, "unknown", "unidentified-descendant", "unmatched"),
         },
     }
 }
@@ -825,6 +913,12 @@ fn unix_ns_or_zero() -> u128 {
     unix_ns().unwrap_or(0)
 }
 
+fn system_time_unix_ns(value: SystemTime) -> u128 {
+    value
+        .duration_since(UNIX_EPOCH)
+        .map_or(0, |duration| duration.as_nanos())
+}
+
 struct ObservedChild {
     role: String,
     catalog_role: Option<ProcessRole>,
@@ -832,37 +926,49 @@ struct ObservedChild {
     layer: &'static str,
     identity_source: &'static str,
     first_observed: Instant,
+    first_observed_wall: SystemTime,
+    working_directory: WorkingDirectoryEvidence,
 }
 
 impl ObservedChild {
     fn classified(
+        pid: u32,
         name: impl Into<String>,
         role: ProcessRole,
         layer: &'static str,
         identity_source: &'static str,
     ) -> Self {
+        let first_observed = Instant::now();
+        let first_observed_wall = SystemTime::now();
         Self {
             role: name.into(),
             catalog_role: Some(role),
             relation: "adopted-session-descendant",
             layer,
             identity_source,
-            first_observed: Instant::now(),
+            first_observed,
+            first_observed_wall,
+            working_directory: WorkingDirectoryEvidence::for_process(pid),
         }
     }
 
     fn unknown(
+        pid: u32,
         name: impl Into<String>,
         layer: &'static str,
         identity_source: &'static str,
     ) -> Self {
+        let first_observed = Instant::now();
+        let first_observed_wall = SystemTime::now();
         Self {
             role: name.into(),
             catalog_role: None,
             relation: "adopted-session-descendant",
             layer,
             identity_source,
-            first_observed: Instant::now(),
+            first_observed,
+            first_observed_wall,
+            working_directory: WorkingDirectoryEvidence::for_process(pid),
         }
     }
 

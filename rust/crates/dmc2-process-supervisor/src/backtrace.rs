@@ -2,7 +2,11 @@ use std::fs::{self, File, OpenOptions};
 use std::io::{self, BufRead, BufReader, Write};
 use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
-use std::time::SystemTime;
+use std::time::{Duration, SystemTime};
+
+use crate::event::{hex_bytes, signal_name, Event};
+
+const FILE_TIMESTAMP_TOLERANCE: Duration = Duration::from_secs(1);
 
 #[derive(Debug)]
 pub enum BacktraceEvidence {
@@ -35,12 +39,56 @@ impl BacktraceEvidence {
             _ => None,
         }
     }
+
+    pub fn event_fields(&self, event: Event) -> Event {
+        let event = event.field(
+            "backtrace_timestamp_tolerance_ns",
+            FILE_TIMESTAMP_TOLERANCE.as_nanos(),
+        );
+        match self {
+            Self::NotApplicable => event.field("backtrace_state", "not-applicable"),
+            Self::Absent { source } => event
+                .field("backtrace_state", "absent")
+                .encoded_path_field("backtrace_source_hex", source),
+            Self::Captured {
+                source,
+                durable_copy,
+                reported_signal,
+            } => event
+                .field("backtrace_state", "captured")
+                .encoded_path_field("backtrace_source_hex", source)
+                .encoded_path_field("backtrace_copy_hex", durable_copy)
+                .field("backtrace_signal", optional_i32(*reported_signal))
+                .field(
+                    "backtrace_signal_name",
+                    reported_signal.map(signal_name).unwrap_or("NONE"),
+                ),
+            Self::Rejected { source, reason } => event
+                .field("backtrace_state", "rejected")
+                .encoded_path_field("backtrace_source_hex", source)
+                .field("backtrace_rejection", reason),
+            Self::CaptureFailed {
+                source,
+                operation,
+                error,
+            } => event
+                .field("backtrace_state", "capture-failed")
+                .encoded_path_field("backtrace_source_hex", source)
+                .field("backtrace_operation", operation)
+                .field("backtrace_error_kind", format!("{:?}", error.kind()))
+                .field("backtrace_raw_os_error", optional_i32(error.raw_os_error()))
+                .field(
+                    "backtrace_error_hex",
+                    hex_bytes(error.to_string().as_bytes()),
+                ),
+        }
+    }
 }
 
 pub fn capture(
     journal_path: &Path,
     child_pid: u32,
-    launched_at: SystemTime,
+    process_not_before: SystemTime,
     exit_unix_ns: u128,
 ) -> BacktraceEvidence {
     let source = PathBuf::from(format!("/tmp/backtrace.{child_pid}"));
@@ -65,7 +113,11 @@ pub fn capture(
     }
 
     match metadata.modified() {
-        Ok(modified) if modified < launched_at => {
+        Ok(modified)
+            if modified
+                .checked_add(FILE_TIMESTAMP_TOLERANCE)
+                .is_some_and(|latest_credible_time| latest_credible_time < process_not_before) =>
+        {
             return BacktraceEvidence::Rejected {
                 source,
                 reason: "predates-supervised-process",
@@ -162,4 +214,8 @@ fn copy_and_sync(source: &Path, destination: &Path) -> io::Result<()> {
 enum HeaderError {
     NoMatchingPid,
     Io(io::Error),
+}
+
+fn optional_i32(value: Option<i32>) -> String {
+    value.map_or_else(|| "NONE".to_owned(), |value| value.to_string())
 }

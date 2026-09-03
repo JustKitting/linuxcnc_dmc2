@@ -19,6 +19,10 @@ Runtime payloads remain ignored by Git.
   resource usage.
 - `process-backtrace-<pid>-<time>.txt` is a durable copy of a matching
   `/tmp/backtrace.<pid>` created by LinuxCNC's own `SIGSEGV`/`SIGFPE` handler.
+- `process-core-<pid>-<time>.core` is an identity-checked, synchronized copy
+  of a file-based kernel core retained before the owning tracker reaps that
+  child. The lifecycle record states explicitly when policy, naming, absence,
+  rejection, or an I/O failure prevents a copy.
 
 This tracking is passive. It never restarts, stops, enables, disables, homes,
 jogs, or otherwise changes the machine. LinuxCNC 2.9.10 catches `SIGINT` and

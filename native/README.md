@@ -22,8 +22,9 @@ checks. A live launch automatically invokes the
 transactional module synchronizer when any verified realtime module differs
 from LinuxCNC's fixed module directory; no separate operator install step is
 required. The overlay removes an upstream-confirmed `hm2_eth` queued-buffer
-segfault path but does not turn an offline build into a claim of live Ethernet
-or hardware verification.
+segfault path, resets a failed-send queue, and prevents a pre-first-write false
+soft error. It does not turn an offline build into a claim of live Ethernet or
+hardware verification.
 
 The build and launcher are locked to LinuxCNC 2.9.10. The task monitor uses its
 native NML status and error-channel interfaces only while running as part of

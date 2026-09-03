@@ -1,6 +1,7 @@
 mod backtrace;
 mod catalog;
 mod cli;
+mod core_artifact;
 mod event;
 mod journal;
 mod limits;

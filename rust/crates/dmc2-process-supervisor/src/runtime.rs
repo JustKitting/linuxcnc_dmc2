@@ -9,7 +9,8 @@ use std::time::{Instant, SystemTime, SystemTimeError, UNIX_EPOCH};
 use crate::backtrace::{self, BacktraceEvidence};
 use crate::catalog::{BacktraceKind, Ownership, ProcessRole};
 use crate::cli::{CliError, Invocation};
-use crate::event::{encode_arguments, hex_bytes, signal_name, Event};
+use crate::core_artifact::{self, CoreArtifactEvidence, WorkingDirectoryEvidence};
+use crate::event::{encode_arguments, hex_bytes, Event};
 use crate::journal::{Journal, JournalError};
 use crate::limits::CoreDumpPlan;
 use crate::process;
@@ -104,6 +105,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
 
     let launched_at_wall = SystemTime::now();
     let launched_at_monotonic = Instant::now();
+    let fallback_cwd = WorkingDirectoryEvidence::for_supervisor();
     let mut command = Command::new(&invocation.program);
     command.args(&invocation.arguments);
     core_dump_plan.configure(&mut command);
@@ -136,6 +138,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
         }
     };
     let child_pid = child.id();
+    let child_cwd = WorkingDirectoryEvidence::for_process(child_pid);
     let start_event = base_event(
         "process-started",
         unix_ns_or_zero(),
@@ -210,6 +213,15 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
             backtrace::capture(journal.path(), child_pid, launched_at_wall, exit_ns)
         }
     };
+    let core_artifact = core_artifact::capture(
+        journal.path(),
+        child_pid,
+        observation.core_dumped(),
+        &child_cwd,
+        &fallback_cwd,
+        launched_at_wall,
+        exit_ns,
+    );
     let evidence = match wait::reap(&mut child) {
         Ok(evidence) => evidence,
         Err(source) => {
@@ -247,6 +259,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
         observation,
         evidence,
         &backtrace,
+        &core_artifact,
     );
     append_after_spawn(
         &mut journal,
@@ -286,50 +299,15 @@ fn termination_event(
     observation: TerminalObservation,
     evidence: WaitEvidence,
     backtrace: &BacktraceEvidence,
+    core_artifact: &CoreArtifactEvidence,
 ) -> Event {
     let event = base_event("process-terminated", exit_ns, supervisor_pid, role)
         .field("elapsed_ns", elapsed_ns)
         .field("waitid_wait4_consistent", observation.agrees_with(evidence));
     let event = observation.event_fields(event);
-    let mut event = evidence.event_fields(event);
-
-    event = match backtrace {
-        BacktraceEvidence::NotApplicable => event.field("backtrace_state", "not-applicable"),
-        BacktraceEvidence::Absent { source } => event
-            .field("backtrace_state", "absent")
-            .encoded_path_field("backtrace_source_hex", source),
-        BacktraceEvidence::Captured {
-            source,
-            durable_copy,
-            reported_signal,
-        } => event
-            .field("backtrace_state", "captured")
-            .encoded_path_field("backtrace_source_hex", source)
-            .encoded_path_field("backtrace_copy_hex", durable_copy)
-            .field("backtrace_signal", optional_i32(*reported_signal))
-            .field(
-                "backtrace_signal_name",
-                reported_signal.map(signal_name).unwrap_or("NONE"),
-            ),
-        BacktraceEvidence::Rejected { source, reason } => event
-            .field("backtrace_state", "rejected")
-            .encoded_path_field("backtrace_source_hex", source)
-            .field("backtrace_rejection", reason),
-        BacktraceEvidence::CaptureFailed {
-            source,
-            operation,
-            error,
-        } => event
-            .field("backtrace_state", "capture-failed")
-            .encoded_path_field("backtrace_source_hex", source)
-            .field("backtrace_operation", operation)
-            .field("backtrace_error_kind", format!("{:?}", error.kind()))
-            .field("backtrace_raw_os_error", optional_i32(error.raw_os_error()))
-            .field(
-                "backtrace_error_hex",
-                hex_bytes(error.to_string().as_bytes()),
-            ),
-    };
+    let event = evidence.event_fields(event);
+    let event = backtrace.event_fields(event);
+    let event = core_artifact.event_fields(event);
 
     let outcome = match (
         evidence.status.signal(),
