@@ -3,6 +3,7 @@ mod catalog;
 mod cli;
 mod event;
 mod journal;
+mod limits;
 mod process;
 mod runtime;
 mod session;

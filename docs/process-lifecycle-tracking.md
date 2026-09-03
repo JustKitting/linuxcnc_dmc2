@@ -1,5 +1,8 @@
 # LinuxCNC process-lifecycle tracking
 
+The evidence and limitations of the incident that required this tracker are
+recorded in `docs/2026-09-02-linuxcnc-process-loss-investigation.md`.
+
 ## Problem boundary
 
 LinuxCNC 2.9.10 starts the configured task, I/O process, HALUI process, and
@@ -22,7 +25,8 @@ server and starts the persistent `rtapi_app` master through a hard-coded path.
 
 `config/processes.tsv` is the versioned source of truth for the role, exact
 program, LinuxCNC launch site, ownership topology, criticality, backtrace
-contract, and INI-argument placement of every tracked process.
+contract, INI-argument placement, core-dump policy, and kernel-visible owner
+name of every tracked process.
 
 The live INI and HAL configuration place `dmc2-process-supervisor` directly
 around each configurable long-lived process whose later status LinuxCNC would
@@ -35,14 +39,23 @@ otherwise discard:
 - `dmc2-serial-bridge`; and
 - `dmc2-task-monitor`.
 
-Each owner starts the unchanged configured program as its direct child and
-uses `wait4(2)` for that exact PID. The compiled launcher itself execs
+Each owner starts the unchanged configured program as its direct child. It
+first uses `waitid(2)` with `WNOWAIT` for that exact PID, synchronizes a
+terminal `/proc/<pid>` snapshot while the process remains a zombie, and only
+then uses `wait4(2)` to reap it and obtain the authoritative status and
+resource usage. The compiled launcher itself execs
 `dmc2-session-supervisor`, which enables Linux `PR_SET_CHILD_SUBREAPER` before
 starting the unchanged `/usr/bin/linuxcnc`. This makes later orphaned
 `linuxcncsvr`, `rtapi_app`, and process-owner descendants waitable by a durable
 session parent instead of PID 1. The session owner records every child it can
 observe and every terminal status it reaps; unrecognised executables remain
 explicitly uncatalogued rather than being guessed.
+
+Each owner also sets its reviewed `comm` value before spawning the workload.
+Unlike `/proc/<pid>/cmdline` and `/proc/<pid>/exe`, that value remains readable
+after the owner becomes a zombie. The session tracker therefore can still map
+a short-lived or already-dead owner to its exact role without relying on its
+poll timing.
 
 The shared journal records:
 
@@ -52,8 +65,13 @@ The shared journal records:
   bytes cannot corrupt the record;
 - executable canonical path, inode metadata, selected safe environment values,
   wall-clock timestamps, and monotonic lifetime;
-- raw `/proc/<pid>` stat, status, command line, cgroup, limits, scheduler, OOM,
-  namespace, root, working-directory, and executable-link snapshots;
+- both running and terminal-before-reap `/proc/<pid>` snapshots, including
+  stat, status, command line, cgroup, limits, scheduler and scheduler counters,
+  process I/O, signal masks, OOM scores, thread IDs, namespace, root,
+  working-directory, and executable links;
+- terminal cgroup membership, event, CPU, memory, PID-limit, I/O-pressure, and
+  pressure-stall counters, with every unavailable controller recorded rather
+  than silently omitted;
 - directly decoded parent PID, process group, session ID, state, CPU ticks,
   thread count, and kernel start-time ticks;
 - raw kernel wait status, exit code, terminating signal number and name, and
@@ -61,8 +79,21 @@ The shared journal records:
 - kernel `wait4` resource usage: user/system CPU, peak RSS, page faults, swaps,
   block I/O, IPC messages, delivered signals, and context switches.
 
+The `waitid` and `wait4` interpretations are retained independently and the
+terminal record states whether they agree. It also records every session child
+known at the instant before reaping, so simultaneous `milltask`, `rtapi_app`,
+or owner loss can be ordered from synchronized records rather than inferred
+from whichever log line happened to be last.
+
 For `milltask`, a matching LinuxCNC-generated `/tmp/backtrace.<pid>` is copied
 to the durable log directory before the terminal event is committed.
+The process catalog also raises each tracked child's soft `RLIMIT_CORE` to its
+inherited hard limit before `exec`. The inherited and requested values plus the
+host's `core_pattern`, `core_uses_pid`, and `suid_dumpable` settings are
+recorded. This permits a kernel core for otherwise-uncaught dumpable crashes;
+it does not claim that a core exists when the wait status or host policy says
+otherwise. In particular, the setuid `rtapi_app` remains subject to the host's
+setuid core-dump policy.
 
 Each journal line is append-only, terminated by a newline, protected with a
 CRC-32, serialized against all concurrent process owners with an advisory file
@@ -70,9 +101,11 @@ lock, and synchronized before execution continues. A partial final record from
 an interrupted write is separated from the next session and reported in the
 following tracker-start record.
 
-The compiled tests exercise real OS children, real non-zero exits, real signal
-termination, concurrent writers, and Linux subreaper adoption of an orphaned
-descendant. Those tests establish the tracker mechanics. They are not a claim
+The compiled tests exercise real OS children, a real retained zombie snapshot
+followed by reap, independently agreeing `waitid`/`wait4` records, real
+non-zero exits, real signal termination, inherited core-limit application,
+concurrent writers, Linux subreaper adoption, and zombie-safe owner identity.
+Those tests establish the tracker mechanics. They are not a claim
 that the currently running, older LinuxCNC session has this new ownership
 topology; it takes effect on the next explicitly requested launch.
 
@@ -98,4 +131,8 @@ alive.
 This instrumentation cannot recover the exact wait status of the `milltask`
 that died before it was installed. The final nearby Modbus address-mismatch
 message is correlation, not proof of why the process ended. Exact lifecycle
-attribution begins with a subsequently launched tracked session.
+attribution begins with a subsequently launched tracked session. It also
+cannot identify who sent a caught `SIGINT`/`SIGTERM`, because LinuxCNC converts
+those signals into a later zero exit before the parent can receive a terminal
+wait status; resolving that narrower provenance boundary would require
+separate kernel signal-audit instrumentation and is not claimed here.

@@ -14,9 +14,10 @@ use crate::catalog::{self, Ownership, ProcessRole};
 use crate::cli::{CliError, Invocation};
 use crate::event::{encode_arguments, hex_bytes, Event};
 use crate::journal::{Journal, JournalError};
+use crate::limits::CoreDumpPlan;
 use crate::process;
 use crate::runtime::TRACKING_FAILURE_EXIT_CODE;
-use crate::wait::{self, AnyWait, WaitEvidence};
+use crate::wait::{self, AnyWait, TerminalObservation, WaitEvidence};
 
 const OBSERVATION_PERIOD: Duration = Duration::from_millis(5);
 
@@ -34,6 +35,54 @@ pub fn run_session(arguments: impl IntoIterator<Item = OsString>) -> Result<u8, 
 fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
     let supervisor_pid = std::process::id();
     let mut journal = Journal::open(&invocation.journal).map_err(SessionError::Journal)?;
+    if let Err(source) = process::set_process_owner_identity(invocation.role) {
+        let event = session_event(
+            "session-owner-identity-failed",
+            unix_ns_or_zero(),
+            supervisor_pid,
+        )
+        .field("role", invocation.role.name())
+        .field("owner_comm", invocation.role.owner_comm())
+        .field("error_kind", format!("{:?}", source.kind()))
+        .field("raw_os_error", optional_i32(source.raw_os_error()))
+        .field("error_hex", hex_bytes(source.to_string().as_bytes()));
+        return match journal.append(&event) {
+            Ok(()) => Err(SessionError::OwnerIdentity {
+                role: invocation.role,
+                source,
+            }),
+            Err(journal) => Err(SessionError::OwnerIdentityAndJournal {
+                role: invocation.role,
+                identity: source,
+                journal,
+            }),
+        };
+    }
+    let core_dump_plan = match CoreDumpPlan::capture(invocation.role.core_dump_policy()) {
+        Ok(plan) => plan,
+        Err(source) => {
+            let event = session_event(
+                "session-core-limit-plan-failed",
+                unix_ns_or_zero(),
+                supervisor_pid,
+            )
+            .field("role", invocation.role.name())
+            .field("error_kind", format!("{:?}", source.kind()))
+            .field("raw_os_error", optional_i32(source.raw_os_error()))
+            .field("error_hex", hex_bytes(source.to_string().as_bytes()));
+            return match journal.append(&event) {
+                Ok(()) => Err(SessionError::CoreDumpLimit {
+                    role: invocation.role,
+                    source,
+                }),
+                Err(journal) => Err(SessionError::CoreDumpLimitAndJournal {
+                    role: invocation.role,
+                    limit: source,
+                    journal,
+                }),
+            };
+        }
+    };
     enable_child_subreaper().map_err(SessionError::EnableSubreaper)?;
     verify_child_subreaper().map_err(SessionError::VerifySubreaper)?;
 
@@ -45,6 +94,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
     )
     .field("role", invocation.role.name())
     .field("ownership", invocation.role.ownership().name())
+    .field("owner_comm", invocation.role.owner_comm())
     .field("observation_period_ns", OBSERVATION_PERIOD.as_nanos())
     .field(
         "recovered_partial_record",
@@ -54,16 +104,17 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
     .encoded_os_field("program_hex", &invocation.program)
     .field("argc", invocation.arguments.len())
     .field("argv_hex", encode_arguments(&invocation.arguments));
+    let event = core_dump_plan.event_fields(event);
     let event = process::environment_event_fields(event);
     let event = process::host_event_fields(event);
     let event = process::executable_event_fields(event, Path::new(&invocation.program));
     let event = process::child_event_fields(event, supervisor_pid);
     journal.append(&event).map_err(SessionError::Journal)?;
 
-    let linuxcnc = match Command::new(&invocation.program)
-        .args(&invocation.arguments)
-        .spawn()
-    {
+    let mut command = Command::new(&invocation.program);
+    command.args(&invocation.arguments);
+    core_dump_plan.configure(&mut command);
+    let linuxcnc = match command.spawn() {
         Ok(child) => child,
         Err(source) => {
             let event = session_event("session-spawn-failed", unix_ns_or_zero(), supervisor_pid)
@@ -145,7 +196,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
 
         let mut no_children = false;
         loop {
-            let wait_result = wait::wait_any_nonblocking();
+            let wait_result = wait::observe_any_nonblocking();
             if wait_error_reported && wait_result.is_ok() {
                 let event =
                     session_event("session-wait-restored", unix_ns_or_zero(), supervisor_pid);
@@ -153,9 +204,52 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
                 wait_error_reported = false;
             }
             match wait_result {
-                Ok(AnyWait::Exited(evidence)) => {
-                    let child = children.remove(&evidence.pid);
-                    let event = child_terminated_event(supervisor_pid, child.as_ref(), evidence);
+                Ok(AnyWait::Terminal(observation)) => {
+                    let terminal_identity = classify_child(observation.pid);
+                    let observation_state = if children.contains_key(&observation.pid) {
+                        "start-observed"
+                    } else {
+                        "terminal-only"
+                    };
+                    let child = children.get(&observation.pid).or(Some(&terminal_identity));
+                    let terminal_event = child_terminal_observed_event(
+                        supervisor_pid,
+                        child,
+                        &terminal_identity,
+                        observation_state,
+                        observation,
+                        &children,
+                    );
+                    append_after_spawn(&mut journal, &terminal_event, &mut retained_journal_errors);
+                    let evidence = match wait::reap_pid(observation.pid) {
+                        Ok(evidence) => evidence,
+                        Err(source) => {
+                            let event = observation.event_fields(
+                                session_event(
+                                    "session-child-reap-failed",
+                                    unix_ns_or_zero(),
+                                    supervisor_pid,
+                                )
+                                .field("child_pid", observation.pid)
+                                .field("error_kind", format!("{:?}", source.kind()))
+                                .field("raw_os_error", optional_i32(source.raw_os_error()))
+                                .field("error_hex", hex_bytes(source.to_string().as_bytes())),
+                            );
+                            append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
+                            return Err(SessionError::Reap {
+                                child_pid: observation.pid,
+                                source,
+                            });
+                        }
+                    };
+                    let child = children.remove(&evidence.pid).unwrap_or(terminal_identity);
+                    let event = child_terminated_event(
+                        supervisor_pid,
+                        Some(&child),
+                        observation_state,
+                        observation,
+                        evidence,
+                    );
                     append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
                     if evidence.pid == linuxcnc_pid {
                         linuxcnc_status = Some(evidence.status);
@@ -229,24 +323,61 @@ fn child_started_event(supervisor_pid: u32, pid: u32, child: &ObservedChild) -> 
     process::child_event_fields(event, pid)
 }
 
+fn child_terminal_observed_event(
+    supervisor_pid: u32,
+    child: Option<&ObservedChild>,
+    terminal_identity: &ObservedChild,
+    observation_state: &'static str,
+    observation: TerminalObservation,
+    children: &BTreeMap<u32, ObservedChild>,
+) -> Event {
+    let event = session_event(
+        "session-child-terminal-observed",
+        unix_ns_or_zero(),
+        supervisor_pid,
+    )
+    .field("role", child.map_or("unknown", |child| child.role.as_str()))
+    .field(
+        "relation",
+        child.map_or("unobserved-session-descendant", |child| child.relation),
+    )
+    .field("layer", child.map_or("unobserved", |child| child.layer))
+    .field(
+        "identity_source",
+        child.map_or("terminal-proc-snapshot", |child| child.identity_source),
+    )
+    .field("terminal_role", &terminal_identity.role)
+    .field("terminal_layer", terminal_identity.layer)
+    .field(
+        "terminal_identity_source",
+        terminal_identity.identity_source,
+    )
+    .field(
+        "terminal_identity_matches_initial",
+        child.is_some_and(|child| child.role == terminal_identity.role),
+    )
+    .field("observation_state", observation_state)
+    .field("snapshot_phase", "terminal-before-reap");
+    let event = catalog_event_fields(event, child.and_then(|child| child.catalog_role));
+    let event = observation.event_fields(event);
+    let event = tracked_children_event_fields(event, children, observation.pid, child);
+    process::terminal_child_event_fields(event, observation.pid)
+}
+
 fn child_terminated_event(
     supervisor_pid: u32,
     child: Option<&ObservedChild>,
+    observation_state: &'static str,
+    observation: TerminalObservation,
     evidence: WaitEvidence,
 ) -> Event {
-    let (role, relation, observed_ns, observation_state) = match child {
+    let (role, relation, observed_ns) = match child {
         Some(child) => (
             child.role.as_str(),
             child.relation,
             child.first_observed.elapsed().as_nanos(),
-            "start-observed",
         ),
-        None => (
-            "unknown",
-            "unobserved-session-descendant",
-            0,
-            "terminal-only",
-        ),
+        None => ("unknown", "unobserved-session-descendant", 0),
     };
     let event = session_event(
         "session-child-terminated",
@@ -261,10 +392,67 @@ fn child_terminated_event(
         child.map_or("unavailable-after-reap", |child| child.identity_source),
     )
     .field("observation_state", observation_state)
-    .field("elapsed_since_observed_ns", observed_ns);
+    .field("elapsed_since_observed_ns", observed_ns)
+    .field("waitid_wait4_consistent", observation.agrees_with(evidence));
     let event = catalog_event_fields(event, child.and_then(|child| child.catalog_role));
+    let event = observation.event_fields(event);
     let outcome = evidence.kernel_outcome();
     evidence.event_fields(event).field("outcome", outcome)
+}
+
+fn tracked_children_event_fields(
+    event: Event,
+    children: &BTreeMap<u32, ObservedChild>,
+    terminal_pid: u32,
+    terminal_child: Option<&ObservedChild>,
+) -> Event {
+    let mut tracked = children
+        .iter()
+        .map(|(pid, child)| format!("{pid}:{}", child.role))
+        .collect::<Vec<_>>();
+    if !children.contains_key(&terminal_pid) {
+        tracked.push(format!(
+            "{terminal_pid}:{}",
+            terminal_child.map_or("unknown", |child| child.role.as_str())
+        ));
+        tracked.sort();
+    }
+    let tracked = tracked.join(",");
+    let tracked_count = children.len() + usize::from(!children.contains_key(&terminal_pid));
+    match direct_children(std::process::id()) {
+        Ok(kernel_children) => event
+            .field("tracked_children_before_reap", tracked_count)
+            .field(
+                "tracked_children_identity_hex",
+                hex_bytes(tracked.as_bytes()),
+            )
+            .field("kernel_children_probe_state", "captured")
+            .field("kernel_children_before_reap", kernel_children.len())
+            .field(
+                "kernel_children_pid_list",
+                kernel_children
+                    .iter()
+                    .map(u32::to_string)
+                    .collect::<Vec<_>>()
+                    .join(","),
+            ),
+        Err(error) => event
+            .field("tracked_children_before_reap", tracked_count)
+            .field(
+                "tracked_children_identity_hex",
+                hex_bytes(tracked.as_bytes()),
+            )
+            .field("kernel_children_probe_state", "failed")
+            .field("kernel_children_error_kind", format!("{:?}", error.kind()))
+            .field(
+                "kernel_children_raw_os_error",
+                optional_i32(error.raw_os_error()),
+            )
+            .field(
+                "kernel_children_error_hex",
+                hex_bytes(error.to_string().as_bytes()),
+            ),
+    }
 }
 
 fn classify_child(pid: u32) -> ObservedChild {
@@ -272,6 +460,17 @@ fn classify_child(pid: u32) -> ObservedChild {
     let executable = fs::read_link(root.join("exe"));
     let cmdline = fs::read(root.join("cmdline")).unwrap_or_default();
     let comm = fs::read(root.join("comm")).ok();
+    if let Some(role) = comm
+        .as_deref()
+        .and_then(|comm| catalog::identify_process_owner(comm).ok().flatten())
+    {
+        return ObservedChild::classified(
+            role.name(),
+            role,
+            "direct-process-owner",
+            "supervisor-process-name",
+        );
+    }
     let basename = executable
         .as_ref()
         .ok()
@@ -320,6 +519,8 @@ fn catalog_event_fields(event: Event, role: Option<ProcessRole>) -> Event {
             .field("catalog_ownership", role.ownership().name())
             .field("catalog_criticality", role.criticality().name())
             .field("catalog_backtrace", role.backtrace().name())
+            .field("catalog_core_dump_policy", role.core_dump_policy().name())
+            .field("catalog_owner_comm", role.owner_comm())
             .field(
                 "catalog_argument_placement",
                 role.argument_placement().name(),
@@ -413,11 +614,16 @@ fn first_source(error: &SessionError) -> Option<&(dyn std::error::Error + 'stati
         SessionError::JournalAfterSpawn { first, .. } => Some(first),
         SessionError::EnableSubreaper(error)
         | SessionError::VerifySubreaper(error)
+        | SessionError::CoreDumpLimit { source: error, .. }
+        | SessionError::OwnerIdentity { source: error, .. }
+        | SessionError::Reap { source: error, .. }
         | SessionError::Spawn { source: error, .. }
         | SessionError::SpawnAndJournal { spawn: error, .. } => Some(error),
         SessionError::UnsupportedOwnership { .. } | SessionError::LinuxCncStatusMissing { .. } => {
             None
         }
+        SessionError::CoreDumpLimitAndJournal { limit, .. } => Some(limit),
+        SessionError::OwnerIdentityAndJournal { identity, .. } => Some(identity),
         SessionError::Clock(error) => Some(error),
     }
 }
@@ -503,6 +709,24 @@ pub enum SessionError {
     EnableSubreaper(io::Error),
     VerifySubreaper(io::Error),
     Clock(SystemTimeError),
+    CoreDumpLimit {
+        role: ProcessRole,
+        source: io::Error,
+    },
+    CoreDumpLimitAndJournal {
+        role: ProcessRole,
+        limit: io::Error,
+        journal: JournalError,
+    },
+    OwnerIdentity {
+        role: ProcessRole,
+        source: io::Error,
+    },
+    OwnerIdentityAndJournal {
+        role: ProcessRole,
+        identity: io::Error,
+        journal: JournalError,
+    },
     Spawn {
         role: ProcessRole,
         program: OsString,
@@ -516,6 +740,10 @@ pub enum SessionError {
     },
     LinuxCncStatusMissing {
         linuxcnc_pid: u32,
+    },
+    Reap {
+        child_pid: u32,
+        source: io::Error,
     },
 }
 
@@ -551,6 +779,34 @@ impl fmt::Display for SessionError {
                 )
             }
             Self::Clock(error) => write!(formatter, "system clock predates Unix epoch: {error}"),
+            Self::CoreDumpLimit { role, source } => write!(
+                formatter,
+                "could not establish the core-dump capture plan for role {}: {source}",
+                role.name()
+            ),
+            Self::CoreDumpLimitAndJournal {
+                role,
+                limit,
+                journal,
+            } => write!(
+                formatter,
+                "could not establish the core-dump capture plan for role {}: {limit}; the lifecycle failure record also failed: {journal}",
+                role.name()
+            ),
+            Self::OwnerIdentity { role, source } => write!(
+                formatter,
+                "could not establish the durable session-owner identity for role {}: {source}",
+                role.name()
+            ),
+            Self::OwnerIdentityAndJournal {
+                role,
+                identity,
+                journal,
+            } => write!(
+                formatter,
+                "could not establish the durable session-owner identity for role {}: {identity}; the lifecycle failure record also failed: {journal}",
+                role.name()
+            ),
             Self::Spawn {
                 role,
                 program,
@@ -573,6 +829,10 @@ impl fmt::Display for SessionError {
             Self::LinuxCncStatusMissing { linuxcnc_pid } => write!(
                 formatter,
                 "no children remain but LinuxCNC PID {linuxcnc_pid} had no captured wait status"
+            ),
+            Self::Reap { child_pid, source } => write!(
+                formatter,
+                "could not reap session child PID {child_pid} after terminal observation: {source}"
             ),
         }
     }

@@ -52,9 +52,11 @@ control machine state from that journal; it validates and displays records.
   durable error journaling, and coherent status HAL publication.
 - `rust/crates/dmc2-process-supervisor`: passive, data-catalogued lifecycle
   ownership for the LinuxCNC session and configurable long-lived processes.
-  It retains process and parent identity, real kernel wait status, resource
-  usage, and matching LinuxCNC task backtraces. It never restarts LinuxCNC,
-  changes machine state, or sends a signal to a tracked process.
+  It retains zombie-safe process and parent identity, pre-reap `/proc` and
+  cgroup evidence, independently checked `waitid`/`wait4` status, resource
+  usage, configured crash-dump limits, and matching LinuxCNC task backtraces.
+  It never restarts LinuxCNC, changes machine state, or sends a signal to a
+  tracked process.
   See `docs/process-lifecycle-tracking.md` for the exact evidence boundary and
   the caught-signal limitations imposed by LinuxCNC 2.9.10.
 - `rust/crates/dmc2-linuxcnc-interface`: generated, version-locked values and

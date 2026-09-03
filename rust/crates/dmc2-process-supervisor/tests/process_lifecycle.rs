@@ -42,13 +42,24 @@ fn records_the_kernel_exit_code_and_rusage_from_a_real_child() {
     let records = fs::read_to_string(&journal).expect("read lifecycle journal");
     assert_complete_records(&records);
     assert!(records.contains("\tevent=process-started\t"));
+    assert!(records.contains("\tevent=process-terminal-observed\t"));
     assert!(records.contains("\tevent=process-terminated\t"));
     assert!(records.contains("\trole=lifecycle-test\t"));
     assert!(records.contains("\texit_code=23\t"));
     assert!(records.contains("\tsignal=NONE\t"));
     assert!(records.contains("\tproc_parent_pid="));
     assert!(records.contains("\tproc_start_time_ticks="));
+    assert!(records.contains("\tproc_state=Z\t"));
+    assert!(records.contains("\tsnapshot_phase=terminal-before-reap\t"));
+    assert!(records.contains("\twaitid_code_name=CLD_EXITED\t"));
+    assert!(records.contains("\twaitid_uid="));
+    assert!(records.contains("\tcore_limit_plan_policy=enable-to-hard-limit\t"));
+    assert!(records.contains("\thost_core_pattern_hex="));
+    assert!(records.contains("\tcgroup_snapshot_state=captured\t"));
+    assert!(records.contains("\tcgroup_memory_events_hex="));
+    assert!(records.contains("\tcgroup_pids_events_hex="));
     assert!(records.contains("\trusage_max_resident_kib="));
+    assert!(records.contains("\twaitid_wait4_consistent=true\t"));
     assert!(records.contains("\toutcome=nonzero-exit\tcrc32="));
 }
 
@@ -82,7 +93,13 @@ fn concurrent_supervisors_commit_noninterleaved_checked_records() {
 
     let records = fs::read_to_string(&journal).expect("read shared lifecycle journal");
     assert_complete_records(&records);
-    assert_eq!(records.lines().count(), CHILDREN * 3);
+    assert_eq!(records.lines().count(), CHILDREN * 4);
+    assert_eq!(
+        records
+            .matches("\tevent=process-terminal-observed\t")
+            .count(),
+        CHILDREN
+    );
     assert_eq!(
         records.matches("\tevent=process-terminated\t").count(),
         CHILDREN
@@ -110,11 +127,15 @@ fn session_subreaper_records_the_root_and_an_adopted_descendant() {
     assert_complete_records(&records);
     assert!(records.contains("\tevent=session-supervisor-started\t"));
     assert!(records.contains("\tevent=session-supervisor-terminated\t"));
+    assert!(records.contains("\tevent=session-child-terminal-observed\t"));
     assert!(records.contains("\trole=session-lifecycle-test\t"));
     assert!(records.contains("\trelation=direct-session-child\t"));
     assert!(records.contains("\trelation=adopted-session-descendant\t"));
     assert!(records.contains("\texit_code=7\t"));
     assert!(records.contains("\texit_code=42\t"));
+    assert!(records.contains("\tproc_state=Z\t"));
+    assert!(records.contains("\twaitid_wait4_consistent=true\t"));
+    assert!(records.contains("\ttracked_children_before_reap="));
     assert_eq!(
         records
             .matches("\tevent=session-child-terminated\t")
@@ -150,9 +171,10 @@ fn session_subreaper_identifies_an_adopted_direct_process_owner() {
     assert!(records.contains("\trole=lifecycle-test\t"));
     assert!(records.contains("\tlayer=direct-process-owner\t"));
     assert!(
-        records.contains("\tidentity_source=supervisor-command-line-role\t"),
+        records.contains("\tterminal_identity_source=supervisor-process-name\t"),
         "{records}"
     );
+    assert!(records.contains("\tterminal_identity_matches_initial=true\t"));
     assert!(records.contains("\tevent=process-terminated\t"));
     assert!(records.contains("\texit_code=42\t"));
 }
@@ -168,8 +190,8 @@ fn every_configurable_long_lived_process_uses_the_generic_owner() {
     let mut checked = 0_usize;
     for line in catalog.lines().skip(2).filter(|line| !line.is_empty()) {
         let fields = line.split('\t').collect::<Vec<_>>();
-        assert_eq!(fields.len(), 7, "invalid process-catalog row: {line}");
-        let [role, program, _, ownership, criticality, _, _] = fields.as_slice() else {
+        assert_eq!(fields.len(), 9, "invalid process-catalog row: {line}");
+        let [role, program, _, ownership, criticality, _, _, _, _] = fields.as_slice() else {
             unreachable!("field count checked above")
         };
         if *ownership != "direct-child" || *criticality == "verification-only" {

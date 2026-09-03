@@ -11,8 +11,9 @@ use crate::catalog::{BacktraceKind, Ownership, ProcessRole};
 use crate::cli::{CliError, Invocation};
 use crate::event::{encode_arguments, hex_bytes, signal_name, Event};
 use crate::journal::{Journal, JournalError};
+use crate::limits::CoreDumpPlan;
 use crate::process;
-use crate::wait::{self, WaitEvidence};
+use crate::wait::{self, TerminalObservation, WaitEvidence};
 
 pub const TRACKING_FAILURE_EXIT_CODE: u8 = 125;
 
@@ -30,6 +31,53 @@ pub fn run(arguments: impl IntoIterator<Item = OsString>) -> Result<u8, Supervis
 fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
     let supervisor_pid = std::process::id();
     let mut journal = Journal::open(&invocation.journal).map_err(SupervisorError::Journal)?;
+    if let Err(source) = process::set_process_owner_identity(invocation.role) {
+        let event = base_event(
+            "owner-identity-failed",
+            unix_ns_or_zero(),
+            supervisor_pid,
+            invocation.role,
+        )
+        .field("error_kind", format!("{:?}", source.kind()))
+        .field("raw_os_error", optional_i32(source.raw_os_error()))
+        .field("error_hex", hex_bytes(source.to_string().as_bytes()));
+        return match journal.append(&event) {
+            Ok(()) => Err(SupervisorError::OwnerIdentity {
+                role: invocation.role,
+                source,
+            }),
+            Err(journal) => Err(SupervisorError::OwnerIdentityAndJournal {
+                role: invocation.role,
+                identity: source,
+                journal,
+            }),
+        };
+    }
+    let core_dump_plan = match CoreDumpPlan::capture(invocation.role.core_dump_policy()) {
+        Ok(plan) => plan,
+        Err(source) => {
+            let event = base_event(
+                "core-limit-plan-failed",
+                unix_ns_or_zero(),
+                supervisor_pid,
+                invocation.role,
+            )
+            .field("error_kind", format!("{:?}", source.kind()))
+            .field("raw_os_error", optional_i32(source.raw_os_error()))
+            .field("error_hex", hex_bytes(source.to_string().as_bytes()));
+            return match journal.append(&event) {
+                Ok(()) => Err(SupervisorError::CoreDumpLimit {
+                    role: invocation.role,
+                    source,
+                }),
+                Err(journal) => Err(SupervisorError::CoreDumpLimitAndJournal {
+                    role: invocation.role,
+                    limit: source,
+                    journal,
+                }),
+            };
+        }
+    };
     let supervisor_started_ns = unix_ns().map_err(SupervisorError::Clock)?;
     let recovered_partial_record = journal.recovered_partial_record();
     let journal_path = journal.path().to_path_buf();
@@ -44,6 +92,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
     .encoded_os_field("program_hex", &invocation.program)
     .field("argc", invocation.arguments.len())
     .field("argv_hex", encode_arguments(&invocation.arguments));
+    let supervisor_event = core_dump_plan.event_fields(supervisor_event);
     let supervisor_event = process::environment_event_fields(supervisor_event);
     let supervisor_event = process::host_event_fields(supervisor_event);
     let supervisor_event =
@@ -55,10 +104,10 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
 
     let launched_at_wall = SystemTime::now();
     let launched_at_monotonic = Instant::now();
-    let mut child = match Command::new(&invocation.program)
-        .args(&invocation.arguments)
-        .spawn()
-    {
+    let mut command = Command::new(&invocation.program);
+    command.args(&invocation.arguments);
+    core_dump_plan.configure(&mut command);
+    let mut child = match command.spawn() {
         Ok(child) => child,
         Err(source) => {
             let event = base_event(
@@ -98,20 +147,20 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
     .field("argc", invocation.arguments.len())
     .field("argv_hex", encode_arguments(&invocation.arguments));
     let start_event = process::child_event_fields(start_event, child_pid);
-    let start_record_error = journal.append(&start_event).err();
-    if let Some(error) = &start_record_error {
-        eprintln!(
-            "dmc2-process-supervisor: role={} child_pid={child_pid} start_record=failed error={error} fallback_event={}",
-            invocation.role.name(),
-            start_event.render()
-        );
-    }
+    let mut retained_journal_errors = Vec::new();
+    append_after_spawn(
+        &mut journal,
+        &start_event,
+        invocation.role,
+        child_pid,
+        &mut retained_journal_errors,
+    );
 
-    let evidence = match wait::wait(&mut child) {
-        Ok(evidence) => evidence,
+    let observation = match wait::observe(&child) {
+        Ok(observation) => observation,
         Err(source) => {
             let event = base_event(
-                "wait-failed",
+                "terminal-observe-failed",
                 unix_ns_or_zero(),
                 supervisor_pid,
                 invocation.role,
@@ -120,19 +169,14 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
             .field("error_kind", format!("{:?}", source.kind()))
             .field("raw_os_error", optional_i32(source.raw_os_error()))
             .field("error_hex", hex_bytes(source.to_string().as_bytes()));
-            let terminal_record = journal.append(&event);
-            if let Some(error) = start_record_error {
-                if let Err(terminal_error) = terminal_record {
-                    eprintln!(
-                        "dmc2-process-supervisor: role={} child_pid={child_pid} wait=failed start_record=failed terminal_record=failed start_error={error} terminal_error={terminal_error} fallback_event={}",
-                        invocation.role.name(),
-                        event.render()
-                    );
-                }
-                return Err(SupervisorError::JournalAfterSpawn(error));
-            }
-            terminal_record.map_err(SupervisorError::JournalAfterTermination)?;
-            return Err(SupervisorError::Wait {
+            append_after_spawn(
+                &mut journal,
+                &event,
+                invocation.role,
+                child_pid,
+                &mut retained_journal_errors,
+            );
+            return Err(SupervisorError::Observe {
                 role: invocation.role,
                 child_pid,
                 source,
@@ -141,10 +185,58 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
     };
     let exit_ns = unix_ns_or_zero();
     let elapsed_ns = launched_at_monotonic.elapsed().as_nanos();
+    let terminal_snapshot = base_event(
+        "process-terminal-observed",
+        exit_ns,
+        supervisor_pid,
+        invocation.role,
+    )
+    .field("child_pid", child_pid)
+    .field("elapsed_ns", elapsed_ns)
+    .field("snapshot_phase", "terminal-before-reap");
+    let terminal_snapshot = observation.event_fields(terminal_snapshot);
+    let terminal_snapshot = process::terminal_child_event_fields(terminal_snapshot, child_pid);
+    append_after_spawn(
+        &mut journal,
+        &terminal_snapshot,
+        invocation.role,
+        child_pid,
+        &mut retained_journal_errors,
+    );
+
     let backtrace = match invocation.role.backtrace() {
         BacktraceKind::None => BacktraceEvidence::NotApplicable,
         BacktraceKind::LinuxCncTask => {
             backtrace::capture(journal.path(), child_pid, launched_at_wall, exit_ns)
+        }
+    };
+    let evidence = match wait::reap(&mut child) {
+        Ok(evidence) => evidence,
+        Err(source) => {
+            let event = observation.event_fields(
+                base_event(
+                    "reap-failed",
+                    unix_ns_or_zero(),
+                    supervisor_pid,
+                    invocation.role,
+                )
+                .field("child_pid", child_pid)
+                .field("error_kind", format!("{:?}", source.kind()))
+                .field("raw_os_error", optional_i32(source.raw_os_error()))
+                .field("error_hex", hex_bytes(source.to_string().as_bytes())),
+            );
+            append_after_spawn(
+                &mut journal,
+                &event,
+                invocation.role,
+                child_pid,
+                &mut retained_journal_errors,
+            );
+            return Err(SupervisorError::Reap {
+                role: invocation.role,
+                child_pid,
+                source,
+            });
         }
     };
     let event = termination_event(
@@ -152,27 +244,23 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
         invocation.role,
         exit_ns,
         elapsed_ns,
+        observation,
         evidence,
         &backtrace,
     );
-    let terminal_record = journal.append(&event);
-    if let Some(error) = start_record_error {
-        if let Err(terminal_error) = terminal_record {
-            eprintln!(
-                "dmc2-process-supervisor: role={} child_pid={child_pid} terminal_record=failed start_error={error} terminal_error={terminal_error} fallback_event={}",
-                invocation.role.name(),
-                event.render()
-            );
-        }
-        return Err(SupervisorError::JournalAfterSpawn(error));
-    }
-    if let Err(error) = terminal_record {
-        eprintln!(
-            "dmc2-process-supervisor: role={} child_pid={child_pid} terminal_record=failed error={error} fallback_event={}",
-            invocation.role.name(),
-            event.render()
-        );
-        return Err(SupervisorError::JournalAfterTermination(error));
+    append_after_spawn(
+        &mut journal,
+        &event,
+        invocation.role,
+        child_pid,
+        &mut retained_journal_errors,
+    );
+    if !retained_journal_errors.is_empty() {
+        let first = retained_journal_errors.remove(0);
+        return Err(SupervisorError::JournalAfterChildSpawn {
+            first,
+            additional_failures: retained_journal_errors.len(),
+        });
     }
 
     Ok(supervisor_exit_code(evidence.status))
@@ -185,6 +273,8 @@ fn base_event(kind: &'static str, unix_ns: u128, supervisor_pid: u32, role: Proc
         .field("ownership", role.ownership().name())
         .field("criticality", role.criticality().name())
         .field("backtrace_contract", role.backtrace().name())
+        .field("core_dump_policy", role.core_dump_policy().name())
+        .field("owner_comm", role.owner_comm())
         .field("argument_placement", role.argument_placement().name())
 }
 
@@ -193,11 +283,14 @@ fn termination_event(
     role: ProcessRole,
     exit_ns: u128,
     elapsed_ns: u128,
+    observation: TerminalObservation,
     evidence: WaitEvidence,
     backtrace: &BacktraceEvidence,
 ) -> Event {
     let event = base_event("process-terminated", exit_ns, supervisor_pid, role)
-        .field("elapsed_ns", elapsed_ns);
+        .field("elapsed_ns", elapsed_ns)
+        .field("waitid_wait4_consistent", observation.agrees_with(evidence));
+    let event = observation.event_fields(event);
     let mut event = evidence.event_fields(event);
 
     event = match backtrace {
@@ -252,6 +345,23 @@ fn termination_event(
     event.field("outcome", outcome)
 }
 
+fn append_after_spawn(
+    journal: &mut Journal,
+    event: &Event,
+    role: ProcessRole,
+    child_pid: u32,
+    failures: &mut Vec<JournalError>,
+) {
+    if let Err(error) = journal.append(event) {
+        eprintln!(
+            "dmc2-process-supervisor: role={} child_pid={child_pid} lifecycle_journal_append=failed error={error} fallback_event={}",
+            role.name(),
+            event.render()
+        );
+        failures.push(error);
+    }
+}
+
 fn supervisor_exit_code(status: ExitStatus) -> u8 {
     if let Some(code) = status.code() {
         return u8::try_from(code).unwrap_or(TRACKING_FAILURE_EXIT_CODE);
@@ -284,9 +394,29 @@ pub enum SupervisorError {
         ownership: Ownership,
     },
     Journal(JournalError),
-    JournalAfterSpawn(JournalError),
-    JournalAfterTermination(JournalError),
+    JournalAfterChildSpawn {
+        first: JournalError,
+        additional_failures: usize,
+    },
     Clock(SystemTimeError),
+    CoreDumpLimit {
+        role: ProcessRole,
+        source: io::Error,
+    },
+    CoreDumpLimitAndJournal {
+        role: ProcessRole,
+        limit: io::Error,
+        journal: JournalError,
+    },
+    OwnerIdentity {
+        role: ProcessRole,
+        source: io::Error,
+    },
+    OwnerIdentityAndJournal {
+        role: ProcessRole,
+        identity: io::Error,
+        journal: JournalError,
+    },
     Spawn {
         role: ProcessRole,
         program: OsString,
@@ -298,7 +428,12 @@ pub enum SupervisorError {
         spawn: io::Error,
         journal: JournalError,
     },
-    Wait {
+    Observe {
+        role: ProcessRole,
+        child_pid: u32,
+        source: io::Error,
+    },
+    Reap {
         role: ProcessRole,
         child_pid: u32,
         source: io::Error,
@@ -316,15 +451,43 @@ impl fmt::Display for SupervisorError {
                 ownership.name()
             ),
             Self::Journal(error) => write!(formatter, "lifecycle journal unavailable: {error}"),
-            Self::JournalAfterSpawn(error) => write!(
+            Self::JournalAfterChildSpawn {
+                first,
+                additional_failures,
+            } => write!(
                 formatter,
-                "a supervised process was spawned but its start record could not be persisted: {error}"
-            ),
-            Self::JournalAfterTermination(error) => write!(
-                formatter,
-                "a supervised process terminated but its terminal record could not be persisted: {error}"
+                "a supervised process ran but {} lifecycle record(s) could not be persisted; first error: {first}",
+                additional_failures + 1
             ),
             Self::Clock(error) => write!(formatter, "system clock predates Unix epoch: {error}"),
+            Self::CoreDumpLimit { role, source } => write!(
+                formatter,
+                "could not establish the core-dump capture plan for role {}: {source}",
+                role.name()
+            ),
+            Self::CoreDumpLimitAndJournal {
+                role,
+                limit,
+                journal,
+            } => write!(
+                formatter,
+                "could not establish the core-dump capture plan for role {}: {limit}; the lifecycle failure record also failed: {journal}",
+                role.name()
+            ),
+            Self::OwnerIdentity { role, source } => write!(
+                formatter,
+                "could not establish the durable process-owner identity for role {}: {source}",
+                role.name()
+            ),
+            Self::OwnerIdentityAndJournal {
+                role,
+                identity,
+                journal,
+            } => write!(
+                formatter,
+                "could not establish the durable process-owner identity for role {}: {identity}; the lifecycle failure record also failed: {journal}",
+                role.name()
+            ),
             Self::Spawn {
                 role,
                 program,
@@ -344,13 +507,22 @@ impl fmt::Display for SupervisorError {
                 "could not spawn role {} program {program:?}: {spawn}; the spawn-failure lifecycle record also failed: {journal}",
                 role.name()
             ),
-            Self::Wait {
+            Self::Observe {
                 role,
                 child_pid,
                 source,
             } => write!(
                 formatter,
-                "could not wait for role {} child PID {child_pid}: {source}",
+                "could not observe terminal state for role {} child PID {child_pid}: {source}",
+                role.name()
+            ),
+            Self::Reap {
+                role,
+                child_pid,
+                source,
+            } => write!(
+                formatter,
+                "could not reap role {} child PID {child_pid} after terminal observation: {source}",
                 role.name()
             ),
         }
@@ -361,11 +533,16 @@ impl std::error::Error for SupervisorError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         match self {
             Self::Cli(error) => Some(error),
-            Self::Journal(error)
-            | Self::JournalAfterSpawn(error)
-            | Self::JournalAfterTermination(error) => Some(error),
+            Self::Journal(error) => Some(error),
+            Self::JournalAfterChildSpawn { first, .. } => Some(first),
             Self::Clock(error) => Some(error),
-            Self::Spawn { source, .. } | Self::Wait { source, .. } => Some(source),
+            Self::CoreDumpLimit { source, .. } => Some(source),
+            Self::CoreDumpLimitAndJournal { limit, .. } => Some(limit),
+            Self::OwnerIdentity { source, .. } => Some(source),
+            Self::OwnerIdentityAndJournal { identity, .. } => Some(identity),
+            Self::Spawn { source, .. }
+            | Self::Observe { source, .. }
+            | Self::Reap { source, .. } => Some(source),
             Self::SpawnAndJournal { spawn, .. } => Some(spawn),
             Self::UnsupportedOwnership { .. } => None,
         }

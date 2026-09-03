@@ -15,5 +15,7 @@ bounded completion and stop deadlines from the accepted live profile.
 `operations.tsv` defines reusable operator actions and their compiled
 execution contracts. `processes.tsv` defines every tracked LinuxCNC process's
 exact program, launch site, ownership topology, criticality, backtrace policy,
-and INI-argument placement. Both files are embedded into the compiled launcher
-or owner so a changed runtime contract requires a rebuild.
+INI-argument placement, core-dump capture policy, and the collision-checked
+kernel process name used to identify an owner even after it has become a
+zombie. Both files are embedded into the compiled launcher or owner so a
+changed runtime contract requires a rebuild.

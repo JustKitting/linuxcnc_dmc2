@@ -1,18 +1,29 @@
+use std::ffi::OsStr;
 use std::fs;
 use std::io;
+use std::os::raw::{c_int, c_ulong};
 use std::os::unix::ffi::OsStrExt;
 use std::os::unix::fs::MetadataExt;
 use std::path::{Path, PathBuf};
 
+use crate::catalog::ProcessRole;
 use crate::event::{hex_bytes, Event};
 
 const PROC_FILES: &[(&str, &str)] = &[
     ("proc_comm_hex", "comm"),
     ("proc_status_hex", "status"),
     ("proc_cmdline_hex", "cmdline"),
-    ("proc_cgroup_hex", "cgroup"),
     ("proc_limits_hex", "limits"),
     ("proc_sched_hex", "sched"),
+    ("proc_schedstat_hex", "schedstat"),
+    ("proc_io_hex", "io"),
+    ("proc_wchan_hex", "wchan"),
+    ("proc_syscall_hex", "syscall"),
+    ("proc_personality_hex", "personality"),
+    ("proc_timerslack_ns_hex", "timerslack_ns"),
+    ("proc_autogroup_hex", "autogroup"),
+    ("proc_loginuid_hex", "loginuid"),
+    ("proc_sessionid_hex", "sessionid"),
     ("proc_oom_score_hex", "oom_score"),
     ("proc_oom_score_adj_hex", "oom_score_adj"),
 ];
@@ -41,7 +52,47 @@ const HOST_FILES: &[(&str, &str)] = &[
     ("host_kernel_osrelease_hex", "/proc/sys/kernel/osrelease"),
     ("host_proc_version_hex", "/proc/version"),
     ("host_uptime_hex", "/proc/uptime"),
+    ("host_core_pattern_hex", "/proc/sys/kernel/core_pattern"),
+    ("host_core_uses_pid_hex", "/proc/sys/kernel/core_uses_pid"),
+    ("host_suid_dumpable_hex", "/proc/sys/fs/suid_dumpable"),
 ];
+const CGROUP_FILES: &[(&str, &str)] = &[
+    ("cgroup_events_hex", "cgroup.events"),
+    ("cgroup_procs_hex", "cgroup.procs"),
+    ("cgroup_threads_hex", "cgroup.threads"),
+    ("cgroup_cpu_stat_hex", "cpu.stat"),
+    ("cgroup_cpu_pressure_hex", "cpu.pressure"),
+    ("cgroup_memory_current_hex", "memory.current"),
+    ("cgroup_memory_events_hex", "memory.events"),
+    ("cgroup_memory_events_local_hex", "memory.events.local"),
+    ("cgroup_memory_pressure_hex", "memory.pressure"),
+    ("cgroup_pids_current_hex", "pids.current"),
+    ("cgroup_pids_events_hex", "pids.events"),
+    ("cgroup_io_pressure_hex", "io.pressure"),
+];
+
+pub fn set_process_owner_identity(role: ProcessRole) -> io::Result<()> {
+    const PR_SET_NAME: c_int = 15;
+    let name = role.owner_comm().as_bytes();
+    let mut buffer = [0_u8; 16];
+    buffer[..name.len()].copy_from_slice(name);
+    // SAFETY: PR_SET_NAME reads at most 16 bytes from this live, NUL-terminated
+    // stack buffer and does not retain the pointer after returning.
+    let result = unsafe { prctl(PR_SET_NAME, buffer.as_ptr() as c_ulong, 0, 0, 0) };
+    if result != 0 {
+        return Err(io::Error::last_os_error());
+    }
+    let observed = fs::read("/proc/self/comm")?;
+    if observed.strip_suffix(b"\n") == Some(name) {
+        Ok(())
+    } else {
+        Err(io::Error::other(format!(
+            "process-name verification mismatch: requested {:?}, observed {:?}",
+            role.owner_comm(),
+            String::from_utf8_lossy(&observed)
+        )))
+    }
+}
 
 pub fn executable_event_fields(mut event: Event, program: &Path) -> Event {
     let canonical = fs::canonicalize(program);
@@ -123,7 +174,15 @@ pub fn host_event_fields(mut event: Event) -> Event {
     event
 }
 
-pub fn child_event_fields(mut event: Event, pid: u32) -> Event {
+pub fn child_event_fields(event: Event, pid: u32) -> Event {
+    child_event_fields_with_phase(event, pid, false)
+}
+
+pub fn terminal_child_event_fields(event: Event, pid: u32) -> Event {
+    child_event_fields_with_phase(event, pid, true)
+}
+
+fn child_event_fields_with_phase(mut event: Event, pid: u32, terminal: bool) -> Event {
     let root = PathBuf::from(format!("/proc/{pid}"));
     let mut captured = 0_usize;
     let mut failed = 0_usize;
@@ -143,6 +202,23 @@ pub fn child_event_fields(mut event: Event, pid: u32) -> Event {
             event = event
                 .field("proc_stat_hex", unavailable(&error))
                 .field("proc_stat_parse_state", "unavailable");
+        }
+    }
+    match fs::read(root.join("cgroup")) {
+        Ok(bytes) => {
+            captured += 1;
+            event = event.field("proc_cgroup_hex", hex_bytes(&bytes));
+            event = if terminal {
+                cgroup_event_fields(event, &bytes)
+            } else {
+                event.field("cgroup_snapshot_state", "deferred-until-terminal")
+            };
+        }
+        Err(error) => {
+            failed += 1;
+            event = event
+                .field("proc_cgroup_hex", unavailable(&error))
+                .field("cgroup_snapshot_state", "proc-cgroup-unavailable");
         }
     }
     for (field, relative) in PROC_FILES {
@@ -169,6 +245,7 @@ pub fn child_event_fields(mut event: Event, pid: u32) -> Event {
             }
         }
     }
+    event = task_ids_event_fields(event, &root);
     event
         .field("process_snapshot_fields_captured", captured)
         .field("process_snapshot_fields_failed", failed)
@@ -176,6 +253,72 @@ pub fn child_event_fields(mut event: Event, pid: u32) -> Event {
             "process_snapshot_state",
             if failed == 0 { "complete" } else { "partial" },
         )
+}
+
+fn cgroup_event_fields(mut event: Event, proc_cgroup: &[u8]) -> Event {
+    let Some(relative) = unified_cgroup_path(proc_cgroup) else {
+        return event.field("cgroup_snapshot_state", "unified-path-unavailable");
+    };
+    let relative = relative.strip_prefix(b"/").unwrap_or(relative);
+    let root = Path::new("/sys/fs/cgroup").join(OsStr::from_bytes(relative));
+    event = event
+        .field("cgroup_snapshot_state", "captured")
+        .field("cgroup_unified_path_hex", hex_bytes(relative))
+        .encoded_path_field("cgroup_snapshot_root_hex", &root);
+    let mut captured = 0_usize;
+    let mut failed = 0_usize;
+    for (field, name) in CGROUP_FILES {
+        match fs::read(root.join(name)) {
+            Ok(bytes) => {
+                captured += 1;
+                event = event.field(field, hex_bytes(&bytes));
+            }
+            Err(error) => {
+                failed += 1;
+                event = event.field(field, unavailable(&error));
+            }
+        }
+    }
+    event
+        .field("cgroup_snapshot_fields_captured", captured)
+        .field("cgroup_snapshot_fields_failed", failed)
+}
+
+fn unified_cgroup_path(contents: &[u8]) -> Option<&[u8]> {
+    contents.split(|byte| *byte == b'\n').find_map(|line| {
+        let mut fields = line.splitn(3, |byte| *byte == b':');
+        match (fields.next(), fields.next(), fields.next()) {
+            (Some(b"0"), Some(b""), Some(path)) => Some(path),
+            _ => None,
+        }
+    })
+}
+
+fn task_ids_event_fields(event: Event, proc_root: &Path) -> Event {
+    match fs::read_dir(proc_root.join("task")) {
+        Ok(entries) => {
+            let mut task_ids = entries
+                .filter_map(Result::ok)
+                .filter_map(|entry| entry.file_name().to_str().map(str::to_owned))
+                .collect::<Vec<_>>();
+            task_ids.sort();
+            event
+                .field("proc_task_ids_state", "captured")
+                .field("proc_task_count", task_ids.len())
+                .field("proc_task_ids", task_ids.join(","))
+        }
+        Err(error) => event
+            .field("proc_task_ids_state", "unavailable")
+            .field("proc_task_ids_error_kind", format!("{:?}", error.kind()))
+            .field(
+                "proc_task_ids_raw_os_error",
+                optional_i32(error.raw_os_error()),
+            )
+            .field(
+                "proc_task_ids_error_hex",
+                hex_bytes(error.to_string().as_bytes()),
+            ),
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -253,6 +396,16 @@ fn optional_i32(value: Option<i32>) -> String {
     value.map_or_else(|| "NONE".to_owned(), |value| value.to_string())
 }
 
+unsafe extern "C" {
+    fn prctl(
+        option: c_int,
+        argument2: c_ulong,
+        argument3: c_ulong,
+        argument4: c_ulong,
+        argument5: c_ulong,
+    ) -> c_int;
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -271,5 +424,13 @@ mod tests {
         assert_eq!(summary.system_ticks, "18");
         assert_eq!(summary.thread_count, "23");
         assert_eq!(summary.start_time_ticks, "25");
+    }
+
+    #[test]
+    fn finds_the_unified_cgroup_path_without_assuming_utf8() {
+        assert_eq!(
+            unified_cgroup_path(b"0::/user.slice/test\xff.scope\n"),
+            Some(&b"/user.slice/test\xff.scope"[..])
+        );
     }
 }

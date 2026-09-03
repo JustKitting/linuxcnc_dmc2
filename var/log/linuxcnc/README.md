@@ -13,8 +13,10 @@ Runtime payloads remain ignored by Git.
   stream shared by `dmc2-process-supervisor` and
   `dmc2-session-supervisor`. It records catalogued roles and ownership,
   tracker/child/parent identity, exact invocation bytes, `/proc` process
-  snapshots, monotonic lifetime, raw kernel wait status, exit code or
-  terminating signal, core-dump status, and `wait4` resource usage.
+  snapshots before and after execution, terminal cgroup counters and
+  membership, monotonic lifetime, independently checked `waitid` and `wait4`
+  status, exit code or terminating signal, core-dump policy/status, and
+  resource usage.
 - `process-backtrace-<pid>-<time>.txt` is a durable copy of a matching
   `/tmp/backtrace.<pid>` created by LinuxCNC's own `SIGSEGV`/`SIGFPE` handler.
 

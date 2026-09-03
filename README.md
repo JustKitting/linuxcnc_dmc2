@@ -456,8 +456,9 @@ child subreaper, while the live INI/HAL configuration places
 `dmc2-process-supervisor` directly around `milltask`, I/O, HALUI, AXIS, and the
 two DMC2 userspace adapters. Their shared, locked journal at
 `var/log/linuxcnc/process-lifecycle.tsv` retains catalogued ownership, exact
-invocations, process/parent identity, `/proc` snapshots, kernel wait status,
-signal/core information, and `wait4` resource usage. The trackers do not
+invocations, zombie-safe owner identity, running and terminal-before-reap
+`/proc`/cgroup snapshots, independently checked `waitid` and `wait4` status,
+signal/core policy, and resource usage. The trackers do not
 restart, stop, signal, or otherwise control the machine; see
 `docs/process-lifecycle-tracking.md` for the exact evidence boundary.
 
