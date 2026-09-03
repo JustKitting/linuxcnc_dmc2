@@ -25,8 +25,10 @@ server and starts the persistent `rtapi_app` master through a hard-coded path.
 
 `config/processes.tsv` is the versioned source of truth for the role, exact
 program, LinuxCNC launch site, ownership topology, criticality, backtrace
-contract, INI-argument placement, core-dump policy, and kernel-visible owner
-name of every tracked process.
+contract, INI-argument placement, core-dump policy, kernel-visible owner name,
+and rolling live-snapshot period of every tracked process. Production roles
+currently use a one-second period; verification roles use ten milliseconds so
+the real refresh path can be exercised without slowing the suite.
 
 The live INI and HAL configuration place `dmc2-process-supervisor` directly
 around each configurable long-lived process whose later status LinuxCNC would
@@ -39,11 +41,14 @@ otherwise discard:
 - `dmc2-serial-bridge`; and
 - `dmc2-task-monitor`.
 
-Each owner starts the unchanged configured program as its direct child. It
-first uses `waitid(2)` with `WNOWAIT` for that exact PID, synchronizes a
-terminal `/proc/<pid>` snapshot while the process remains a zombie, and only
-then uses `wait4(2)` to reap it and obtain the authoritative status and
-resource usage. The compiled launcher itself execs
+Each owner starts the unchanged configured program as its direct child. While
+that process is alive, the owner polls `waitid(2)` without reaping and retains
+the newest successful `/proc/<pid>` resource and open-file snapshot in memory.
+On termination it uses `waitid(2)` with `WNOWAIT` for that exact PID,
+synchronizes both the retained last-live snapshot and a terminal
+`/proc/<pid>` snapshot while the process remains a zombie, and only then uses
+`wait4(2)` to reap it and obtain the authoritative status and resource usage.
+The compiled launcher itself execs
 `dmc2-session-supervisor`, which enables Linux `PR_SET_CHILD_SUBREAPER` before
 starting the unchanged `/usr/bin/linuxcnc`. This makes later orphaned
 `linuxcncsvr`, `rtapi_app`, and process-owner descendants waitable by a durable
@@ -68,11 +73,21 @@ The shared journal records:
 - executable and argument bytes, hex encoded so tabs, newlines, and non-UTF-8
   bytes cannot corrupt the record;
 - executable canonical path, inode metadata, selected safe environment values,
-  wall-clock timestamps, and monotonic lifetime;
-- both running and terminal-before-reap `/proc/<pid>` snapshots, including
-  stat, status, command line, cgroup, limits, scheduler and scheduler counters,
-  process I/O, signal masks, OOM scores, thread IDs, namespace, root,
-  working-directory, and executable links;
+  systemd invocation/journal identifiers, wall-clock timestamps, and monotonic
+  lifetime;
+- the last successful live `/proc/<pid>` snapshot, including stat, status,
+  command line, cgroup, limits, scheduler and scheduler counters, process I/O,
+  memory-map identity, wait channel, current syscall, OOM scores, and thread
+  IDs;
+- the live open-file count, retained descriptor targets, and matching `fdinfo`,
+  including explicit read-race failures and truncation counters;
+- the snapshot sequence, capture duration, age at process death, number of
+  attempts and successes, and exact result of the final refresh attempt;
+- the first transition into a live-snapshot read failure and the later
+  restoration as synchronized journal events, without repeating the same
+  failure every polling cycle;
+- the terminal-before-reap `/proc/<pid>` snapshot, including namespace, root,
+  working-directory, and executable links that remain available;
 - terminal cgroup membership, event, CPU, memory, PID-limit, I/O-pressure, and
   pressure-stall counters, with every unavailable controller recorded rather
   than silently omitted;
@@ -117,10 +132,15 @@ This does not claim that a core exists when the wait status or host policy says
 otherwise. In particular, the setuid `rtapi_app` remains subject to the host's
 setuid core-dump policy.
 
-Each journal line is append-only, terminated by a newline, protected with a
-CRC-32, serialized against all concurrent process owners with an advisory file
-lock, and synchronized before execution continues. A partial final record from
-an interrupted write is separated from the next session and reported in the
+Each completed journal event is append-only, terminated by a newline, protected
+with a CRC-32, serialized against all concurrent process owners with an
+advisory file lock, and synchronized before execution continues. Both journal open and every
+append inspect the final record while holding that lock. If a process was
+killed during a write, the next surviving writer separates the partial bytes
+before appending anything else and emits a checksummed recovery record with the
+fragment's byte offset, length, and CRC-32. The fragment remains in the journal
+as evidence but cannot merge with or masquerade as the next valid event. A
+partial record recovered while opening the journal is also reported by the
 following tracker-start record.
 
 The compiled tests exercise real OS children, a real retained zombie snapshot
@@ -139,6 +159,14 @@ in the pinned LinuxCNC source.
 An additional real-process case kills the direct owner with `SIGKILL`, then
 requires the outer subreaper to retain that exact owner status and the adopted
 workload's later `SIGSEGV` status and nonempty core.
+That case also validates any journal fragment left when `SIGKILL` interrupts a
+large record: the following recovery record must identify the fragment by
+offset, byte count, and checksum before later lifecycle records are accepted.
+Two real-process cases open a uniquely named file only after the initial
+snapshot. They require the terminal-before-reap record to contain that exact
+descriptor from a later rolling snapshot, once through a direct owner and once
+through an adopted session descendant. Those cases exercise refresh and
+retention rather than manufacturing a downstream result.
 The complete lifecycle integration set is repeatedly run to cover the
 fork/`exec` classification race as well as the terminal path.
 Those tests establish the tracker mechanics. They are not a claim
@@ -172,3 +200,9 @@ cannot identify who sent a caught `SIGINT`/`SIGTERM`, because LinuxCNC converts
 those signals into a later zero exit before the parent can receive a terminal
 wait status; resolving that narrower provenance boundary would require
 separate kernel signal-audit instrumentation and is not claimed here.
+The retained resource snapshot can be up to its catalogued period old. It is
+evidence of the last successfully observed live state, not a claim that every
+resource mutation in the final second was observed. Individual large fields
+and descriptor catalogs are bounded; every omission is reported with explicit
+entry, error-entry, and payload truncation counters rather than silently
+presented as complete.

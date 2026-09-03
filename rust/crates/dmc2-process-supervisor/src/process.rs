@@ -41,11 +41,14 @@ const PROC_LINKS: &[(&str, &str)] = &[
 ];
 const SAFE_ENVIRONMENT: &[&str] = &[
     "INI_FILE_NAME",
+    "INVOCATION_ID",
+    "JOURNAL_STREAM",
     "LINUXCNC_FORCE_REALTIME",
     "NMLFILE",
     "PYTHONDONTWRITEBYTECODE",
     "RTAPI_FIFO_PATH",
     "RTAPI_UID",
+    "SYSTEMD_EXEC_PID",
 ];
 const HOST_FILES: &[(&str, &str)] = &[
     ("host_boot_id_hex", "/proc/sys/kernel/random/boot_id"),
@@ -149,11 +152,14 @@ pub fn environment_event_fields(mut event: Event) -> Event {
     for name in SAFE_ENVIRONMENT {
         let field = match *name {
             "INI_FILE_NAME" => "env_ini_file_name_hex",
+            "INVOCATION_ID" => "env_systemd_invocation_id_hex",
+            "JOURNAL_STREAM" => "env_systemd_journal_stream_hex",
             "LINUXCNC_FORCE_REALTIME" => "env_linuxcnc_force_realtime_hex",
             "NMLFILE" => "env_nmlfile_hex",
             "PYTHONDONTWRITEBYTECODE" => "env_python_dont_write_bytecode_hex",
             "RTAPI_FIFO_PATH" => "env_rtapi_fifo_path_hex",
             "RTAPI_UID" => "env_rtapi_uid_hex",
+            "SYSTEMD_EXEC_PID" => "env_systemd_exec_pid_hex",
             _ => unreachable!("safe environment catalog is exhaustive"),
         };
         event = match std::env::var_os(name) {
@@ -322,16 +328,16 @@ fn task_ids_event_fields(event: Event, proc_root: &Path) -> Event {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-struct StatSummary<'a> {
-    reported_pid: &'a str,
-    state: &'a str,
+pub(crate) struct StatSummary<'a> {
+    pub(crate) reported_pid: &'a str,
+    pub(crate) state: &'a str,
     parent_pid: &'a str,
     process_group_id: &'a str,
     session_id: &'a str,
     user_ticks: &'a str,
     system_ticks: &'a str,
     thread_count: &'a str,
-    start_time_ticks: &'a str,
+    pub(crate) start_time_ticks: &'a str,
 }
 
 impl StatSummary<'_> {
@@ -350,7 +356,7 @@ impl StatSummary<'_> {
     }
 }
 
-fn parse_stat(bytes: &[u8]) -> Result<StatSummary<'_>, &'static str> {
+pub(crate) fn parse_stat(bytes: &[u8]) -> Result<StatSummary<'_>, &'static str> {
     let closing_parenthesis = bytes
         .iter()
         .rposition(|byte| *byte == b')')

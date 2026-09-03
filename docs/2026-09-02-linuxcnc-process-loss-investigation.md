@@ -108,11 +108,26 @@ Future launches use two independent ownership layers:
 2. `dmc2-session-supervisor` is a Linux child subreaper for orphaned
    `rtapi_app`, `linuxcncsvr`, and process-owner descendants.
 
+Each ownership layer also retains a data-catalogued rolling snapshot while its
+observed process is still live. This closes a separate evidence gap in the
+two-stage terminal capture: Linux keeps a zombie's wait status and basic stat
+identity, but it has already released that process's descriptor table, memory
+map, and most resource files. The last-live snapshot records open descriptor
+targets and `fdinfo`, limits, status and signal masks, memory maps, I/O,
+scheduler state, current syscall, wait channel, OOM values, cgroup, and thread
+IDs. It is held in memory during normal operation and written only when the
+process terminates, so it does not continuously write to storage.
+If a live `/proc` snapshot becomes unavailable, the tracker synchronizes one
+loss-of-observability event immediately and one restoration event when capture
+resumes. Repeated failures remain counted in the terminal record without
+creating a continuous write stream.
+
 The corrected terminal path is deliberately two-stage:
 
 1. `waitid(WEXITED | WNOWAIT)` reports termination without reaping;
-2. the tracker synchronizes the child's still-readable zombie `/proc` state,
-   complete tracked-child membership, and cgroup resource/pressure counters;
+2. the tracker synchronizes the retained last-live state, the child's
+   still-readable zombie `/proc` state, complete tracked-child membership, and
+   cgroup resource/pressure counters;
 3. any matching LinuxCNC task backtrace is preserved;
 4. a `waitid` status that reports a core-generating death causes the kernel
    core to be identity-checked and copied into the durable journal directory
@@ -140,7 +155,11 @@ terminal data rather than silent omissions.
 
 All records are appended to
 `var/log/linuxcnc/process-lifecycle.tsv` under an exclusive lock, include a
-CRC-32, and are synchronized before reaping proceeds.
+CRC-32, and are synchronized before reaping proceeds. A process killed during
+a large write can leave bytes behind even though its lock is then released.
+Every later append therefore detects and separates an interrupted tail first,
+then writes a valid recovery event containing the fragment offset, length, and
+CRC-32. Later records cannot be concatenated onto the interrupted fragment.
 
 ## Deliberate non-behavior and remaining proof boundary
 
@@ -159,7 +178,10 @@ adopted-descendant paths. A direct-owner-loss case requires the outer
 subreaper to retain both the owner's real `SIGKILL` and its orphaned workload's
 later real `SIGSEGV` plus nonempty core. Bidirectional static checks reject a
 live INI/HAL userspace launch without a catalogued owner and reject a
-production direct catalog row without a live launch. These tests do not prove
+production direct catalog row without a live launch. Direct and adopted-child
+tests additionally require a uniquely named descriptor opened after the
+initial observation to be present in a later live snapshot retained in the
+terminal record. These tests do not prove
 that the currently running older session used this new binary, nor do
 they establish the cause of the historical event. The live evidence boundary
 begins only after a separately authorized launch of the newly built tracker.

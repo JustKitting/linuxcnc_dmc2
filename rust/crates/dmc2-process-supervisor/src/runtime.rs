@@ -4,7 +4,8 @@ use std::io;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Command, ExitStatus};
-use std::time::{Instant, SystemTime, SystemTimeError, UNIX_EPOCH};
+use std::thread;
+use std::time::{Duration, Instant, SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use crate::backtrace::{self, BacktraceEvidence};
 use crate::catalog::{BacktraceKind, Ownership, ProcessRole};
@@ -13,10 +14,12 @@ use crate::core_artifact::{self, CoreArtifactEvidence, WorkingDirectoryEvidence}
 use crate::event::{encode_arguments, hex_bytes, Event};
 use crate::journal::{Journal, JournalError};
 use crate::limits::CoreDumpPlan;
+use crate::live_snapshot;
 use crate::process;
 use crate::wait::{self, TerminalObservation, WaitEvidence};
 
 pub const TRACKING_FAILURE_EXIT_CODE: u8 = 125;
+const OBSERVATION_PERIOD: Duration = Duration::from_millis(5);
 
 pub fn run(arguments: impl IntoIterator<Item = OsString>) -> Result<u8, SupervisorError> {
     let invocation = Invocation::parse(arguments).map_err(SupervisorError::Cli)?;
@@ -138,6 +141,9 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
         }
     };
     let child_pid = child.id();
+    let mut live_snapshots =
+        live_snapshot::Tracker::deferred(invocation.role.live_snapshot_period_ms());
+    let initial_snapshot_transition = live_snapshots.capture_now(child_pid);
     let child_cwd = WorkingDirectoryEvidence::for_process(child_pid);
     let start_event = base_event(
         "process-started",
@@ -158,32 +164,58 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
         child_pid,
         &mut retained_journal_errors,
     );
+    if let Some(transition) = initial_snapshot_transition {
+        append_live_snapshot_transition(
+            &mut journal,
+            invocation.role,
+            child_pid,
+            &live_snapshots,
+            transition,
+            &mut retained_journal_errors,
+        );
+    }
 
-    let observation = match wait::observe(&child) {
-        Ok(observation) => observation,
-        Err(source) => {
-            let event = base_event(
-                "terminal-observe-failed",
-                unix_ns_or_zero(),
-                supervisor_pid,
-                invocation.role,
-            )
-            .field("child_pid", child_pid)
-            .field("error_kind", format!("{:?}", source.kind()))
-            .field("raw_os_error", optional_i32(source.raw_os_error()))
-            .field("error_hex", hex_bytes(source.to_string().as_bytes()));
-            append_after_spawn(
-                &mut journal,
-                &event,
-                invocation.role,
-                child_pid,
-                &mut retained_journal_errors,
-            );
-            return Err(SupervisorError::Observe {
-                role: invocation.role,
-                child_pid,
-                source,
-            });
+    let observation = loop {
+        match wait::observe_pid_nonblocking(child_pid) {
+            Ok(Some(observation)) => break observation,
+            Ok(None) => {
+                if let Some(transition) = live_snapshots.capture_if_due(child_pid) {
+                    append_live_snapshot_transition(
+                        &mut journal,
+                        invocation.role,
+                        child_pid,
+                        &live_snapshots,
+                        transition,
+                        &mut retained_journal_errors,
+                    );
+                }
+                thread::sleep(OBSERVATION_PERIOD);
+            }
+            Err(source) => {
+                let event = base_event(
+                    "terminal-observe-failed",
+                    unix_ns_or_zero(),
+                    supervisor_pid,
+                    invocation.role,
+                )
+                .field("child_pid", child_pid)
+                .field("error_kind", format!("{:?}", source.kind()))
+                .field("raw_os_error", optional_i32(source.raw_os_error()))
+                .field("error_hex", hex_bytes(source.to_string().as_bytes()));
+                let event = live_snapshots.full_event_fields(event);
+                append_after_spawn(
+                    &mut journal,
+                    &event,
+                    invocation.role,
+                    child_pid,
+                    &mut retained_journal_errors,
+                );
+                return Err(SupervisorError::Observe {
+                    role: invocation.role,
+                    child_pid,
+                    source,
+                });
+            }
         }
     };
     let exit_ns = unix_ns_or_zero();
@@ -199,6 +231,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
     .field("snapshot_phase", "terminal-before-reap");
     let terminal_snapshot = observation.event_fields(terminal_snapshot);
     let terminal_snapshot = process::terminal_child_event_fields(terminal_snapshot, child_pid);
+    let terminal_snapshot = live_snapshots.full_event_fields(terminal_snapshot);
     append_after_spawn(
         &mut journal,
         &terminal_snapshot,
@@ -261,6 +294,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
         &backtrace,
         &core_artifact,
     );
+    let event = live_snapshots.summary_event_fields(event);
     append_after_spawn(
         &mut journal,
         &event,
@@ -279,6 +313,25 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
     Ok(supervisor_exit_code(evidence.status))
 }
 
+fn append_live_snapshot_transition(
+    journal: &mut Journal,
+    role: ProcessRole,
+    child_pid: u32,
+    tracker: &live_snapshot::Tracker,
+    transition: live_snapshot::CaptureTransition,
+    retained_journal_errors: &mut Vec<JournalError>,
+) {
+    let event = base_event(
+        transition.direct_event_name(),
+        unix_ns_or_zero(),
+        std::process::id(),
+        role,
+    )
+    .field("child_pid", child_pid);
+    let event = tracker.summary_event_fields(event);
+    append_after_spawn(journal, &event, role, child_pid, retained_journal_errors);
+}
+
 fn base_event(kind: &'static str, unix_ns: u128, supervisor_pid: u32, role: ProcessRole) -> Event {
     Event::new(kind, unix_ns, supervisor_pid)
         .field("role", role.name())
@@ -288,6 +341,10 @@ fn base_event(kind: &'static str, unix_ns: u128, supervisor_pid: u32, role: Proc
         .field("backtrace_contract", role.backtrace().name())
         .field("core_dump_policy", role.core_dump_policy().name())
         .field("owner_comm", role.owner_comm())
+        .field(
+            "catalog_live_snapshot_period_ms",
+            role.live_snapshot_period_ms(),
+        )
         .field("argument_placement", role.argument_placement().name())
 }
 

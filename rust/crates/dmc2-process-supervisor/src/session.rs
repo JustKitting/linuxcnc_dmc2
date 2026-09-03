@@ -17,6 +17,7 @@ use crate::core_artifact::{self, CoreArtifactEvidence, WorkingDirectoryEvidence}
 use crate::event::{encode_arguments, hex_bytes, Event};
 use crate::journal::{Journal, JournalError};
 use crate::limits::CoreDumpPlan;
+use crate::live_snapshot;
 use crate::process;
 use crate::runtime::TRACKING_FAILURE_EXIT_CODE;
 use crate::wait::{self, AnyWait, TerminalObservation, WaitEvidence};
@@ -98,6 +99,10 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
     .field("role", invocation.role.name())
     .field("ownership", invocation.role.ownership().name())
     .field("owner_comm", invocation.role.owner_comm())
+    .field(
+        "catalog_live_snapshot_period_ms",
+        invocation.role.live_snapshot_period_ms(),
+    )
     .field("observation_period_ns", OBSERVATION_PERIOD.as_nanos())
     .field(
         "recovered_partial_record",
@@ -145,7 +150,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
     let observed_at = Instant::now();
     let observed_at_wall = SystemTime::now();
     let mut children = BTreeMap::new();
-    let root = ObservedChild {
+    let mut root = ObservedChild {
         role: invocation.role.name().to_owned(),
         catalog_role: Some(invocation.role),
         relation: "direct-session-child",
@@ -154,10 +159,22 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
         first_observed: observed_at,
         first_observed_wall: observed_at_wall,
         working_directory: WorkingDirectoryEvidence::for_process(linuxcnc_pid),
+        live_snapshots: live_snapshot::Tracker::deferred(invocation.role.live_snapshot_period_ms()),
     };
+    let root_snapshot_transition = root.live_snapshots.capture_now(linuxcnc_pid);
     let event = child_started_event(supervisor_pid, linuxcnc_pid, &root);
     let mut retained_journal_errors = Vec::new();
     append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
+    if let Some(transition) = root_snapshot_transition {
+        append_child_live_snapshot_transition(
+            &mut journal,
+            supervisor_pid,
+            linuxcnc_pid,
+            &root,
+            transition,
+            &mut retained_journal_errors,
+        );
+    }
     children.insert(linuxcnc_pid, root);
 
     let mut linuxcnc_status = None;
@@ -176,22 +193,41 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
                 }
                 children_probe_error_reported = false;
                 for pid in pids {
-                    if let Some(existing) = children.get(&pid) {
-                        let mut observed = classify_child(pid);
-                        if existing.should_reclassify_as(&observed) {
-                            let event =
-                                child_reclassified_event(supervisor_pid, pid, existing, &observed);
-                            observed.first_observed = existing.first_observed;
-                            observed.first_observed_wall = existing.first_observed_wall;
-                            observed.working_directory = existing.working_directory.clone();
-                            append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
-                            children.insert(pid, observed);
+                    if let Some(existing) = children.get_mut(&pid) {
+                        if existing.catalog_role.is_none() {
+                            let observed =
+                                classify_child(pid, invocation.role.live_snapshot_period_ms());
+                            if existing.should_reclassify_as(&observed) {
+                                let event = child_reclassified_event(
+                                    supervisor_pid,
+                                    pid,
+                                    existing,
+                                    &observed,
+                                );
+                                append_after_spawn(
+                                    &mut journal,
+                                    &event,
+                                    &mut retained_journal_errors,
+                                );
+                                existing.reclassify_from(&observed);
+                            }
                         }
                         continue;
                     }
-                    let child = classify_child(pid);
+                    let mut child = classify_child(pid, invocation.role.live_snapshot_period_ms());
+                    let snapshot_transition = child.live_snapshots.capture_now(pid);
                     let event = child_started_event(supervisor_pid, pid, &child);
                     append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
+                    if let Some(transition) = snapshot_transition {
+                        append_child_live_snapshot_transition(
+                            &mut journal,
+                            supervisor_pid,
+                            pid,
+                            &child,
+                            transition,
+                            &mut retained_journal_errors,
+                        );
+                    }
                     children.insert(pid, child);
                 }
             }
@@ -210,6 +246,19 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
             Err(_) => {}
         }
 
+        for (pid, child) in &mut children {
+            if let Some(transition) = child.live_snapshots.capture_if_due(*pid) {
+                append_child_live_snapshot_transition(
+                    &mut journal,
+                    supervisor_pid,
+                    *pid,
+                    child,
+                    transition,
+                    &mut retained_journal_errors,
+                );
+            }
+        }
+
         let mut no_children = false;
         loop {
             let wait_result = wait::observe_any_nonblocking();
@@ -221,7 +270,20 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
             }
             match wait_result {
                 Ok(AnyWait::Terminal(observation)) => {
-                    let terminal_identity = classify_child(observation.pid);
+                    let terminal_identity =
+                        classify_child(observation.pid, invocation.role.live_snapshot_period_ms());
+                    if let Some(existing) = children.get_mut(&observation.pid) {
+                        if existing.should_reclassify_as(&terminal_identity) {
+                            let event = child_reclassified_event(
+                                supervisor_pid,
+                                observation.pid,
+                                existing,
+                                &terminal_identity,
+                            );
+                            append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
+                            existing.reclassify_from(&terminal_identity);
+                        }
+                    }
                     let session_root = SessionRootObservation::capture(
                         observation.pid,
                         linuxcnc_pid,
@@ -372,6 +434,29 @@ fn child_started_event(supervisor_pid: u32, pid: u32, child: &ObservedChild) -> 
     process::child_event_fields(event, pid)
 }
 
+fn append_child_live_snapshot_transition(
+    journal: &mut Journal,
+    supervisor_pid: u32,
+    pid: u32,
+    child: &ObservedChild,
+    transition: live_snapshot::CaptureTransition,
+    retained_journal_errors: &mut Vec<JournalError>,
+) {
+    let event = session_event(
+        transition.session_event_name(),
+        unix_ns_or_zero(),
+        supervisor_pid,
+    )
+    .field("role", &child.role)
+    .field("relation", child.relation)
+    .field("layer", child.layer)
+    .field("identity_source", child.identity_source)
+    .field("child_pid", pid);
+    let event = catalog_event_fields(event, child.catalog_role);
+    let event = child.live_snapshots.summary_event_fields(event);
+    append_after_spawn(journal, &event, retained_journal_errors);
+}
+
 fn child_reclassified_event(
     supervisor_pid: u32,
     pid: u32,
@@ -452,7 +537,11 @@ fn child_terminal_observed_event(
     let event = catalog_event_fields(event, child.and_then(|child| child.catalog_role));
     let event = observation.event_fields(event);
     let event = tracked_children_event_fields(event, children, observation.pid, child);
-    process::terminal_child_event_fields(event, observation.pid)
+    let event = process::terminal_child_event_fields(event, observation.pid);
+    match child {
+        Some(child) => child.live_snapshots.full_event_fields(event),
+        None => event.field("last_live_snapshot_state", "untracked-terminal-only"),
+    }
 }
 
 fn child_terminated_event(
@@ -503,6 +592,10 @@ fn child_terminated_event(
     let event = evidence.event_fields(event);
     let event = backtrace.event_fields(event);
     let event = core_artifact.event_fields(event);
+    let event = match child {
+        Some(child) => child.live_snapshots.summary_event_fields(event),
+        None => event.field("last_live_snapshot_state", "untracked-terminal-only"),
+    };
     let outcome = match (
         evidence.status.signal(),
         evidence.status.code(),
@@ -712,7 +805,7 @@ fn tracked_children_event_fields(
     }
 }
 
-fn classify_child(pid: u32) -> ObservedChild {
+fn classify_child(pid: u32, fallback_snapshot_period_ms: u64) -> ObservedChild {
     let root = PathBuf::from(format!("/proc/{pid}"));
     let executable = fs::read_link(root.join("exe"));
     let cmdline = fs::read(root.join("cmdline")).unwrap_or_default();
@@ -752,6 +845,7 @@ fn classify_child(pid: u32) -> ObservedChild {
                 "process-supervisor:unknown",
                 "direct-process-owner",
                 "unmatched",
+                fallback_snapshot_period_ms,
             ),
         };
     }
@@ -765,8 +859,15 @@ fn classify_child(pid: u32) -> ObservedChild {
                 format!("uncatalogued:{name}"),
                 "uncatalogued-descendant",
                 "proc-executable-basename-only",
+                fallback_snapshot_period_ms,
             ),
-            None => ObservedChild::unknown(pid, "unknown", "unidentified-descendant", "unmatched"),
+            None => ObservedChild::unknown(
+                pid,
+                "unknown",
+                "unidentified-descendant",
+                "unmatched",
+                fallback_snapshot_period_ms,
+            ),
         },
     }
 }
@@ -782,6 +883,10 @@ fn catalog_event_fields(event: Event, role: Option<ProcessRole>) -> Event {
             .field("catalog_backtrace", role.backtrace().name())
             .field("catalog_core_dump_policy", role.core_dump_policy().name())
             .field("catalog_owner_comm", role.owner_comm())
+            .field(
+                "catalog_live_snapshot_period_ms",
+                role.live_snapshot_period_ms(),
+            )
             .field(
                 "catalog_argument_placement",
                 role.argument_placement().name(),
@@ -928,6 +1033,7 @@ struct ObservedChild {
     first_observed: Instant,
     first_observed_wall: SystemTime,
     working_directory: WorkingDirectoryEvidence,
+    live_snapshots: live_snapshot::Tracker,
 }
 
 impl ObservedChild {
@@ -949,6 +1055,7 @@ impl ObservedChild {
             first_observed,
             first_observed_wall,
             working_directory: WorkingDirectoryEvidence::for_process(pid),
+            live_snapshots: live_snapshot::Tracker::deferred(role.live_snapshot_period_ms()),
         }
     }
 
@@ -957,6 +1064,7 @@ impl ObservedChild {
         name: impl Into<String>,
         layer: &'static str,
         identity_source: &'static str,
+        fallback_snapshot_period_ms: u64,
     ) -> Self {
         let first_observed = Instant::now();
         let first_observed_wall = SystemTime::now();
@@ -969,11 +1077,24 @@ impl ObservedChild {
             first_observed,
             first_observed_wall,
             working_directory: WorkingDirectoryEvidence::for_process(pid),
+            live_snapshots: live_snapshot::Tracker::deferred(fallback_snapshot_period_ms),
         }
     }
 
     fn should_reclassify_as(&self, observed: &Self) -> bool {
         self.catalog_role.is_none() && observed.catalog_role.is_some()
+    }
+
+    fn reclassify_from(&mut self, observed: &Self) {
+        self.role.clone_from(&observed.role);
+        self.catalog_role = observed.catalog_role;
+        self.relation = observed.relation;
+        self.layer = observed.layer;
+        self.identity_source = observed.identity_source;
+        if let Some(role) = self.catalog_role {
+            self.live_snapshots
+                .set_period_ms(role.live_snapshot_period_ms());
+        }
     }
 }
 

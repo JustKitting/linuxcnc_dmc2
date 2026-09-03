@@ -2,7 +2,8 @@ use std::io;
 use std::mem::MaybeUninit;
 use std::os::raw::{c_int, c_long, c_uint};
 use std::os::unix::process::ExitStatusExt;
-use std::process::{Child, ExitStatus};
+use std::process::Child;
+use std::process::ExitStatus;
 
 use crate::event::{signal_name, Event};
 
@@ -143,6 +144,7 @@ pub struct ResourceUsage {
     pub involuntary_context_switches: c_long,
 }
 
+#[cfg(test)]
 pub fn observe(child: &Child) -> io::Result<TerminalObservation> {
     let pid = i32::try_from(child.id()).map_err(|_| {
         io::Error::new(

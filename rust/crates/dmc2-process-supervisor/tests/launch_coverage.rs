@@ -161,7 +161,7 @@ fn read_catalog(project: &Path) -> BTreeMap<String, CatalogRow> {
         .filter(|line| !line.is_empty())
         .map(|line| {
             let fields = line.split('\t').collect::<Vec<_>>();
-            assert_eq!(fields.len(), 9, "invalid process-catalog row: {line}");
+            assert_eq!(fields.len(), 10, "invalid process-catalog row: {line}");
             (
                 fields[0].to_owned(),
                 CatalogRow {

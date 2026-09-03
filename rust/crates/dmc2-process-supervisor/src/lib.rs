@@ -5,6 +5,7 @@ mod core_artifact;
 mod event;
 mod journal;
 mod limits;
+mod live_snapshot;
 mod process;
 mod runtime;
 mod session;

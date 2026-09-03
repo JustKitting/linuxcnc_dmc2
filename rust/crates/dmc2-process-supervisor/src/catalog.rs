@@ -7,9 +7,9 @@ const CATALOG: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../config/processes.tsv"
 ));
-const MAGIC: &str = "DMC2_PROCESS_CATALOG\t2";
+const MAGIC: &str = "DMC2_PROCESS_CATALOG\t3";
 const HEADER: &str =
-    "role\tprogram\tlaunch_site\townership\tcriticality\tbacktrace\targument_placement\tcore_dump_policy\towner_comm";
+    "role\tprogram\tlaunch_site\townership\tcriticality\tbacktrace\targument_placement\tcore_dump_policy\towner_comm\tlive_snapshot_period_ms";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProcessRole {
@@ -52,6 +52,10 @@ impl ProcessRole {
     pub const fn owner_comm(self) -> &'static str {
         self.definition.owner_comm
     }
+
+    pub const fn live_snapshot_period_ms(self) -> u64 {
+        self.definition.live_snapshot_period_ms
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -65,6 +69,7 @@ struct ProcessDefinition {
     argument_placement: ArgumentPlacement,
     core_dump_policy: CoreDumpPolicy,
     owner_comm: &'static str,
+    live_snapshot_period_ms: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -294,13 +299,13 @@ fn parse_definition(
     line: &'static str,
 ) -> Result<ProcessDefinition, CatalogError> {
     let fields = line.split('\t').collect::<Vec<_>>();
-    if fields.len() != 9 {
+    if fields.len() != 10 {
         return Err(CatalogError::FieldCount {
             line: line_number,
             observed: fields.len(),
         });
     }
-    let [role, program, launch_site, ownership, criticality, backtrace, argument_placement, core_dump_policy, owner_comm] =
+    let [role, program, launch_site, ownership, criticality, backtrace, argument_placement, core_dump_policy, owner_comm, live_snapshot_period_ms] =
         fields.as_slice()
     else {
         unreachable!("field count checked above")
@@ -327,7 +332,28 @@ fn parse_definition(
         argument_placement: parse_argument_placement(line_number, argument_placement)?,
         core_dump_policy: parse_core_dump_policy(line_number, core_dump_policy)?,
         owner_comm: parse_owner_comm(line_number, owner_comm)?,
+        live_snapshot_period_ms: parse_live_snapshot_period_ms(
+            line_number,
+            live_snapshot_period_ms,
+        )?,
     })
+}
+
+fn parse_live_snapshot_period_ms(line: usize, value: &str) -> Result<u64, CatalogError> {
+    let period = value.parse::<u64>().map_err(|_| CatalogError::Value {
+        line,
+        field: "live_snapshot_period_ms",
+        value: value.to_owned(),
+    })?;
+    if (1..=60_000).contains(&period) {
+        Ok(period)
+    } else {
+        Err(CatalogError::Value {
+            line,
+            field: "live_snapshot_period_ms",
+            value: value.to_owned(),
+        })
+    }
 }
 
 fn parse_ownership(line: usize, value: &str) -> Result<Ownership, CatalogError> {
@@ -447,7 +473,7 @@ impl fmt::Display for CatalogError {
             }
             Self::FieldCount { line, observed } => write!(
                 formatter,
-                "process catalog line {line} has {observed} fields; expected 9"
+                "process catalog line {line} has {observed} fields; expected 10"
             ),
             Self::EmptyField { line, field } => {
                 write!(formatter, "process catalog line {line} has empty {field}")
@@ -520,6 +546,7 @@ mod tests {
         assert_eq!(role.backtrace(), BacktraceKind::LinuxCncTask);
         assert_eq!(role.core_dump_policy(), CoreDumpPolicy::EnableToHardLimit);
         assert_eq!(role.owner_comm(), "dmc2-task-owner");
+        assert_eq!(role.live_snapshot_period_ms(), 1_000);
     }
 
     #[test]
