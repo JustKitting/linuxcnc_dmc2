@@ -362,6 +362,12 @@ the physically verified clockwise state, waits for at-speed feedback, commands
 It contains no X/Y/Z motion. Beside AXIS's stock spindle controls, `Actual RPM`
 displays the same H100 output-frequency feedback used by
 `spindle.0.speed-in`; it remains visible while the pendant panel is closed.
+At the top of the hideable pendant panel, `VFD disconnected` asserts when
+hm2_modbus has disabled a required command after repeated communication
+failures. The same hardware section reports VFD readiness, Mesa
+packet/watchdog fault state, and the X/Y/Z HostMot2 step-output enables. It
+explicitly reports X/Y/Z physical power and motion feedback as `NOT WIRED`;
+those enable signals are not mislabeled as physical motor response.
 
 ## Deliberately disabled or deferred
 

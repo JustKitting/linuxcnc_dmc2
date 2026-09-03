@@ -8,6 +8,51 @@
     <label text='"DMC2 MACHINE STATUS"'
            font='("Helvetica", 12, "bold")' anchor='"w"' padx="8" pady="6"/>
 
+    <labelframe text="HARDWARE CONNECTIONS" font='("Helvetica", 10, "bold")'
+                padx="8" pady="5">
+      <table flexible_columns="[1,2,3,4,5,6,7,8,9]">
+        <tablesticky sticky="w"/>
+        <tablerow/>
+        <label text='"VFD ready"' font='("Helvetica", 10, "bold")'
+               width="12" anchor='"w"'/>
+        <led halpin='"spindle-ready"' size="16"
+             on_color='"green"' off_color='"gray35"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"VFD disconnected"' font='("Helvetica", 10, "bold")'
+               width="17" anchor='"w"'/>
+        <led halpin='"spindle-communication-lost"' size="16"
+             on_color='"red"' off_color='"gray35"'/>
+        <tablerow/>
+        <label text='"Mesa packet fault"' font='("Helvetica", 10)'
+               width="17" anchor='"w"'/>
+        <led halpin='"mesa-packet-error-exceeded"' size="16"
+             on_color='"red"' off_color='"green"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"Mesa watchdog"' font='("Helvetica", 10)'
+               width="17" anchor='"w"'/>
+        <led halpin='"mesa-watchdog-fault"' size="16"
+             on_color='"red"' off_color='"green"'/>
+        <tablerow/>
+        <label text='"X step output"' font='("Helvetica", 10)'
+               width="13" anchor='"w"'/>
+        <led halpin='"axis-x-output-enabled"' size="16"
+             on_color='"green"' off_color='"red"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"Y step output"' font='("Helvetica", 10)'
+               width="13" anchor='"w"'/>
+        <led halpin='"axis-y-output-enabled"' size="16"
+             on_color='"green"' off_color='"red"'/>
+        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
+        <label text='"Z step output"' font='("Helvetica", 10)'
+               width="13" anchor='"w"'/>
+        <led halpin='"axis-z-output-enabled"' size="16"
+             on_color='"green"' off_color='"red"'/>
+        <tablerow/>
+        <label text='"X/Y/Z physical power and motion feedback: NOT WIRED"'
+               font='("Helvetica", 10, "bold")' width="51" anchor='"w"'/>
+      </table>
+    </labelframe>
+
     <labelframe text="CONTROL STATE" font='("Helvetica", 10, "bold")'
                 padx="8" pady="5">
       <table flexible_columns="[1,2,3,4,5,6,7,8]">

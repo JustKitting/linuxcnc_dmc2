@@ -32,6 +32,18 @@ net dmc2-z-position halui.axis.z.pos-feedback => pyvcp.z-position
 # Live RPM calculated from the H100 output-frequency readback. AXIS displays
 # this beside its stock spindle controls even when the pendant panel is closed.
 net dmc2-spindle-speed-feedback => axisui.spindle-actual-rpm
+net dmc2-spindle-ready h100-spindle.ready => pyvcp.spindle-ready
+net dmc2-spindle-communication-lost h100-spindle.block-kind-22 => pyvcp.spindle-communication-lost
+
+# Pendant-panel hardware evidence. The three enable signals prove only that
+# LinuxCNC has enabled the corresponding HostMot2 step output. They do not
+# prove external driver power or physical motor response; no AL/ready input is
+# assigned yet, and the UI labels that boundary explicitly.
+net dmc2-mesa-packet-error-exceeded => pyvcp.mesa-packet-error-exceeded
+net dmc2-mesa-watchdog-fault => pyvcp.mesa-watchdog-fault
+net dmc2-x-enable => pyvcp.axis-x-output-enabled
+net dmc2-y-enable => pyvcp.axis-y-output-enabled
+net dmc2-z-enable => pyvcp.axis-z-output-enabled
 
 # Mesa-generated pulse counts, converted to floats for PyVCP number widgets.
 net dmc2-x-generated-pulses => pyvcp.x-generated-pulses
