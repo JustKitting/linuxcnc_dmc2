@@ -39,16 +39,19 @@ const PROC_LINKS: &[(&str, &str)] = &[
     ("proc_ns_user_hex", "ns/user"),
     ("proc_ns_uts_hex", "ns/uts"),
 ];
-const SAFE_ENVIRONMENT: &[&str] = &[
-    "INI_FILE_NAME",
-    "INVOCATION_ID",
-    "JOURNAL_STREAM",
-    "LINUXCNC_FORCE_REALTIME",
-    "NMLFILE",
-    "PYTHONDONTWRITEBYTECODE",
-    "RTAPI_FIFO_PATH",
-    "RTAPI_UID",
-    "SYSTEMD_EXEC_PID",
+const SAFE_ENVIRONMENT: &[(&str, &str)] = &[
+    ("INI_FILE_NAME", "env_ini_file_name_hex"),
+    ("INVOCATION_ID", "env_systemd_invocation_id_hex"),
+    ("JOURNAL_STREAM", "env_systemd_journal_stream_hex"),
+    ("LINUXCNC_FORCE_REALTIME", "env_linuxcnc_force_realtime_hex"),
+    ("NMLFILE", "env_nmlfile_hex"),
+    (
+        "PYTHONDONTWRITEBYTECODE",
+        "env_python_dont_write_bytecode_hex",
+    ),
+    ("RTAPI_FIFO_PATH", "env_rtapi_fifo_path_hex"),
+    ("RTAPI_UID", "env_rtapi_uid_hex"),
+    ("SYSTEMD_EXEC_PID", "env_systemd_exec_pid_hex"),
 ];
 const HOST_FILES: &[(&str, &str)] = &[
     ("host_boot_id_hex", "/proc/sys/kernel/random/boot_id"),
@@ -149,19 +152,7 @@ pub fn executable_event_fields(mut event: Event, program: &Path) -> Event {
 }
 
 pub fn environment_event_fields(mut event: Event) -> Event {
-    for name in SAFE_ENVIRONMENT {
-        let field = match *name {
-            "INI_FILE_NAME" => "env_ini_file_name_hex",
-            "INVOCATION_ID" => "env_systemd_invocation_id_hex",
-            "JOURNAL_STREAM" => "env_systemd_journal_stream_hex",
-            "LINUXCNC_FORCE_REALTIME" => "env_linuxcnc_force_realtime_hex",
-            "NMLFILE" => "env_nmlfile_hex",
-            "PYTHONDONTWRITEBYTECODE" => "env_python_dont_write_bytecode_hex",
-            "RTAPI_FIFO_PATH" => "env_rtapi_fifo_path_hex",
-            "RTAPI_UID" => "env_rtapi_uid_hex",
-            "SYSTEMD_EXEC_PID" => "env_systemd_exec_pid_hex",
-            _ => unreachable!("safe environment catalog is exhaustive"),
-        };
+    for (name, field) in SAFE_ENVIRONMENT {
         event = match std::env::var_os(name) {
             Some(value) => event.field(field, hex_bytes(value.as_bytes())),
             None => event.field(field, "UNSET"),

@@ -15,8 +15,6 @@ pub use external::{
     ControllerFaultEvidenceSnapshot, ExternalDiagnosticSnapshot, H100FaultEvidenceSnapshot,
     SerialBridgeFaultEvidenceSnapshot,
 };
-#[cfg(test)]
-pub use report::Issue;
 pub use report::{
     DiagnosticReport, DiagnosticTransition, Severity, TransitionLogger, TransitionUpdate,
 };

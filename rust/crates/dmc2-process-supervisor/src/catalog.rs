@@ -7,9 +7,9 @@ const CATALOG: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../config/processes.tsv"
 ));
-const MAGIC: &str = "DMC2_PROCESS_CATALOG\t3";
+const MAGIC: &str = "DMC2_PROCESS_CATALOG\t4";
 const HEADER: &str =
-    "role\tprogram\tlaunch_site\townership\tcriticality\tbacktrace\targument_placement\tcore_dump_policy\towner_comm\tlive_snapshot_period_ms";
+    "role\tprogram\tlaunch_site\townership\tcriticality\tbacktrace\targument_placement\tcore_dump_policy\towner_comm\tlive_snapshot_period_ms\tcaught_signal_evidence";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ProcessRole {
@@ -56,6 +56,10 @@ impl ProcessRole {
     pub const fn live_snapshot_period_ms(self) -> u64 {
         self.definition.live_snapshot_period_ms
     }
+
+    pub const fn caught_signal_evidence(self) -> CaughtSignalEvidence {
+        self.definition.caught_signal_evidence
+    }
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -70,6 +74,7 @@ struct ProcessDefinition {
     core_dump_policy: CoreDumpPolicy,
     owner_comm: &'static str,
     live_snapshot_period_ms: u64,
+    caught_signal_evidence: CaughtSignalEvidence,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
@@ -112,6 +117,28 @@ impl Criticality {
 pub enum BacktraceKind {
     None,
     LinuxCncTask,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum CaughtSignalEvidence {
+    None,
+    LibcSignalIntTermV1,
+}
+
+impl CaughtSignalEvidence {
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::None => "none",
+            Self::LibcSignalIntTermV1 => "libc-signal-int-term-v1",
+        }
+    }
+
+    pub const fn expected_signals(self) -> &'static [i32] {
+        match self {
+            Self::None => &[],
+            Self::LibcSignalIntTermV1 => &[2, 15],
+        }
+    }
 }
 
 impl BacktraceKind {
@@ -290,6 +317,15 @@ fn validate_definitions(definitions: &[ProcessDefinition]) -> Result<(), Catalog
                 definition.owner_comm.to_owned(),
             ));
         }
+        if definition.caught_signal_evidence != CaughtSignalEvidence::None
+            && definition.ownership != Ownership::DirectChild
+        {
+            return Err(CatalogError::CaughtSignalOwnership {
+                role: definition.role.to_owned(),
+                ownership: definition.ownership,
+                evidence: definition.caught_signal_evidence,
+            });
+        }
     }
     Ok(())
 }
@@ -299,21 +335,19 @@ fn parse_definition(
     line: &'static str,
 ) -> Result<ProcessDefinition, CatalogError> {
     let fields = line.split('\t').collect::<Vec<_>>();
-    if fields.len() != 10 {
-        return Err(CatalogError::FieldCount {
-            line: line_number,
-            observed: fields.len(),
-        });
-    }
-    let [role, program, launch_site, ownership, criticality, backtrace, argument_placement, core_dump_policy, owner_comm, live_snapshot_period_ms] =
-        fields.as_slice()
-    else {
-        unreachable!("field count checked above")
-    };
+    let fields: [&'static str; 11] =
+        fields
+            .try_into()
+            .map_err(|fields: Vec<&'static str>| CatalogError::FieldCount {
+                line: line_number,
+                observed: fields.len(),
+            })?;
+    let [role, program, launch_site, ownership, criticality, backtrace, argument_placement, core_dump_policy, owner_comm, live_snapshot_period_ms, caught_signal_evidence] =
+        fields;
     for (name, value) in [
-        ("role", *role),
-        ("program", *program),
-        ("launch_site", *launch_site),
+        ("role", role),
+        ("program", program),
+        ("launch_site", launch_site),
     ] {
         if value.is_empty() {
             return Err(CatalogError::EmptyField {
@@ -336,7 +370,23 @@ fn parse_definition(
             line_number,
             live_snapshot_period_ms,
         )?,
+        caught_signal_evidence: parse_caught_signal_evidence(line_number, caught_signal_evidence)?,
     })
+}
+
+fn parse_caught_signal_evidence(
+    line: usize,
+    value: &str,
+) -> Result<CaughtSignalEvidence, CatalogError> {
+    match value {
+        "none" => Ok(CaughtSignalEvidence::None),
+        "libc-signal-int-term-v1" => Ok(CaughtSignalEvidence::LibcSignalIntTermV1),
+        _ => Err(CatalogError::Value {
+            line,
+            field: "caught_signal_evidence",
+            value: value.to_owned(),
+        }),
+    }
 }
 
 fn parse_live_snapshot_period_ms(line: usize, value: &str) -> Result<u64, CatalogError> {
@@ -456,6 +506,11 @@ pub enum CatalogError {
         ownership: Ownership,
         owner_comm: String,
     },
+    CaughtSignalOwnership {
+        role: String,
+        ownership: Ownership,
+        evidence: CaughtSignalEvidence,
+    },
 }
 
 impl fmt::Display for CatalogError {
@@ -473,7 +528,7 @@ impl fmt::Display for CatalogError {
             }
             Self::FieldCount { line, observed } => write!(
                 formatter,
-                "process catalog line {line} has {observed} fields; expected 10"
+                "process catalog line {line} has {observed} fields; expected 11"
             ),
             Self::EmptyField { line, field } => {
                 write!(formatter, "process catalog line {line} has empty {field}")
@@ -497,6 +552,16 @@ impl fmt::Display for CatalogError {
                 formatter,
                 "process role {role:?} with ownership {} has invalid owner_comm contract {owner_comm:?}",
                 ownership.name()
+            ),
+            Self::CaughtSignalOwnership {
+                role,
+                ownership,
+                evidence,
+            } => write!(
+                formatter,
+                "process role {role:?} with ownership {} cannot use caught-signal evidence contract {}",
+                ownership.name(),
+                evidence.name()
             ),
         }
     }
@@ -532,6 +597,7 @@ mod tests {
                 "rtapi-app",
                 "serial-bridge",
                 "session-lifecycle-test",
+                "signal-evidence-test",
                 "task-backtrace-test",
                 "task-monitor",
             ])
@@ -547,6 +613,11 @@ mod tests {
         assert_eq!(role.core_dump_policy(), CoreDumpPolicy::EnableToHardLimit);
         assert_eq!(role.owner_comm(), "dmc2-task-owner");
         assert_eq!(role.live_snapshot_period_ms(), 1_000);
+        assert_eq!(
+            role.caught_signal_evidence(),
+            CaughtSignalEvidence::LibcSignalIntTermV1
+        );
+        assert_eq!(role.caught_signal_evidence().expected_signals(), &[2, 15]);
     }
 
     #[test]

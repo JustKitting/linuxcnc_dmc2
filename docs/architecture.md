@@ -55,7 +55,13 @@ control machine state from that journal; it validates and displays records.
   It retains zombie-safe process and parent identity, pre-reap `/proc` and
   cgroup evidence, independently checked `waitid`/`wait4` status, resource
   usage, configured crash-dump limits, matching LinuxCNC task backtraces, and
-  identity-checked durable kernel-core copies for core-generating deaths.
+  identity-checked durable kernel-core copies for core-generating deaths. A
+  narrowly scoped native interposer records the `siginfo_t` for caught
+  SIGINT/SIGTERM deliveries to the catalogued LinuxCNC C consumers before
+  those consumers convert the signal into a zero exit. That nonblocking record
+  is explicitly best-effort. If non-reaping `waitid` fails, the direct owner
+  retains the child and degrades to nonblocking `wait4` until a real status is
+  reaped instead of abandoning the process.
   It never restarts LinuxCNC, changes machine state, or sends a signal to a
   tracked process.
   See `docs/process-lifecycle-tracking.md` for the exact evidence boundary and
@@ -111,6 +117,10 @@ control machine state from that journal; it validates and displays records.
    `linuxcncsvr`, `rtapi_app`, and owner descendants.
    Bidirectional source checks reject both an unowned live userspace launch and
    a production direct-child catalog entry that is absent from the live profile.
+   Every process-specific caught-signal mechanism is selected in that same
+   catalog; absence of the initialization and handler-registration handshake
+   remains explicit terminal evidence rather than being treated as proof that
+   no signal occurred.
 10. A LinuxCNC driver overlay must name an exact release commit and upstream
     commits, pass its recorded SHA-256 check, compile against the installed
     version, retain the installed module's export set, and deploy in the same

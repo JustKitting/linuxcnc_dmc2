@@ -2,9 +2,6 @@ use std::fmt;
 
 use dmc2_linuxcnc_interface::{error_message_contract_by_type, ErrorMessageContract};
 
-#[cfg(test)]
-use dmc2_linuxcnc_interface::ERROR_MESSAGE_CONTRACTS;
-
 use super::native::{RawErrorSnapshot, ERROR_MESSAGE_ABI_VERSION, ERROR_OBJECT_CAPACITY};
 
 const BASE_TYPE_OFFSET: usize = 0;

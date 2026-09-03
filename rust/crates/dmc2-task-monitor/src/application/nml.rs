@@ -8,9 +8,6 @@ use crate::snapshot::{
     NativeSnapshot, NativeTaskStatusChannel, DMC2_TASK_STATUS_NATIVE_OK,
 };
 
-#[cfg(test)]
-use crate::snapshot::DMC2_TASK_STATUS_NATIVE_ERROR;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(crate) enum PollDisposition {
     Snapshot,

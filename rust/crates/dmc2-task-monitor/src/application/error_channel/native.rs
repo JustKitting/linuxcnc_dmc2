@@ -90,16 +90,6 @@ impl fmt::Display for SourceCodeDisplay {
     }
 }
 
-impl ErrorChannelFault {
-    #[cfg(test)]
-    pub(in crate::application) fn test_fault(transport: TransportStatus) -> Self {
-        Self {
-            transport,
-            reason: FaultReason::Native(NativeResult::TransportError),
-        }
-    }
-}
-
 #[derive(Clone, Debug, Eq, PartialEq)]
 enum FaultReason {
     Native(NativeResult),

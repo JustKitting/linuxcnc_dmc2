@@ -2,8 +2,10 @@ use std::io;
 use std::mem::MaybeUninit;
 use std::os::raw::{c_int, c_long, c_uint};
 use std::os::unix::process::ExitStatusExt;
-use std::process::Child;
 use std::process::ExitStatus;
+
+#[cfg(test)]
+use std::process::Child;
 
 use crate::event::{signal_name, Event};
 
@@ -123,6 +125,13 @@ pub enum AnyWait {
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum AnyReap {
+    Running,
+    Terminal(WaitEvidence),
+    NoChildren,
+}
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub struct ResourceUsage {
     pub user_seconds: c_long,
     pub user_microseconds: c_long,
@@ -146,18 +155,14 @@ pub struct ResourceUsage {
 
 #[cfg(test)]
 pub fn observe(child: &Child) -> io::Result<TerminalObservation> {
-    let pid = i32::try_from(child.id()).map_err(|_| {
+    let child_pid = child.id();
+    let pid = i32::try_from(child_pid).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
-            format!("child PID {} does not fit pid_t", child.id()),
+            format!("child PID {child_pid} does not fit pid_t"),
         )
     })?;
-    observe_id(
-        P_PID,
-        u32::try_from(pid).expect("positive pid_t fits u32"),
-        false,
-    )?
-    .ok_or_else(|| {
+    observe_id(P_PID, child_pid, false)?.ok_or_else(|| {
         io::Error::other(format!(
             "blocking waitid returned no event for direct child {pid}"
         ))
@@ -175,50 +180,87 @@ pub fn observe_any_nonblocking() -> io::Result<AnyWait> {
 }
 
 pub fn observe_pid_nonblocking(pid: u32) -> io::Result<Option<TerminalObservation>> {
-    let pid = i32::try_from(pid).map_err(|_| {
+    i32::try_from(pid).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("child PID {pid} does not fit pid_t"),
         )
     })?;
-    observe_id(
-        P_PID,
-        u32::try_from(pid).expect("positive pid_t fits u32"),
-        true,
-    )
+    observe_id(P_PID, pid, true)
 }
 
+#[cfg(test)]
 pub fn reap(child: &mut Child) -> io::Result<WaitEvidence> {
     reap_pid(child.id())
 }
 
+#[cfg(test)]
 pub fn reap_pid(pid: u32) -> io::Result<WaitEvidence> {
+    reap_pid_with_options(pid, 0)?.ok_or_else(|| {
+        io::Error::other(format!(
+            "blocking wait4 returned no terminal state for child {pid}"
+        ))
+    })
+}
+
+/// Polls and reaps `pid` only if it is already terminal.
+///
+/// Unlike `observe_pid_nonblocking`, a successful terminal result consumes the
+/// kernel wait status. This is the direct owner's degraded fallback when
+/// `waitid(WNOWAIT)` itself has failed: ownership and final status are retained,
+/// but the zombie `/proc` snapshot can no longer be taken before the reap.
+pub fn reap_pid_nonblocking(pid: u32) -> io::Result<Option<WaitEvidence>> {
+    reap_pid_with_options(pid, WNOHANG)
+}
+
+pub fn reap_any_nonblocking() -> io::Result<AnyReap> {
+    const ECHILD_LINUX: i32 = 10;
+    match wait4_with_options(-1, WNOHANG) {
+        Ok(Some(evidence)) => Ok(AnyReap::Terminal(evidence)),
+        Ok(None) => Ok(AnyReap::Running),
+        Err(error) if error.raw_os_error() == Some(ECHILD_LINUX) => Ok(AnyReap::NoChildren),
+        Err(error) => Err(error),
+    }
+}
+
+fn reap_pid_with_options(pid: u32, options: c_int) -> io::Result<Option<WaitEvidence>> {
     let pid = i32::try_from(pid).map_err(|_| {
         io::Error::new(
             io::ErrorKind::InvalidInput,
             format!("child PID {pid} does not fit pid_t"),
         )
     })?;
+    wait4_with_options(pid, options)
+}
+
+fn wait4_with_options(pid: c_int, options: c_int) -> io::Result<Option<WaitEvidence>> {
     loop {
         let mut status = 0_i32;
         let mut raw_usage = MaybeUninit::<RawResourceUsage>::zeroed();
         // SAFETY: `status` and `raw_usage` are valid writable objects, `pid`
-        // names a waitable child previously reported by waitid, and options=0
-        // requests one blocking terminal-state result without retaining either
-        // pointer after the call.
-        let result = unsafe { wait4(pid, &mut status, 0, raw_usage.as_mut_ptr()) };
-        if result == pid {
+        // names a direct waitable child, and `options` is either zero or
+        // WNOHANG. Neither pointer is retained after the call.
+        let result = unsafe { wait4(pid, &mut status, options, raw_usage.as_mut_ptr()) };
+        if result > 0 && (pid == -1 || result == pid) {
             // SAFETY: wait4 returned success and initialized the rusage object.
             let raw_usage = unsafe { raw_usage.assume_init() };
-            return Ok(WaitEvidence {
-                pid: u32::try_from(result).expect("positive pid_t fits u32"),
+            let observed_pid = u32::try_from(result).map_err(|_| {
+                io::Error::other(format!(
+                    "wait4 returned positive PID {result} that does not fit u32"
+                ))
+            })?;
+            return Ok(Some(WaitEvidence {
+                pid: observed_pid,
                 status: ExitStatus::from_raw(status),
                 usage: raw_usage.into(),
-            });
+            }));
+        }
+        if result == 0 && options & WNOHANG != 0 {
+            return Ok(None);
         }
         if result >= 0 {
             return Err(io::Error::other(format!(
-                "wait4 returned PID {result} while reaping child {pid}"
+                "wait4 returned PID {result} while waiting for target {pid}"
             )));
         }
         let error = io::Error::last_os_error();
@@ -248,7 +290,7 @@ fn observe_id(
             if information.pid == 0 {
                 return Ok(None);
             }
-            return Ok(Some(information.into()));
+            return Ok(Some(TerminalObservation::try_from(information)?));
         }
         let error = io::Error::last_os_error();
         if error.kind() != io::ErrorKind::Interrupted {
@@ -333,10 +375,18 @@ struct RawSignalInformation {
     remaining: [u8; 80],
 }
 
-impl From<RawSignalInformation> for TerminalObservation {
-    fn from(value: RawSignalInformation) -> Self {
-        Self {
-            pid: u32::try_from(value.pid).expect("waitid returned positive child PID"),
+impl TryFrom<RawSignalInformation> for TerminalObservation {
+    type Error = io::Error;
+
+    fn try_from(value: RawSignalInformation) -> Result<Self, Self::Error> {
+        let pid = u32::try_from(value.pid).map_err(|_| {
+            io::Error::other(format!(
+                "waitid returned invalid non-positive child PID {}",
+                value.pid
+            ))
+        })?;
+        Ok(Self {
+            pid,
             signal: value.signal,
             error: value.error,
             code: value.code,
@@ -344,7 +394,7 @@ impl From<RawSignalInformation> for TerminalObservation {
             status: value.status,
             user_ticks: value.user_ticks,
             system_ticks: value.system_ticks,
-        }
+        })
     }
 }
 
@@ -388,6 +438,8 @@ unsafe extern "C" {
 mod tests {
     use super::*;
     use std::process::Command;
+    use std::thread;
+    use std::time::{Duration, Instant};
 
     #[test]
     fn retains_a_terminal_child_for_proc_capture_before_reaping_it() {
@@ -417,6 +469,44 @@ mod tests {
         assert!(
             std::fs::metadata(format!("/proc/{pid}")).is_err(),
             "reaped child remained in proc"
+        );
+    }
+
+    #[test]
+    fn nonblocking_wait4_fallback_keeps_a_running_child_and_reaps_its_real_status() {
+        let child = Command::new("/bin/sh")
+            .args(["-c", "sleep 0.05; exit 41"])
+            .spawn()
+            .expect("spawn fallback child");
+        let pid = child.id();
+
+        assert_eq!(
+            reap_pid_nonblocking(pid).expect("poll live child"),
+            None,
+            "nonblocking wait4 reaped a child before it terminated"
+        );
+
+        let deadline = Instant::now() + Duration::from_secs(2);
+        let evidence = loop {
+            if let Some(evidence) =
+                reap_pid_nonblocking(pid).expect("poll fallback child terminal state")
+            {
+                break evidence;
+            }
+            assert!(
+                Instant::now() < deadline,
+                "fallback child did not terminate before the test deadline"
+            );
+            thread::sleep(Duration::from_millis(5));
+        };
+
+        assert_eq!(evidence.pid, pid);
+        assert_eq!(evidence.status.code(), Some(41));
+        assert!(evidence.usage.user_seconds >= 0);
+        assert!(evidence.usage.system_seconds >= 0);
+        assert!(
+            std::fs::metadata(format!("/proc/{pid}")).is_err(),
+            "fallback wait4 did not reap the terminal child"
         );
     }
 

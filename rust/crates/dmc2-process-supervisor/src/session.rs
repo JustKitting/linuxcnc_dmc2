@@ -1,6 +1,5 @@
 use std::collections::BTreeMap;
 use std::ffi::{OsStr, OsString};
-use std::fmt;
 use std::fs;
 use std::io;
 use std::os::raw::{c_int, c_ulong};
@@ -10,19 +9,39 @@ use std::process::{Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, SystemTimeError, UNIX_EPOCH};
 
-use crate::backtrace::{self, BacktraceEvidence};
-use crate::catalog::{self, BacktraceKind, Ownership, ProcessRole};
-use crate::cli::{CliError, Invocation};
-use crate::core_artifact::{self, CoreArtifactEvidence, WorkingDirectoryEvidence};
+use crate::backtrace::BacktraceEvidence;
+use crate::catalog::{self, Ownership, ProcessRole};
+use crate::cli::Invocation;
+use crate::core_artifact::{self, WorkingDirectoryEvidence};
 use crate::event::{encode_arguments, hex_bytes, Event};
-use crate::journal::{Journal, JournalError};
+use crate::journal::{FailureTracker, Journal};
 use crate::limits::CoreDumpPlan;
 use crate::live_snapshot;
 use crate::process;
 use crate::runtime::TRACKING_FAILURE_EXIT_CODE;
-use crate::wait::{self, AnyWait, TerminalObservation, WaitEvidence};
+use crate::wait::{self, AnyReap, AnyWait, TerminalObservation, WaitEvidence};
+use crate::wait_degradation::WaitDegradation;
+
+mod error;
+mod reap;
+mod terminal;
+
+pub use error::SessionError;
+use reap::reap_retained_session_child;
+use terminal::{
+    child_terminal_observed_event, child_terminal_reaped_fallback_event, child_terminated_event,
+    session_backtrace, SessionRootObservation,
+};
 
 const OBSERVATION_PERIOD: Duration = Duration::from_millis(5);
+
+enum SessionTerminalAcquisition {
+    Retained(TerminalObservation),
+    ReapedFallback {
+        evidence: WaitEvidence,
+        degradation: WaitDegradation,
+    },
+}
 
 pub fn run_session(arguments: impl IntoIterator<Item = OsString>) -> Result<u8, SessionError> {
     let invocation = Invocation::parse(arguments).map_err(SessionError::Cli)?;
@@ -163,7 +182,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
     };
     let root_snapshot_transition = root.live_snapshots.capture_now(linuxcnc_pid);
     let event = child_started_event(supervisor_pid, linuxcnc_pid, &root);
-    let mut retained_journal_errors = Vec::new();
+    let mut retained_journal_errors = FailureTracker::new();
     append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
     if let Some(transition) = root_snapshot_transition {
         append_child_live_snapshot_transition(
@@ -179,72 +198,17 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
 
     let mut linuxcnc_status = None;
     let mut children_probe_error_reported = false;
-    let mut wait_error_reported = false;
+    let mut wait_degradation: Option<WaitDegradation> = None;
+    let mut reap_degradations = Vec::new();
     loop {
-        match direct_children(supervisor_pid) {
-            Ok(pids) => {
-                if children_probe_error_reported {
-                    let event = session_event(
-                        "session-children-probe-restored",
-                        unix_ns_or_zero(),
-                        supervisor_pid,
-                    );
-                    append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
-                }
-                children_probe_error_reported = false;
-                for pid in pids {
-                    if let Some(existing) = children.get_mut(&pid) {
-                        if existing.catalog_role.is_none() {
-                            let observed =
-                                classify_child(pid, invocation.role.live_snapshot_period_ms());
-                            if existing.should_reclassify_as(&observed) {
-                                let event = child_reclassified_event(
-                                    supervisor_pid,
-                                    pid,
-                                    existing,
-                                    &observed,
-                                );
-                                append_after_spawn(
-                                    &mut journal,
-                                    &event,
-                                    &mut retained_journal_errors,
-                                );
-                                existing.reclassify_from(&observed);
-                            }
-                        }
-                        continue;
-                    }
-                    let mut child = classify_child(pid, invocation.role.live_snapshot_period_ms());
-                    let snapshot_transition = child.live_snapshots.capture_now(pid);
-                    let event = child_started_event(supervisor_pid, pid, &child);
-                    append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
-                    if let Some(transition) = snapshot_transition {
-                        append_child_live_snapshot_transition(
-                            &mut journal,
-                            supervisor_pid,
-                            pid,
-                            &child,
-                            transition,
-                            &mut retained_journal_errors,
-                        );
-                    }
-                    children.insert(pid, child);
-                }
-            }
-            Err(error) if !children_probe_error_reported => {
-                children_probe_error_reported = true;
-                let event = session_event(
-                    "session-children-probe-failed",
-                    unix_ns_or_zero(),
-                    supervisor_pid,
-                )
-                .field("error_kind", format!("{:?}", error.kind()))
-                .field("raw_os_error", optional_i32(error.raw_os_error()))
-                .field("error_hex", hex_bytes(error.to_string().as_bytes()));
-                append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
-            }
-            Err(_) => {}
-        }
+        refresh_session_children(
+            &mut journal,
+            supervisor_pid,
+            invocation.role.live_snapshot_period_ms(),
+            &mut children,
+            &mut children_probe_error_reported,
+            &mut retained_journal_errors,
+        );
 
         for (pid, child) in &mut children {
             if let Some(transition) = child.live_snapshots.capture_if_due(*pid) {
@@ -261,15 +225,100 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
 
         let mut no_children = false;
         loop {
-            let wait_result = wait::observe_any_nonblocking();
-            if wait_error_reported && wait_result.is_ok() {
-                let event =
-                    session_event("session-wait-restored", unix_ns_or_zero(), supervisor_pid);
-                append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
-                wait_error_reported = false;
-            }
-            match wait_result {
-                Ok(AnyWait::Terminal(observation)) => {
+            let acquisition = if let Some(degradation) = &mut wait_degradation {
+                match wait::reap_any_nonblocking() {
+                    Ok(AnyReap::Terminal(evidence)) => {
+                        if degradation.record_fallback_success() {
+                            let event = degradation.summary_event_fields(
+                                session_event(
+                                    "session-fallback-reap-poll-restored",
+                                    unix_ns_or_zero(),
+                                    supervisor_pid,
+                                )
+                                .field("fallback_wait4_result", "terminal-reaped"),
+                            );
+                            append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
+                        }
+                        SessionTerminalAcquisition::ReapedFallback {
+                            evidence,
+                            degradation: degradation.clone(),
+                        }
+                    }
+                    Ok(AnyReap::Running) => {
+                        if degradation.record_fallback_success() {
+                            let event = degradation.summary_event_fields(
+                                session_event(
+                                    "session-fallback-reap-poll-restored",
+                                    unix_ns_or_zero(),
+                                    supervisor_pid,
+                                )
+                                .field("fallback_wait4_result", "children-running"),
+                            );
+                            append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
+                        }
+                        break;
+                    }
+                    Ok(AnyReap::NoChildren) => {
+                        if degradation.record_fallback_success() {
+                            let event = degradation.summary_event_fields(
+                                session_event(
+                                    "session-fallback-reap-poll-restored",
+                                    unix_ns_or_zero(),
+                                    supervisor_pid,
+                                )
+                                .field("fallback_wait4_result", "no-children"),
+                            );
+                            append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
+                        }
+                        no_children = true;
+                        break;
+                    }
+                    Err(error) => {
+                        if let Some(error) = degradation.record_fallback_failure(&error) {
+                            let event = error.fallback_event_fields(
+                                degradation.summary_event_fields(
+                                    session_event(
+                                        "session-fallback-reap-poll-failed",
+                                        unix_ns_or_zero(),
+                                        supervisor_pid,
+                                    )
+                                    .field("session_ownership_released", false),
+                                ),
+                            );
+                            append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
+                        }
+                        break;
+                    }
+                }
+            } else {
+                match wait::observe_any_nonblocking() {
+                    Ok(AnyWait::Terminal(observation)) => {
+                        SessionTerminalAcquisition::Retained(observation)
+                    }
+                    Ok(AnyWait::Running) => break,
+                    Ok(AnyWait::NoChildren) => {
+                        no_children = true;
+                        break;
+                    }
+                    Err(error) => {
+                        let degradation = WaitDegradation::new(error);
+                        let event = degradation.waitid_event_fields(
+                            session_event("session-wait-failed", unix_ns_or_zero(), supervisor_pid)
+                                .field("session_ownership_released", false)
+                                .field(
+                                    "terminal_acquisition_fallback",
+                                    "wait4-p-all-wnohang-reaping",
+                                ),
+                        );
+                        append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
+                        wait_degradation = Some(degradation);
+                        continue;
+                    }
+                }
+            };
+
+            match acquisition {
+                SessionTerminalAcquisition::Retained(observation) => {
                     let terminal_identity =
                         classify_child(observation.pid, invocation.role.live_snapshot_period_ms());
                     if let Some(existing) = children.get_mut(&observation.pid) {
@@ -323,27 +372,16 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
                         child.first_observed_wall,
                         exit_ns,
                     );
-                    let evidence = match wait::reap_pid(observation.pid) {
-                        Ok(evidence) => evidence,
-                        Err(source) => {
-                            let event = observation.event_fields(
-                                session_event(
-                                    "session-child-reap-failed",
-                                    unix_ns_or_zero(),
-                                    supervisor_pid,
-                                )
-                                .field("child_pid", observation.pid)
-                                .field("error_kind", format!("{:?}", source.kind()))
-                                .field("raw_os_error", optional_i32(source.raw_os_error()))
-                                .field("error_hex", hex_bytes(source.to_string().as_bytes())),
-                            );
-                            append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
-                            return Err(SessionError::Reap {
-                                child_pid: observation.pid,
-                                source,
-                            });
-                        }
-                    };
+                    let (evidence, reap_degradation) = reap_retained_session_child(
+                        &mut journal,
+                        supervisor_pid,
+                        observation.pid,
+                        observation,
+                        invocation.role.live_snapshot_period_ms(),
+                        &mut children,
+                        &mut children_probe_error_reported,
+                        &mut retained_journal_errors,
+                    );
                     let child = children.remove(&evidence.pid).unwrap_or(terminal_identity);
                     let event = child_terminated_event(
                         supervisor_pid,
@@ -352,32 +390,103 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
                         Some(&child),
                         observation_state,
                         exit_ns,
-                        observation,
+                        Some(observation),
                         evidence,
                         &backtrace,
                         &core_artifact,
                     );
+                    let event = match &reap_degradation {
+                        Some(degradation) => degradation.summary_event_fields(event),
+                        None => event.field("terminal_reap_degraded", false),
+                    };
                     append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
+                    if let Some(degradation) = reap_degradation {
+                        reap_degradations.push((evidence.pid, degradation));
+                    }
                     if evidence.pid == linuxcnc_pid {
                         linuxcnc_status = Some(evidence.status);
                     }
                 }
-                Ok(AnyWait::Running) => break,
-                Ok(AnyWait::NoChildren) => {
-                    no_children = true;
-                    break;
-                }
-                Err(error) if !wait_error_reported => {
-                    wait_error_reported = true;
-                    let event =
-                        session_event("session-wait-failed", unix_ns_or_zero(), supervisor_pid)
-                            .field("error_kind", format!("{:?}", error.kind()))
-                            .field("raw_os_error", optional_i32(error.raw_os_error()))
-                            .field("error_hex", hex_bytes(error.to_string().as_bytes()));
+                SessionTerminalAcquisition::ReapedFallback {
+                    evidence,
+                    degradation,
+                } => {
+                    let child_pid = evidence.pid;
+                    let session_root = SessionRootObservation::capture(
+                        child_pid,
+                        linuxcnc_pid,
+                        linuxcnc_status.is_some(),
+                    );
+                    let observation_state = if children.contains_key(&child_pid) {
+                        "start-observed-reaped-fallback"
+                    } else {
+                        "terminal-only-reaped-fallback"
+                    };
+                    let terminal_event = child_terminal_reaped_fallback_event(
+                        supervisor_pid,
+                        linuxcnc_pid,
+                        &session_root,
+                        children.get(&child_pid),
+                        observation_state,
+                        evidence,
+                        &children,
+                        &degradation,
+                    );
+                    append_after_spawn(&mut journal, &terminal_event, &mut retained_journal_errors);
+                    let exit_ns = unix_ns_or_zero();
+                    let (backtrace, core_artifact) = match children.get(&child_pid) {
+                        Some(child) => (
+                            session_backtrace(
+                                journal.path(),
+                                child,
+                                child_pid,
+                                child.first_observed_wall,
+                                exit_ns,
+                            ),
+                            core_artifact::capture(
+                                journal.path(),
+                                child_pid,
+                                evidence.status.core_dumped(),
+                                &child.working_directory,
+                                &fallback_cwd,
+                                child.first_observed_wall,
+                                exit_ns,
+                            ),
+                        ),
+                        None => (
+                            BacktraceEvidence::NotApplicable,
+                            core_artifact::capture(
+                                journal.path(),
+                                child_pid,
+                                evidence.status.core_dumped(),
+                                &fallback_cwd,
+                                &fallback_cwd,
+                                observed_at_wall,
+                                exit_ns,
+                            ),
+                        ),
+                    };
+                    let child = children.remove(&child_pid);
+                    let event = child_terminated_event(
+                        supervisor_pid,
+                        linuxcnc_pid,
+                        &session_root,
+                        child.as_ref(),
+                        observation_state,
+                        exit_ns,
+                        None,
+                        evidence,
+                        &backtrace,
+                        &core_artifact,
+                    );
+                    let event = degradation
+                        .summary_event_fields(event)
+                        .field("terminal_reap_degraded", false);
                     append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
-                    break;
+                    if child_pid == linuxcnc_pid {
+                        linuxcnc_status = Some(evidence.status);
+                    }
                 }
-                Err(_) => break,
             }
         }
 
@@ -404,18 +513,130 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
             .field("linuxcnc_exit_code", optional_i32(status.code()))
             .field("linuxcnc_signal", optional_i32(status.signal()))
             .field("remaining_children", children.len());
+            let event = match &wait_degradation {
+                Some(degradation) => degradation.summary_event_fields(event),
+                None => event.field("terminal_observation_degraded", false),
+            };
+            let reap_wait4_failures = reap_degradations
+                .iter()
+                .map(|(_, degradation)| degradation.failures())
+                .fold(0_u64, u64::saturating_add);
+            let event = event
+                .field("terminal_reap_degraded", !reap_degradations.is_empty())
+                .field("terminal_reap_degraded_children", reap_degradations.len())
+                .field("terminal_reap_wait4_failures", reap_wait4_failures)
+                .field(
+                    "terminal_reap_degraded_pid_list",
+                    reap_degradations
+                        .iter()
+                        .map(|(pid, _)| pid.to_string())
+                        .collect::<Vec<_>>()
+                        .join(","),
+                );
+            let event = retained_journal_errors.summary_event_fields(event);
             append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
-            if !retained_journal_errors.is_empty() {
-                let first = retained_journal_errors.remove(0);
+            if let Some(degradation) = wait_degradation.take() {
+                let first_journal_failure = retained_journal_errors.take_first();
+                return Err(SessionError::TerminalObservationDegraded {
+                    waitid_error_kind: degradation.waitid_error().kind,
+                    waitid_raw_os_error: degradation.waitid_error().raw_os_error,
+                    waitid_error: degradation.waitid_error().detail.clone(),
+                    fallback_wait4_failures: degradation.fallback_wait4_failures(),
+                    retained_reap_degraded_children: reap_degradations.len(),
+                    retained_reap_wait4_failures: reap_wait4_failures,
+                    first_journal_failure,
+                    additional_journal_failures: retained_journal_errors.additional_failures(),
+                });
+            }
+            if !reap_degradations.is_empty() {
+                let (child_pid, degradation) = reap_degradations.remove(0);
+                let first_journal_failure = retained_journal_errors.take_first();
+                return Err(SessionError::TerminalReapDegraded {
+                    child_pid,
+                    additional_affected_children: reap_degradations.len(),
+                    first_error_kind: degradation.first_error().kind,
+                    first_raw_os_error: degradation.first_error().raw_os_error,
+                    first_error: degradation.first_error().detail.clone(),
+                    wait4_failures: reap_wait4_failures,
+                    first_journal_failure,
+                    additional_journal_failures: retained_journal_errors.additional_failures(),
+                });
+            }
+            if let Some(first) = retained_journal_errors.take_first() {
                 return Err(SessionError::JournalAfterSpawn {
                     first,
-                    additional_failures: retained_journal_errors.len(),
+                    additional_failures: retained_journal_errors.additional_failures(),
                 });
             }
             return Ok(supervisor_exit_code(status));
         }
 
         thread::sleep(OBSERVATION_PERIOD);
+    }
+}
+
+fn refresh_session_children(
+    journal: &mut Journal,
+    supervisor_pid: u32,
+    snapshot_period_ms: u64,
+    children: &mut BTreeMap<u32, ObservedChild>,
+    probe_error_reported: &mut bool,
+    retained_journal_errors: &mut FailureTracker,
+) {
+    match direct_children(supervisor_pid) {
+        Ok(pids) => {
+            if *probe_error_reported {
+                let event = session_event(
+                    "session-children-probe-restored",
+                    unix_ns_or_zero(),
+                    supervisor_pid,
+                );
+                append_after_spawn(journal, &event, retained_journal_errors);
+            }
+            *probe_error_reported = false;
+            for pid in pids {
+                if let Some(existing) = children.get_mut(&pid) {
+                    if existing.catalog_role.is_none() {
+                        let observed = classify_child(pid, snapshot_period_ms);
+                        if existing.should_reclassify_as(&observed) {
+                            let event =
+                                child_reclassified_event(supervisor_pid, pid, existing, &observed);
+                            append_after_spawn(journal, &event, retained_journal_errors);
+                            existing.reclassify_from(&observed);
+                        }
+                    }
+                    continue;
+                }
+                let mut child = classify_child(pid, snapshot_period_ms);
+                let snapshot_transition = child.live_snapshots.capture_now(pid);
+                let event = child_started_event(supervisor_pid, pid, &child);
+                append_after_spawn(journal, &event, retained_journal_errors);
+                if let Some(transition) = snapshot_transition {
+                    append_child_live_snapshot_transition(
+                        journal,
+                        supervisor_pid,
+                        pid,
+                        &child,
+                        transition,
+                        retained_journal_errors,
+                    );
+                }
+                children.insert(pid, child);
+            }
+        }
+        Err(error) if !*probe_error_reported => {
+            *probe_error_reported = true;
+            let event = session_event(
+                "session-children-probe-failed",
+                unix_ns_or_zero(),
+                supervisor_pid,
+            )
+            .field("error_kind", format!("{:?}", error.kind()))
+            .field("raw_os_error", optional_i32(error.raw_os_error()))
+            .field("error_hex", hex_bytes(error.to_string().as_bytes()));
+            append_after_spawn(journal, &event, retained_journal_errors);
+        }
+        Err(_) => {}
     }
 }
 
@@ -440,7 +661,7 @@ fn append_child_live_snapshot_transition(
     pid: u32,
     child: &ObservedChild,
     transition: live_snapshot::CaptureTransition,
-    retained_journal_errors: &mut Vec<JournalError>,
+    retained_journal_errors: &mut FailureTracker,
 ) {
     let event = session_event(
         transition.session_event_name(),
@@ -487,322 +708,6 @@ fn child_reclassified_event(
     );
     let event = catalog_event_fields(event, observed.catalog_role);
     process::child_event_fields(event, pid)
-}
-
-fn child_terminal_observed_event(
-    supervisor_pid: u32,
-    linuxcnc_pid: u32,
-    session_root: &SessionRootObservation,
-    child: Option<&ObservedChild>,
-    terminal_identity: &ObservedChild,
-    observation_state: &'static str,
-    observation: TerminalObservation,
-    children: &BTreeMap<u32, ObservedChild>,
-) -> Event {
-    let event = session_event(
-        "session-child-terminal-observed",
-        unix_ns_or_zero(),
-        supervisor_pid,
-    )
-    .field("role", child.map_or("unknown", |child| child.role.as_str()))
-    .field(
-        "relation",
-        child.map_or("unobserved-session-descendant", |child| child.relation),
-    )
-    .field("layer", child.map_or("unobserved", |child| child.layer))
-    .field(
-        "identity_source",
-        child.map_or("terminal-proc-snapshot", |child| child.identity_source),
-    )
-    .field("terminal_role", &terminal_identity.role)
-    .field("terminal_layer", terminal_identity.layer)
-    .field(
-        "terminal_identity_source",
-        terminal_identity.identity_source,
-    )
-    .field(
-        "terminal_identity_matches_initial",
-        child.is_some_and(|child| child.role == terminal_identity.role),
-    )
-    .field(
-        "first_observed_unix_ns",
-        child.map_or_else(
-            || "NONE".to_owned(),
-            |child| system_time_unix_ns(child.first_observed_wall).to_string(),
-        ),
-    )
-    .field("observation_state", observation_state)
-    .field("snapshot_phase", "terminal-before-reap");
-    let event = session_root.event_fields(event, linuxcnc_pid);
-    let event = catalog_event_fields(event, child.and_then(|child| child.catalog_role));
-    let event = observation.event_fields(event);
-    let event = tracked_children_event_fields(event, children, observation.pid, child);
-    let event = process::terminal_child_event_fields(event, observation.pid);
-    match child {
-        Some(child) => child.live_snapshots.full_event_fields(event),
-        None => event.field("last_live_snapshot_state", "untracked-terminal-only"),
-    }
-}
-
-fn child_terminated_event(
-    supervisor_pid: u32,
-    linuxcnc_pid: u32,
-    session_root: &SessionRootObservation,
-    child: Option<&ObservedChild>,
-    observation_state: &'static str,
-    terminated_unix_ns: u128,
-    observation: TerminalObservation,
-    evidence: WaitEvidence,
-    backtrace: &BacktraceEvidence,
-    core_artifact: &CoreArtifactEvidence,
-) -> Event {
-    let (role, relation, observed_ns) = match child {
-        Some(child) => (
-            child.role.as_str(),
-            child.relation,
-            child.first_observed.elapsed().as_nanos(),
-        ),
-        None => ("unknown", "unobserved-session-descendant", 0),
-    };
-    let event = session_event(
-        "session-child-terminated",
-        terminated_unix_ns,
-        supervisor_pid,
-    )
-    .field("role", role)
-    .field("relation", relation)
-    .field("layer", child.map_or("unobserved", |child| child.layer))
-    .field(
-        "identity_source",
-        child.map_or("unavailable-after-reap", |child| child.identity_source),
-    )
-    .field("observation_state", observation_state)
-    .field(
-        "first_observed_unix_ns",
-        child.map_or_else(
-            || "NONE".to_owned(),
-            |child| system_time_unix_ns(child.first_observed_wall).to_string(),
-        ),
-    )
-    .field("elapsed_since_observed_ns", observed_ns)
-    .field("waitid_wait4_consistent", observation.agrees_with(evidence));
-    let event = session_root.event_fields(event, linuxcnc_pid);
-    let event = catalog_event_fields(event, child.and_then(|child| child.catalog_role));
-    let event = observation.event_fields(event);
-    let event = evidence.event_fields(event);
-    let event = backtrace.event_fields(event);
-    let event = core_artifact.event_fields(event);
-    let event = match child {
-        Some(child) => child.live_snapshots.summary_event_fields(event),
-        None => event.field("last_live_snapshot_state", "untracked-terminal-only"),
-    };
-    let outcome = match (
-        evidence.status.signal(),
-        evidence.status.code(),
-        backtrace.reported_signal(),
-    ) {
-        (_, _, Some(8 | 11)) => "linuxcnc-handled-fatal-signal",
-        (Some(_), _, _) => "kernel-signal-termination",
-        (None, Some(0), _) => "zero-exit",
-        (None, Some(_), _) => "nonzero-exit",
-        _ => "unknown-wait-status",
-    };
-    event.field("outcome", outcome)
-}
-
-fn session_backtrace(
-    journal_path: &Path,
-    child: &ObservedChild,
-    child_pid: u32,
-    process_not_before: SystemTime,
-    exit_unix_ns: u128,
-) -> BacktraceEvidence {
-    if child.layer != "catalogued-workload" {
-        return BacktraceEvidence::NotApplicable;
-    }
-    match child.catalog_role.map(ProcessRole::backtrace) {
-        Some(BacktraceKind::LinuxCncTask) => {
-            backtrace::capture(journal_path, child_pid, process_not_before, exit_unix_ns)
-        }
-        Some(BacktraceKind::None) | None => BacktraceEvidence::NotApplicable,
-    }
-}
-
-#[derive(Debug)]
-enum SessionRootObservation {
-    Nonterminal {
-        observed_unix_ns: u128,
-    },
-    TerminalPending {
-        observed_unix_ns: u128,
-        waitid: TerminalObservation,
-    },
-    TerminalEvent {
-        observed_unix_ns: u128,
-    },
-    AlreadyReaped {
-        observed_unix_ns: u128,
-    },
-    ProbeFailed {
-        observed_unix_ns: u128,
-        error_kind: String,
-        raw_os_error: Option<i32>,
-        error_hex: String,
-    },
-}
-
-impl SessionRootObservation {
-    fn capture(terminal_pid: u32, linuxcnc_pid: u32, status_captured: bool) -> Self {
-        let observed_unix_ns = unix_ns_or_zero();
-        if terminal_pid == linuxcnc_pid {
-            return Self::TerminalEvent { observed_unix_ns };
-        }
-        if status_captured {
-            return Self::AlreadyReaped { observed_unix_ns };
-        }
-        match wait::observe_pid_nonblocking(linuxcnc_pid) {
-            Ok(None) => Self::Nonterminal { observed_unix_ns },
-            Ok(Some(waitid)) => Self::TerminalPending {
-                observed_unix_ns,
-                waitid,
-            },
-            Err(error) => Self::ProbeFailed {
-                observed_unix_ns,
-                error_kind: format!("{:?}", error.kind()),
-                raw_os_error: error.raw_os_error(),
-                error_hex: hex_bytes(error.to_string().as_bytes()),
-            },
-        }
-    }
-
-    fn event_fields(&self, event: Event, linuxcnc_pid: u32) -> Event {
-        let event = event
-            .field("linuxcnc_pid", linuxcnc_pid)
-            .field("session_root_observation_unix_ns", self.observed_unix_ns());
-        match self {
-            Self::Nonterminal { .. } => event
-                .field("session_root_state", "nonterminal-at-probe")
-                .field(
-                    "session_root_observation_method",
-                    "waitid-p-pid-wnohang-wnowait",
-                )
-                .field("session_root_terminal_at_child_observation", "false"),
-            Self::TerminalPending { waitid, .. } => event
-                .field("session_root_state", "terminal-pending-at-probe")
-                .field(
-                    "session_root_observation_method",
-                    "waitid-p-pid-wnohang-wnowait",
-                )
-                .field("session_root_terminal_at_child_observation", "true")
-                .field("session_root_waitid_pid", waitid.pid)
-                .field("session_root_waitid_signal", waitid.signal)
-                .field("session_root_waitid_error", waitid.error)
-                .field("session_root_waitid_code", waitid.code)
-                .field("session_root_waitid_code_name", waitid.code_name())
-                .field("session_root_waitid_uid", waitid.uid)
-                .field("session_root_waitid_status", waitid.status)
-                .field("session_root_waitid_user_ticks", waitid.user_ticks)
-                .field("session_root_waitid_system_ticks", waitid.system_ticks),
-            Self::TerminalEvent { .. } => event
-                .field("session_root_state", "terminal-event")
-                .field(
-                    "session_root_observation_method",
-                    "current-waitid-p-all-wnowait",
-                )
-                .field("session_root_terminal_at_child_observation", "true"),
-            Self::AlreadyReaped { .. } => event
-                .field("session_root_state", "already-reaped")
-                .field("session_root_observation_method", "retained-wait4-status")
-                .field("session_root_terminal_at_child_observation", "true"),
-            Self::ProbeFailed {
-                error_kind,
-                raw_os_error,
-                error_hex,
-                ..
-            } => event
-                .field("session_root_state", "probe-failed")
-                .field(
-                    "session_root_observation_method",
-                    "waitid-p-pid-wnohang-wnowait",
-                )
-                .field("session_root_terminal_at_child_observation", "UNKNOWN")
-                .field("session_root_probe_error_kind", error_kind)
-                .field(
-                    "session_root_probe_raw_os_error",
-                    optional_i32(*raw_os_error),
-                )
-                .field("session_root_probe_error_hex", error_hex),
-        }
-    }
-
-    fn observed_unix_ns(&self) -> u128 {
-        match self {
-            Self::Nonterminal { observed_unix_ns }
-            | Self::TerminalPending {
-                observed_unix_ns, ..
-            }
-            | Self::TerminalEvent { observed_unix_ns }
-            | Self::AlreadyReaped { observed_unix_ns }
-            | Self::ProbeFailed {
-                observed_unix_ns, ..
-            } => *observed_unix_ns,
-        }
-    }
-}
-
-fn tracked_children_event_fields(
-    event: Event,
-    children: &BTreeMap<u32, ObservedChild>,
-    terminal_pid: u32,
-    terminal_child: Option<&ObservedChild>,
-) -> Event {
-    let mut tracked = children
-        .iter()
-        .map(|(pid, child)| format!("{pid}:{}", child.role))
-        .collect::<Vec<_>>();
-    if !children.contains_key(&terminal_pid) {
-        tracked.push(format!(
-            "{terminal_pid}:{}",
-            terminal_child.map_or("unknown", |child| child.role.as_str())
-        ));
-        tracked.sort();
-    }
-    let tracked = tracked.join(",");
-    let tracked_count = children.len() + usize::from(!children.contains_key(&terminal_pid));
-    match direct_children(std::process::id()) {
-        Ok(kernel_children) => event
-            .field("tracked_children_before_reap", tracked_count)
-            .field(
-                "tracked_children_identity_hex",
-                hex_bytes(tracked.as_bytes()),
-            )
-            .field("kernel_children_probe_state", "captured")
-            .field("kernel_children_before_reap", kernel_children.len())
-            .field(
-                "kernel_children_pid_list",
-                kernel_children
-                    .iter()
-                    .map(u32::to_string)
-                    .collect::<Vec<_>>()
-                    .join(","),
-            ),
-        Err(error) => event
-            .field("tracked_children_before_reap", tracked_count)
-            .field(
-                "tracked_children_identity_hex",
-                hex_bytes(tracked.as_bytes()),
-            )
-            .field("kernel_children_probe_state", "failed")
-            .field("kernel_children_error_kind", format!("{:?}", error.kind()))
-            .field(
-                "kernel_children_raw_os_error",
-                optional_i32(error.raw_os_error()),
-            )
-            .field(
-                "kernel_children_error_hex",
-                hex_bytes(error.to_string().as_bytes()),
-            ),
-    }
 }
 
 fn classify_child(pid: u32, fallback_snapshot_period_ms: u64) -> ObservedChild {
@@ -963,34 +868,16 @@ fn session_event(kind: &'static str, unix_ns: u128, supervisor_pid: u32) -> Even
     Event::new(kind, unix_ns, supervisor_pid).field("tracker", "session-subreaper")
 }
 
-fn append_after_spawn(journal: &mut Journal, event: &Event, failures: &mut Vec<JournalError>) {
-    if let Err(error) = journal.append(event) {
-        eprintln!(
-            "dmc2-session-supervisor: lifecycle_journal_append=failed error={error} fallback_event={}",
-            event.render()
-        );
-        failures.push(error);
-    }
-}
-
-fn first_source(error: &SessionError) -> Option<&(dyn std::error::Error + 'static)> {
-    match error {
-        SessionError::Cli(error) => Some(error),
-        SessionError::Journal(error) => Some(error),
-        SessionError::JournalAfterSpawn { first, .. } => Some(first),
-        SessionError::EnableSubreaper(error)
-        | SessionError::VerifySubreaper(error)
-        | SessionError::CoreDumpLimit { source: error, .. }
-        | SessionError::OwnerIdentity { source: error, .. }
-        | SessionError::Reap { source: error, .. }
-        | SessionError::Spawn { source: error, .. }
-        | SessionError::SpawnAndJournal { spawn: error, .. } => Some(error),
-        SessionError::UnsupportedOwnership { .. } | SessionError::LinuxCncStatusMissing { .. } => {
-            None
+fn append_after_spawn(journal: &mut Journal, event: &Event, failures: &mut FailureTracker) {
+    match journal.append(event) {
+        Ok(()) => failures.record_success(),
+        Err(error) => {
+            eprintln!(
+                "dmc2-session-supervisor: lifecycle_journal_append=failed error={error} fallback_event={}",
+                event.render()
+            );
+            failures.record_failure(error);
         }
-        SessionError::CoreDumpLimitAndJournal { limit, .. } => Some(limit),
-        SessionError::OwnerIdentityAndJournal { identity, .. } => Some(identity),
-        SessionError::Clock(error) => Some(error),
     }
 }
 
@@ -1095,156 +982,6 @@ impl ObservedChild {
             self.live_snapshots
                 .set_period_ms(role.live_snapshot_period_ms());
         }
-    }
-}
-
-#[derive(Debug)]
-pub enum SessionError {
-    Cli(CliError),
-    UnsupportedOwnership {
-        role: ProcessRole,
-        ownership: Ownership,
-    },
-    Journal(JournalError),
-    JournalAfterSpawn {
-        first: JournalError,
-        additional_failures: usize,
-    },
-    EnableSubreaper(io::Error),
-    VerifySubreaper(io::Error),
-    Clock(SystemTimeError),
-    CoreDumpLimit {
-        role: ProcessRole,
-        source: io::Error,
-    },
-    CoreDumpLimitAndJournal {
-        role: ProcessRole,
-        limit: io::Error,
-        journal: JournalError,
-    },
-    OwnerIdentity {
-        role: ProcessRole,
-        source: io::Error,
-    },
-    OwnerIdentityAndJournal {
-        role: ProcessRole,
-        identity: io::Error,
-        journal: JournalError,
-    },
-    Spawn {
-        role: ProcessRole,
-        program: OsString,
-        source: io::Error,
-    },
-    SpawnAndJournal {
-        role: ProcessRole,
-        program: OsString,
-        spawn: io::Error,
-        journal: JournalError,
-    },
-    LinuxCncStatusMissing {
-        linuxcnc_pid: u32,
-    },
-    Reap {
-        child_pid: u32,
-        source: io::Error,
-    },
-}
-
-impl fmt::Display for SessionError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Cli(error) => write!(formatter, "invalid invocation: {error}"),
-            Self::UnsupportedOwnership { role, ownership } => write!(
-                formatter,
-                "role {} has ownership contract {}, not session-root",
-                role.name(),
-                ownership.name()
-            ),
-            Self::Journal(error) => write!(formatter, "lifecycle journal unavailable: {error}"),
-            Self::JournalAfterSpawn {
-                first,
-                additional_failures,
-            } => write!(
-                formatter,
-                "the session ran but {} lifecycle record(s) could not be persisted; first error: {first}",
-                additional_failures + 1
-            ),
-            Self::EnableSubreaper(error) => {
-                write!(
-                    formatter,
-                    "could not enable Linux child-subreaper ownership: {error}"
-                )
-            }
-            Self::VerifySubreaper(error) => {
-                write!(
-                    formatter,
-                    "could not verify Linux child-subreaper ownership: {error}"
-                )
-            }
-            Self::Clock(error) => write!(formatter, "system clock predates Unix epoch: {error}"),
-            Self::CoreDumpLimit { role, source } => write!(
-                formatter,
-                "could not establish the core-dump capture plan for role {}: {source}",
-                role.name()
-            ),
-            Self::CoreDumpLimitAndJournal {
-                role,
-                limit,
-                journal,
-            } => write!(
-                formatter,
-                "could not establish the core-dump capture plan for role {}: {limit}; the lifecycle failure record also failed: {journal}",
-                role.name()
-            ),
-            Self::OwnerIdentity { role, source } => write!(
-                formatter,
-                "could not establish the durable session-owner identity for role {}: {source}",
-                role.name()
-            ),
-            Self::OwnerIdentityAndJournal {
-                role,
-                identity,
-                journal,
-            } => write!(
-                formatter,
-                "could not establish the durable session-owner identity for role {}: {identity}; the lifecycle failure record also failed: {journal}",
-                role.name()
-            ),
-            Self::Spawn {
-                role,
-                program,
-                source,
-            } => write!(
-                formatter,
-                "could not spawn role {} program {program:?}: {source}",
-                role.name()
-            ),
-            Self::SpawnAndJournal {
-                role,
-                program,
-                spawn,
-                journal,
-            } => write!(
-                formatter,
-                "could not spawn role {} program {program:?}: {spawn}; the spawn-failure lifecycle record also failed: {journal}",
-                role.name()
-            ),
-            Self::LinuxCncStatusMissing { linuxcnc_pid } => write!(
-                formatter,
-                "no children remain but LinuxCNC PID {linuxcnc_pid} had no captured wait status"
-            ),
-            Self::Reap { child_pid, source } => write!(
-                formatter,
-                "could not reap session child PID {child_pid} after terminal observation: {source}"
-            ),
-        }
-    }
-}
-
-impl std::error::Error for SessionError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        first_source(self)
     }
 }
 

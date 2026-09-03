@@ -2,22 +2,14 @@ use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
-use crate::application::nml::{
-    PollCodes, PollDisposition, StatusChannel, TransportStatus,
-};
+use crate::application::nml::{PollCodes, PollDisposition, StatusChannel, TransportStatus};
 use crate::snapshot::NativeSnapshot;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Error {
     PathContainsNul(PathBuf),
-    Open {
-        nml_error: i32,
-        cms_status: i32,
-    },
-    Poll {
-        nml_error: i32,
-        cms_status: i32,
-    },
+    Open { nml_error: i32, cms_status: i32 },
+    Poll { nml_error: i32, cms_status: i32 },
 }
 
 impl std::fmt::Display for Error {

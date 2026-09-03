@@ -10,6 +10,7 @@ h100_module="${h100_project}/target/release/h100_spindle.so"
 hm2_eth_module="${project_dir}/native/modules/hm2_eth.so"
 
 "${project_dir}/scripts/build_linuxcnc_driver_overlays.sh"
+"${project_dir}/scripts/build_signal_evidence_shim.sh"
 "${h100_project}/scripts/build_release.sh"
 
 env RUSTFLAGS=-Dwarnings \
@@ -57,4 +58,5 @@ echo "userspace adapters installed in ${native_bin_dir}"
 echo "DMC2 realtime module staged at ${dmc2_module}"
 echo "H100 realtime module staged at ${h100_module}"
 echo "patched LinuxCNC hm2_eth module staged at ${hm2_eth_module}"
+echo "caught-signal evidence shim staged in ${native_bin_dir}"
 echo "launch with native/bin/dmc2-linuxcnc --live --persistent to synchronize all modules"

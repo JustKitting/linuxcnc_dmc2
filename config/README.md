@@ -19,8 +19,12 @@ INI-argument placement, core-dump capture policy, and the collision-checked
 kernel process name used to identify an owner even after it has become a
 zombie. It also defines the rolling live-process snapshot interval used to
 retain resource and open-file evidence that Linux removes when a process
-becomes a zombie. `linuxcnc-driver-overlays.tsv` pins each local driver
-hardening patch to the exact LinuxCNC release commit, upstream commit
-provenance, patch hash, build entry point, staged artifact, and installed
-destination. These files are embedded into the compiled launcher or owner so
+becomes a zombie, plus the caught-signal evidence contract selected for each
+process. The caught-signal transport is catalogued as a contract, while its
+runtime journal explicitly identifies the nonblocking delivery records as
+best-effort rather than treating absence as proof.
+`linuxcnc-driver-overlays.tsv` pins each local driver hardening patch to the
+exact LinuxCNC release commit, upstream commit provenance, patch hash, build
+entry point, staged artifact, and installed destination. These files are
+embedded into the compiled launcher or owner so
 a changed runtime contract requires a rebuild.

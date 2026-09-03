@@ -1,6 +1,4 @@
 use std::ffi::OsString;
-use std::fmt;
-use std::io;
 use std::os::unix::process::ExitStatusExt;
 use std::path::Path;
 use std::process::{Command, ExitStatus};
@@ -9,17 +7,33 @@ use std::time::{Duration, Instant, SystemTime, SystemTimeError, UNIX_EPOCH};
 
 use crate::backtrace::{self, BacktraceEvidence};
 use crate::catalog::{BacktraceKind, Ownership, ProcessRole};
-use crate::cli::{CliError, Invocation};
+use crate::cli::Invocation;
 use crate::core_artifact::{self, CoreArtifactEvidence, WorkingDirectoryEvidence};
 use crate::event::{encode_arguments, hex_bytes, Event};
-use crate::journal::{Journal, JournalError};
+use crate::journal::{FailureTracker, Journal};
 use crate::limits::CoreDumpPlan;
 use crate::live_snapshot;
 use crate::process;
+use crate::signal_evidence;
 use crate::wait::{self, TerminalObservation, WaitEvidence};
+use crate::wait_degradation::WaitDegradation;
 
 pub const TRACKING_FAILURE_EXIT_CODE: u8 = 125;
 const OBSERVATION_PERIOD: Duration = Duration::from_millis(5);
+
+mod error;
+mod reap;
+
+pub use error::SupervisorError;
+use reap::reap_retained_child;
+
+enum TerminalAcquisition {
+    Retained(TerminalObservation),
+    ReapedFallback {
+        evidence: WaitEvidence,
+        degradation: WaitDegradation,
+    },
+}
 
 pub fn run(arguments: impl IntoIterator<Item = OsString>) -> Result<u8, SupervisorError> {
     let invocation = Invocation::parse(arguments).map_err(SupervisorError::Cli)?;
@@ -82,6 +96,31 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
             };
         }
     };
+    let mut caught_signals = match signal_evidence::Tracker::prepare(invocation.role) {
+        Ok(tracker) => tracker,
+        Err(source) => {
+            let event = signal_evidence::setup_error_event_fields(
+                &source,
+                base_event(
+                    "caught-signal-evidence-setup-failed",
+                    unix_ns_or_zero(),
+                    supervisor_pid,
+                    invocation.role,
+                ),
+            );
+            return match journal.append(&event) {
+                Ok(()) => Err(SupervisorError::SignalEvidenceSetup {
+                    role: invocation.role,
+                    source,
+                }),
+                Err(journal) => Err(SupervisorError::SignalEvidenceSetupAndJournal {
+                    role: invocation.role,
+                    setup: source,
+                    journal,
+                }),
+            };
+        }
+    };
     let supervisor_started_ns = unix_ns().map_err(SupervisorError::Clock)?;
     let recovered_partial_record = journal.recovered_partial_record();
     let journal_path = journal.path().to_path_buf();
@@ -97,6 +136,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
     .field("argc", invocation.arguments.len())
     .field("argv_hex", encode_arguments(&invocation.arguments));
     let supervisor_event = core_dump_plan.event_fields(supervisor_event);
+    let supervisor_event = caught_signals.plan_event_fields(supervisor_event);
     let supervisor_event = process::environment_event_fields(supervisor_event);
     let supervisor_event = process::host_event_fields(supervisor_event);
     let supervisor_event =
@@ -112,7 +152,29 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
     let mut command = Command::new(&invocation.program);
     command.args(&invocation.arguments);
     core_dump_plan.configure(&mut command);
-    let mut child = match command.spawn() {
+    if let Err(source) = caught_signals.configure_child(&mut command) {
+        let event = signal_evidence::setup_error_event_fields(
+            &source,
+            base_event(
+                "caught-signal-evidence-configuration-failed",
+                unix_ns_or_zero(),
+                supervisor_pid,
+                invocation.role,
+            ),
+        );
+        return match journal.append(&event) {
+            Ok(()) => Err(SupervisorError::SignalEvidenceSetup {
+                role: invocation.role,
+                source,
+            }),
+            Err(journal) => Err(SupervisorError::SignalEvidenceSetupAndJournal {
+                role: invocation.role,
+                setup: source,
+                journal,
+            }),
+        };
+    }
+    let child = match command.spawn() {
         Ok(child) => child,
         Err(source) => {
             let event = base_event(
@@ -140,6 +202,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
             };
         }
     };
+    caught_signals.parent_after_spawn();
     let child_pid = child.id();
     let mut live_snapshots =
         live_snapshot::Tracker::deferred(invocation.role.live_snapshot_period_ms());
@@ -156,12 +219,19 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
     .field("argc", invocation.arguments.len())
     .field("argv_hex", encode_arguments(&invocation.arguments));
     let start_event = process::child_event_fields(start_event, child_pid);
-    let mut retained_journal_errors = Vec::new();
+    let mut retained_journal_errors = FailureTracker::new();
     append_after_spawn(
         &mut journal,
         &start_event,
         invocation.role,
         child_pid,
+        &mut retained_journal_errors,
+    );
+    append_caught_signal_observations(
+        &mut journal,
+        invocation.role,
+        child_pid,
+        &mut caught_signals,
         &mut retained_journal_errors,
     );
     if let Some(transition) = initial_snapshot_transition {
@@ -175,113 +245,264 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
         );
     }
 
-    let observation = loop {
-        match wait::observe_pid_nonblocking(child_pid) {
-            Ok(Some(observation)) => break observation,
-            Ok(None) => {
-                if let Some(transition) = live_snapshots.capture_if_due(child_pid) {
-                    append_live_snapshot_transition(
+    let mut observation_degradation: Option<WaitDegradation> = None;
+    let acquisition = loop {
+        append_caught_signal_observations(
+            &mut journal,
+            invocation.role,
+            child_pid,
+            &mut caught_signals,
+            &mut retained_journal_errors,
+        );
+        if let Some(degradation) = &mut observation_degradation {
+            match wait::reap_pid_nonblocking(child_pid) {
+                Ok(Some(evidence)) => {
+                    if degradation.record_fallback_success() {
+                        let event = degradation.summary_event_fields(
+                            base_event(
+                                "terminal-fallback-reap-poll-restored",
+                                unix_ns_or_zero(),
+                                supervisor_pid,
+                                invocation.role,
+                            )
+                            .field("child_pid", child_pid)
+                            .field("fallback_wait4_result", "terminal-reaped"),
+                        );
+                        append_after_spawn(
+                            &mut journal,
+                            &event,
+                            invocation.role,
+                            child_pid,
+                            &mut retained_journal_errors,
+                        );
+                    }
+                    break TerminalAcquisition::ReapedFallback {
+                        evidence,
+                        degradation: degradation.clone(),
+                    };
+                }
+                Ok(None) => {
+                    if degradation.record_fallback_success() {
+                        let event = degradation.summary_event_fields(
+                            base_event(
+                                "terminal-fallback-reap-poll-restored",
+                                unix_ns_or_zero(),
+                                supervisor_pid,
+                                invocation.role,
+                            )
+                            .field("child_pid", child_pid)
+                            .field("fallback_wait4_result", "child-running"),
+                        );
+                        append_after_spawn(
+                            &mut journal,
+                            &event,
+                            invocation.role,
+                            child_pid,
+                            &mut retained_journal_errors,
+                        );
+                    }
+                }
+                Err(source) => {
+                    if let Some(error) = degradation.record_fallback_failure(&source) {
+                        let event = error.fallback_event_fields(
+                            degradation.summary_event_fields(
+                                base_event(
+                                    "terminal-fallback-reap-poll-failed",
+                                    unix_ns_or_zero(),
+                                    supervisor_pid,
+                                    invocation.role,
+                                )
+                                .field("child_pid", child_pid)
+                                .field("child_ownership_released", false),
+                            ),
+                        );
+                        append_after_spawn(
+                            &mut journal,
+                            &event,
+                            invocation.role,
+                            child_pid,
+                            &mut retained_journal_errors,
+                        );
+                    }
+                }
+            }
+        } else {
+            match wait::observe_pid_nonblocking(child_pid) {
+                Ok(Some(observation)) => {
+                    break TerminalAcquisition::Retained(observation);
+                }
+                Ok(None) => {}
+                Err(source) => {
+                    let degradation = WaitDegradation::new(source);
+                    let event = degradation.waitid_event_fields(
+                        base_event(
+                            "terminal-observe-failed",
+                            unix_ns_or_zero(),
+                            supervisor_pid,
+                            invocation.role,
+                        )
+                        .field("child_pid", child_pid)
+                        .field("child_ownership_released", false)
+                        .field("terminal_acquisition_fallback", "wait4-wnohang-reaping"),
+                    );
+                    let event = live_snapshots.full_event_fields(event);
+                    append_after_spawn(
                         &mut journal,
+                        &event,
                         invocation.role,
                         child_pid,
-                        &live_snapshots,
-                        transition,
                         &mut retained_journal_errors,
                     );
+                    observation_degradation = Some(degradation);
+                    continue;
                 }
-                thread::sleep(OBSERVATION_PERIOD);
-            }
-            Err(source) => {
-                let event = base_event(
-                    "terminal-observe-failed",
-                    unix_ns_or_zero(),
-                    supervisor_pid,
-                    invocation.role,
-                )
-                .field("child_pid", child_pid)
-                .field("error_kind", format!("{:?}", source.kind()))
-                .field("raw_os_error", optional_i32(source.raw_os_error()))
-                .field("error_hex", hex_bytes(source.to_string().as_bytes()));
-                let event = live_snapshots.full_event_fields(event);
-                append_after_spawn(
-                    &mut journal,
-                    &event,
-                    invocation.role,
-                    child_pid,
-                    &mut retained_journal_errors,
-                );
-                return Err(SupervisorError::Observe {
-                    role: invocation.role,
-                    child_pid,
-                    source,
-                });
             }
         }
+
+        if let Some(transition) = live_snapshots.capture_if_due(child_pid) {
+            append_live_snapshot_transition(
+                &mut journal,
+                invocation.role,
+                child_pid,
+                &live_snapshots,
+                transition,
+                &mut retained_journal_errors,
+            );
+        }
+        thread::sleep(OBSERVATION_PERIOD);
     };
-    let exit_ns = unix_ns_or_zero();
-    let elapsed_ns = launched_at_monotonic.elapsed().as_nanos();
-    let terminal_snapshot = base_event(
-        "process-terminal-observed",
-        exit_ns,
-        supervisor_pid,
-        invocation.role,
-    )
-    .field("child_pid", child_pid)
-    .field("elapsed_ns", elapsed_ns)
-    .field("snapshot_phase", "terminal-before-reap");
-    let terminal_snapshot = observation.event_fields(terminal_snapshot);
-    let terminal_snapshot = process::terminal_child_event_fields(terminal_snapshot, child_pid);
-    let terminal_snapshot = live_snapshots.full_event_fields(terminal_snapshot);
-    append_after_spawn(
+    append_caught_signal_observations(
         &mut journal,
-        &terminal_snapshot,
         invocation.role,
         child_pid,
+        &mut caught_signals,
         &mut retained_journal_errors,
     );
-
-    let backtrace = match invocation.role.backtrace() {
-        BacktraceKind::None => BacktraceEvidence::NotApplicable,
-        BacktraceKind::LinuxCncTask => {
-            backtrace::capture(journal.path(), child_pid, launched_at_wall, exit_ns)
-        }
-    };
-    let core_artifact = core_artifact::capture(
-        journal.path(),
-        child_pid,
-        observation.core_dumped(),
-        &child_cwd,
-        &fallback_cwd,
-        launched_at_wall,
-        exit_ns,
-    );
-    let evidence = match wait::reap(&mut child) {
-        Ok(evidence) => evidence,
-        Err(source) => {
-            let event = observation.event_fields(
-                base_event(
-                    "reap-failed",
-                    unix_ns_or_zero(),
-                    supervisor_pid,
-                    invocation.role,
-                )
-                .field("child_pid", child_pid)
-                .field("error_kind", format!("{:?}", source.kind()))
-                .field("raw_os_error", optional_i32(source.raw_os_error()))
-                .field("error_hex", hex_bytes(source.to_string().as_bytes())),
-            );
+    let exit_ns = unix_ns_or_zero();
+    let elapsed_ns = launched_at_monotonic.elapsed().as_nanos();
+    let (
+        observation,
+        evidence,
+        observation_degradation,
+        reap_degradation,
+        backtrace,
+        core_artifact,
+    ) = match acquisition {
+        TerminalAcquisition::Retained(observation) => {
+            let terminal_snapshot = base_event(
+                "process-terminal-observed",
+                exit_ns,
+                supervisor_pid,
+                invocation.role,
+            )
+            .field("child_pid", child_pid)
+            .field("elapsed_ns", elapsed_ns)
+            .field("terminal_acquisition_method", "waitid-wnowait")
+            .field("terminal_observation_degraded", false)
+            .field("snapshot_phase", "terminal-before-reap");
+            let terminal_snapshot = observation.event_fields(terminal_snapshot);
+            let terminal_snapshot =
+                process::terminal_child_event_fields(terminal_snapshot, child_pid);
+            let terminal_snapshot = live_snapshots.full_event_fields(terminal_snapshot);
+            let terminal_snapshot = caught_signals.summary_event_fields(terminal_snapshot);
             append_after_spawn(
                 &mut journal,
-                &event,
+                &terminal_snapshot,
                 invocation.role,
                 child_pid,
                 &mut retained_journal_errors,
             );
-            return Err(SupervisorError::Reap {
-                role: invocation.role,
+
+            let backtrace = capture_backtrace(
+                invocation.role,
+                journal.path(),
                 child_pid,
-                source,
-            });
+                launched_at_wall,
+                exit_ns,
+            );
+            let core_artifact = core_artifact::capture(
+                journal.path(),
+                child_pid,
+                observation.core_dumped(),
+                &child_cwd,
+                &fallback_cwd,
+                launched_at_wall,
+                exit_ns,
+            );
+            let (evidence, reap_degradation) = reap_retained_child(
+                &mut journal,
+                invocation.role,
+                child_pid,
+                observation,
+                &mut caught_signals,
+                &mut retained_journal_errors,
+            );
+            (
+                Some(observation),
+                evidence,
+                None,
+                reap_degradation,
+                backtrace,
+                core_artifact,
+            )
+        }
+        TerminalAcquisition::ReapedFallback {
+            evidence,
+            degradation,
+        } => {
+            let terminal_snapshot = degradation.summary_event_fields(
+                base_event(
+                    "process-terminal-reaped-fallback",
+                    exit_ns,
+                    supervisor_pid,
+                    invocation.role,
+                )
+                .field("elapsed_ns", elapsed_ns)
+                .field(
+                    "terminal_acquisition_method",
+                    "wait4-wnohang-after-waitid-error",
+                )
+                .field("snapshot_phase", "post-reap-fallback")
+                .field(
+                    "terminal_proc_snapshot_state",
+                    "not-attempted-after-reap-to-avoid-pid-reuse",
+                ),
+            );
+            let terminal_snapshot = evidence.event_fields(terminal_snapshot);
+            let terminal_snapshot = live_snapshots.full_event_fields(terminal_snapshot);
+            let terminal_snapshot = caught_signals.summary_event_fields(terminal_snapshot);
+            append_after_spawn(
+                &mut journal,
+                &terminal_snapshot,
+                invocation.role,
+                child_pid,
+                &mut retained_journal_errors,
+            );
+
+            let backtrace = capture_backtrace(
+                invocation.role,
+                journal.path(),
+                child_pid,
+                launched_at_wall,
+                exit_ns,
+            );
+            let core_artifact = core_artifact::capture(
+                journal.path(),
+                child_pid,
+                evidence.status.core_dumped(),
+                &child_cwd,
+                &fallback_cwd,
+                launched_at_wall,
+                exit_ns,
+            );
+            (
+                None,
+                evidence,
+                Some(degradation),
+                None,
+                backtrace,
+                core_artifact,
+            )
         }
     };
     let event = termination_event(
@@ -293,8 +514,19 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
         evidence,
         &backtrace,
         &core_artifact,
+        &caught_signals,
     );
     let event = live_snapshots.summary_event_fields(event);
+    let event = caught_signals.summary_event_fields(event);
+    let event = match &observation_degradation {
+        Some(degradation) => degradation.summary_event_fields(event),
+        None => event.field("terminal_observation_degraded", false),
+    };
+    let event = match &reap_degradation {
+        Some(degradation) => degradation.summary_event_fields(event),
+        None => event.field("terminal_reap_degraded", false),
+    };
+    let event = retained_journal_errors.summary_event_fields(event);
     append_after_spawn(
         &mut journal,
         &event,
@@ -302,15 +534,80 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
         child_pid,
         &mut retained_journal_errors,
     );
-    if !retained_journal_errors.is_empty() {
-        let first = retained_journal_errors.remove(0);
-        return Err(SupervisorError::JournalAfterChildSpawn {
-            first,
-            additional_failures: retained_journal_errors.len(),
+    let signal_failures = caught_signals.infrastructure_failures();
+    if let Some(degradation) = observation_degradation {
+        let first_journal_failure = retained_journal_errors.take_first();
+        return Err(SupervisorError::TerminalObservationDegraded {
+            role: invocation.role,
+            child_pid,
+            waitid_error_kind: degradation.waitid_error().kind,
+            waitid_raw_os_error: degradation.waitid_error().raw_os_error,
+            waitid_error: degradation.waitid_error().detail.clone(),
+            fallback_wait4_failures: degradation.fallback_wait4_failures(),
+            first_journal_failure,
+            additional_journal_failures: retained_journal_errors.additional_failures(),
+            signal_failures,
         });
+    }
+    if let Some(degradation) = reap_degradation {
+        let first_journal_failure = retained_journal_errors.take_first();
+        return Err(SupervisorError::TerminalReapDegraded {
+            role: invocation.role,
+            child_pid,
+            first_error_kind: degradation.first_error().kind,
+            first_raw_os_error: degradation.first_error().raw_os_error,
+            first_error: degradation.first_error().detail.clone(),
+            wait4_failures: degradation.failures(),
+            first_journal_failure,
+            additional_journal_failures: retained_journal_errors.additional_failures(),
+            signal_failures,
+        });
+    }
+    match (retained_journal_errors.take_first(), signal_failures) {
+        (Some(first), Some(signal)) => {
+            return Err(SupervisorError::JournalAndSignalEvidenceAfterChildSpawn {
+                first,
+                additional_journal_failures: retained_journal_errors.additional_failures(),
+                signal,
+            });
+        }
+        (Some(first), None) => {
+            return Err(SupervisorError::JournalAfterChildSpawn {
+                first,
+                additional_failures: retained_journal_errors.additional_failures(),
+            });
+        }
+        (None, Some(failures)) => {
+            return Err(SupervisorError::SignalEvidenceAfterChildSpawn {
+                role: invocation.role,
+                child_pid,
+                failures,
+            });
+        }
+        (None, None) => {}
     }
 
     Ok(supervisor_exit_code(evidence.status))
+}
+
+fn append_caught_signal_observations(
+    journal: &mut Journal,
+    role: ProcessRole,
+    child_pid: u32,
+    tracker: &mut signal_evidence::Tracker,
+    retained_journal_errors: &mut FailureTracker,
+) {
+    for observation in tracker.drain(child_pid) {
+        let event = base_event(
+            signal_evidence::observation_event_name(&observation),
+            unix_ns_or_zero(),
+            std::process::id(),
+            role,
+        )
+        .field("child_pid", child_pid);
+        let event = signal_evidence::observation_event(&observation, event);
+        append_after_spawn(journal, &event, role, child_pid, retained_journal_errors);
+    }
 }
 
 fn append_live_snapshot_transition(
@@ -319,7 +616,7 @@ fn append_live_snapshot_transition(
     child_pid: u32,
     tracker: &live_snapshot::Tracker,
     transition: live_snapshot::CaptureTransition,
-    retained_journal_errors: &mut Vec<JournalError>,
+    retained_journal_errors: &mut FailureTracker,
 ) {
     let event = base_event(
         transition.direct_event_name(),
@@ -339,6 +636,10 @@ fn base_event(kind: &'static str, unix_ns: u128, supervisor_pid: u32, role: Proc
         .field("ownership", role.ownership().name())
         .field("criticality", role.criticality().name())
         .field("backtrace_contract", role.backtrace().name())
+        .field(
+            "caught_signal_evidence_contract",
+            role.caught_signal_evidence().name(),
+        )
         .field("core_dump_policy", role.core_dump_policy().name())
         .field("owner_comm", role.owner_comm())
         .field(
@@ -348,20 +649,49 @@ fn base_event(kind: &'static str, unix_ns: u128, supervisor_pid: u32, role: Proc
         .field("argument_placement", role.argument_placement().name())
 }
 
+fn capture_backtrace(
+    role: ProcessRole,
+    journal_path: &Path,
+    child_pid: u32,
+    launched_at_wall: SystemTime,
+    exit_ns: u128,
+) -> BacktraceEvidence {
+    match role.backtrace() {
+        BacktraceKind::None => BacktraceEvidence::NotApplicable,
+        BacktraceKind::LinuxCncTask => {
+            backtrace::capture(journal_path, child_pid, launched_at_wall, exit_ns)
+        }
+    }
+}
+
 fn termination_event(
     supervisor_pid: u32,
     role: ProcessRole,
     exit_ns: u128,
     elapsed_ns: u128,
-    observation: TerminalObservation,
+    observation: Option<TerminalObservation>,
     evidence: WaitEvidence,
     backtrace: &BacktraceEvidence,
     core_artifact: &CoreArtifactEvidence,
+    caught_signals: &signal_evidence::Tracker,
 ) -> Event {
     let event = base_event("process-terminated", exit_ns, supervisor_pid, role)
-        .field("elapsed_ns", elapsed_ns)
-        .field("waitid_wait4_consistent", observation.agrees_with(evidence));
-    let event = observation.event_fields(event);
+        .field("elapsed_ns", elapsed_ns);
+    let event = match observation {
+        Some(observation) => observation.event_fields(
+            event
+                .field("terminal_acquisition_method", "waitid-wnowait-then-wait4")
+                .field("waitid_available", true)
+                .field("waitid_wait4_consistent", observation.agrees_with(evidence)),
+        ),
+        None => event
+            .field(
+                "terminal_acquisition_method",
+                "wait4-wnohang-after-waitid-error",
+            )
+            .field("waitid_available", false)
+            .field("waitid_wait4_consistent", "NOT_COMPARABLE"),
+    };
     let event = evidence.event_fields(event);
     let event = backtrace.event_fields(event);
     let event = core_artifact.event_fields(event);
@@ -373,7 +703,7 @@ fn termination_event(
     ) {
         (_, _, Some(8 | 11)) => "linuxcnc-handled-fatal-signal",
         (Some(_), _, _) => "kernel-signal-termination",
-        (None, Some(0), _) => "zero-exit",
+        (None, Some(0), _) => caught_signals.zero_exit_outcome(),
         (None, Some(_), _) => "nonzero-exit",
         _ => "unknown-wait-status",
     };
@@ -385,7 +715,7 @@ fn append_after_spawn(
     event: &Event,
     role: ProcessRole,
     child_pid: u32,
-    failures: &mut Vec<JournalError>,
+    failures: &mut FailureTracker,
 ) {
     if let Err(error) = journal.append(event) {
         eprintln!(
@@ -393,7 +723,9 @@ fn append_after_spawn(
             role.name(),
             event.render()
         );
-        failures.push(error);
+        failures.record_failure(error);
+    } else {
+        failures.record_success();
     }
 }
 
@@ -419,169 +751,6 @@ fn unix_ns() -> Result<u128, SystemTimeError> {
 
 fn unix_ns_or_zero() -> u128 {
     unix_ns().unwrap_or(0)
-}
-
-#[derive(Debug)]
-pub enum SupervisorError {
-    Cli(CliError),
-    UnsupportedOwnership {
-        role: ProcessRole,
-        ownership: Ownership,
-    },
-    Journal(JournalError),
-    JournalAfterChildSpawn {
-        first: JournalError,
-        additional_failures: usize,
-    },
-    Clock(SystemTimeError),
-    CoreDumpLimit {
-        role: ProcessRole,
-        source: io::Error,
-    },
-    CoreDumpLimitAndJournal {
-        role: ProcessRole,
-        limit: io::Error,
-        journal: JournalError,
-    },
-    OwnerIdentity {
-        role: ProcessRole,
-        source: io::Error,
-    },
-    OwnerIdentityAndJournal {
-        role: ProcessRole,
-        identity: io::Error,
-        journal: JournalError,
-    },
-    Spawn {
-        role: ProcessRole,
-        program: OsString,
-        source: io::Error,
-    },
-    SpawnAndJournal {
-        role: ProcessRole,
-        program: OsString,
-        spawn: io::Error,
-        journal: JournalError,
-    },
-    Observe {
-        role: ProcessRole,
-        child_pid: u32,
-        source: io::Error,
-    },
-    Reap {
-        role: ProcessRole,
-        child_pid: u32,
-        source: io::Error,
-    },
-}
-
-impl fmt::Display for SupervisorError {
-    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
-        match self {
-            Self::Cli(error) => write!(formatter, "invalid invocation: {error}"),
-            Self::UnsupportedOwnership { role, ownership } => write!(
-                formatter,
-                "role {} has ownership contract {}, but this binary only owns direct children",
-                role.name(),
-                ownership.name()
-            ),
-            Self::Journal(error) => write!(formatter, "lifecycle journal unavailable: {error}"),
-            Self::JournalAfterChildSpawn {
-                first,
-                additional_failures,
-            } => write!(
-                formatter,
-                "a supervised process ran but {} lifecycle record(s) could not be persisted; first error: {first}",
-                additional_failures + 1
-            ),
-            Self::Clock(error) => write!(formatter, "system clock predates Unix epoch: {error}"),
-            Self::CoreDumpLimit { role, source } => write!(
-                formatter,
-                "could not establish the core-dump capture plan for role {}: {source}",
-                role.name()
-            ),
-            Self::CoreDumpLimitAndJournal {
-                role,
-                limit,
-                journal,
-            } => write!(
-                formatter,
-                "could not establish the core-dump capture plan for role {}: {limit}; the lifecycle failure record also failed: {journal}",
-                role.name()
-            ),
-            Self::OwnerIdentity { role, source } => write!(
-                formatter,
-                "could not establish the durable process-owner identity for role {}: {source}",
-                role.name()
-            ),
-            Self::OwnerIdentityAndJournal {
-                role,
-                identity,
-                journal,
-            } => write!(
-                formatter,
-                "could not establish the durable process-owner identity for role {}: {identity}; the lifecycle failure record also failed: {journal}",
-                role.name()
-            ),
-            Self::Spawn {
-                role,
-                program,
-                source,
-            } => write!(
-                formatter,
-                "could not spawn role {} program {program:?}: {source}",
-                role.name()
-            ),
-            Self::SpawnAndJournal {
-                role,
-                program,
-                spawn,
-                journal,
-            } => write!(
-                formatter,
-                "could not spawn role {} program {program:?}: {spawn}; the spawn-failure lifecycle record also failed: {journal}",
-                role.name()
-            ),
-            Self::Observe {
-                role,
-                child_pid,
-                source,
-            } => write!(
-                formatter,
-                "could not observe terminal state for role {} child PID {child_pid}: {source}",
-                role.name()
-            ),
-            Self::Reap {
-                role,
-                child_pid,
-                source,
-            } => write!(
-                formatter,
-                "could not reap role {} child PID {child_pid} after terminal observation: {source}",
-                role.name()
-            ),
-        }
-    }
-}
-
-impl std::error::Error for SupervisorError {
-    fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
-        match self {
-            Self::Cli(error) => Some(error),
-            Self::Journal(error) => Some(error),
-            Self::JournalAfterChildSpawn { first, .. } => Some(first),
-            Self::Clock(error) => Some(error),
-            Self::CoreDumpLimit { source, .. } => Some(source),
-            Self::CoreDumpLimitAndJournal { limit, .. } => Some(limit),
-            Self::OwnerIdentity { source, .. } => Some(source),
-            Self::OwnerIdentityAndJournal { identity, .. } => Some(identity),
-            Self::Spawn { source, .. }
-            | Self::Observe { source, .. }
-            | Self::Reap { source, .. } => Some(source),
-            Self::SpawnAndJournal { spawn, .. } => Some(spawn),
-            Self::UnsupportedOwnership { .. } => None,
-        }
-    }
 }
 
 #[cfg(test)]

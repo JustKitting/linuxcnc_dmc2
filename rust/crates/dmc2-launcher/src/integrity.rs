@@ -47,6 +47,12 @@ pub fn realtime_deployments(layout: &Layout) -> Vec<(PathBuf, PathBuf)> {
 pub fn userspace_deployments(layout: &Layout) -> Vec<(PathBuf, PathBuf)> {
     vec![
         (
+            layout.project.join("native/bin/libdmc2_signal_evidence.so"),
+            layout
+                .project
+                .join("rust/target/release/libdmc2_signal_evidence.so"),
+        ),
+        (
             layout.project.join("native/bin/dmc2-serial-bridge"),
             layout
                 .project

@@ -11,6 +11,7 @@ struct CatalogRow {
     launch_site: String,
     ownership: String,
     criticality: String,
+    caught_signal_evidence: String,
 }
 
 #[test]
@@ -125,6 +126,68 @@ fn linuxcncs_two_hardcoded_persistent_processes_remain_catalogued() {
     assert!(halcmd.contains("EMC2_BIN_DIR \"/rtapi_app\""));
 }
 
+#[test]
+fn caught_signal_contract_matches_the_pinned_linuxcnc_consumers() {
+    let project = project_root();
+    let catalog = read_catalog(&project);
+    let task =
+        fs::read_to_string(project.join("vendor/linuxcnc-2.9.10/src/emc/task/emctaskmain.cc"))
+            .expect("read pinned LinuxCNC task source");
+    let io = fs::read_to_string(project.join("vendor/linuxcnc-2.9.10/src/emc/iotask/ioControl.cc"))
+        .expect("read pinned LinuxCNC I/O source");
+    let halui =
+        fs::read_to_string(project.join("vendor/linuxcnc-2.9.10/src/emc/usr_intf/halui.cc"))
+            .expect("read pinned LinuxCNC HALUI source");
+
+    assert_eq!(task.matches("signal(SIGINT, emctask_quit);").count(), 1);
+    assert_eq!(task.matches("signal(SIGTERM, emctask_quit);").count(), 1);
+    assert_eq!(task.matches("done = 1;").count(), 1);
+    assert_eq!(task.matches("done = 0;").count(), 1);
+    assert!(task.contains("void emctask_quit(int sig)"));
+    assert!(
+        task.contains("done = 1;\n    // restore signal handler\n    signal(sig, emctask_quit);")
+    );
+    assert!(task.contains("// end of while (! done)"));
+    assert!(task.contains("emctask_shutdown();\n\n    // and leave\n    exit(0);"));
+    for (name, source) in [("iocontrol", io), ("halui", halui)] {
+        assert!(
+            source.contains("signal(SIGINT, quit);"),
+            "{name} stopped registering SIGINT through libc signal()"
+        );
+        assert!(
+            source.contains("signal(SIGTERM, quit);"),
+            "{name} stopped registering SIGTERM through libc signal()"
+        );
+        assert!(
+            source.contains("static void quit(int sig)\n{\n    done = 1;\n}"),
+            "{name} caught-signal handler stopped setting its shutdown flag"
+        );
+        assert!(
+            source.contains("while (!done)") || source.contains("while (! done)"),
+            "{name} main loop stopped using its shutdown flag"
+        );
+    }
+
+    for role in ["milltask", "iocontrol", "halui"] {
+        assert_eq!(
+            catalog
+                .get(role)
+                .expect("caught-signal role is catalogued")
+                .caught_signal_evidence,
+            "libc-signal-int-term-v1"
+        );
+    }
+    for role in ["axis", "rtapi-app", "linuxcncsvr"] {
+        assert_eq!(
+            catalog
+                .get(role)
+                .expect("non-interposed role is catalogued")
+                .caught_signal_evidence,
+            "none"
+        );
+    }
+}
+
 fn parse_configured_owner(configured: &str, linuxcnc_prepends_ini: bool) -> Invocation {
     let mut fields = configured.split_ascii_whitespace();
     let owner = fields.next().expect("configured process owner executable");
@@ -161,7 +224,7 @@ fn read_catalog(project: &Path) -> BTreeMap<String, CatalogRow> {
         .filter(|line| !line.is_empty())
         .map(|line| {
             let fields = line.split('\t').collect::<Vec<_>>();
-            assert_eq!(fields.len(), 10, "invalid process-catalog row: {line}");
+            assert_eq!(fields.len(), 11, "invalid process-catalog row: {line}");
             (
                 fields[0].to_owned(),
                 CatalogRow {
@@ -169,6 +232,7 @@ fn read_catalog(project: &Path) -> BTreeMap<String, CatalogRow> {
                     launch_site: fields[2].to_owned(),
                     ownership: fields[3].to_owned(),
                     criticality: fields[4].to_owned(),
+                    caught_signal_evidence: fields[10].to_owned(),
                 },
             )
         })

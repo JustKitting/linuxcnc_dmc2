@@ -498,11 +498,6 @@ impl HalPublisher {
         }
         Ok(())
     }
-
-    #[cfg(test)]
-    pub(super) fn test_pins(&self) -> &HalPins {
-        unsafe { &*self.pins }
-    }
 }
 
 impl Drop for HalPublisher {

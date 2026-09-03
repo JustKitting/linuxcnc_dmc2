@@ -173,11 +173,6 @@ impl DiagnosticReport {
             .unwrap_or(u32::MAX)
     }
 
-    #[cfg(test)]
-    pub(crate) fn issues(&self) -> &[Issue] {
-        &self.issues
-    }
-
     pub(crate) fn issue_count(&self) -> usize {
         self.issues.len()
     }
@@ -204,11 +199,6 @@ impl DiagnosticReport {
 
     #[cfg(not(test))]
     pub(super) fn account(&mut self, _source: impl Into<String>, _policy: &'static str) {}
-
-    #[cfg(test)]
-    pub(super) fn covered_fields(&self) -> &BTreeMap<String, &'static str> {
-        &self.covered_fields
-    }
 }
 
 #[derive(Default)]

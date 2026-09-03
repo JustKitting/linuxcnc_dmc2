@@ -8,5 +8,3 @@ pub(super) use native::{
     RawErrorSnapshot, ERROR_MESSAGE_ABI_VERSION,
 };
 pub(super) use record::ErrorMessageRecord;
-#[cfg(test)]
-pub(super) use record::ErrorSeverity;

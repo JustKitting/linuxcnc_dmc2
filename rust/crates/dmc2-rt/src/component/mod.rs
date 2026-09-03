@@ -23,8 +23,6 @@ const HAL_FAILURE_FORMAT: &[u8] = b"dmc2_rt: %s (raw=%d, call=%s): %s; action: %
 const PIN_STORAGE_ALLOCATION_FAILURE: &[u8] = b"dmc2_rt: HAL_PIN_STORAGE_ALLOCATION_FAILED (raw=null, call=hal_malloc): HAL shared memory could not hold the realtime pin-pointer structure; action: stop duplicate HAL owners and restore sufficient HAL shared memory before restarting\n\0";
 const STATE_ALLOCATION_FAILURE: &[u8] = b"dmc2_rt: HAL_COMPONENT_STATE_ALLOCATION_FAILED (raw=null, call=hal_malloc): HAL shared memory could not hold the realtime controller state; action: stop duplicate HAL owners and restore sufficient HAL shared memory before restarting\n\0";
 const ENOMEM: c_int = linuxcnc_hal::HalKnownErrno::OutOfMemory.raw();
-#[cfg(test)]
-const EINVAL: c_int = linuxcnc_hal::HalKnownErrno::InvalidArgument.raw();
 
 static mut COMPONENT_ID: c_int = -1;
 

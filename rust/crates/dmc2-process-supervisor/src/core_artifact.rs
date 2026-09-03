@@ -495,18 +495,24 @@ fn working_directory_fields(
     fallback: &WorkingDirectoryEvidence,
     selected: Option<&'static str>,
 ) -> Event {
-    event = one_working_directory_fields(event, "primary", primary);
-    event = one_working_directory_fields(event, "fallback", fallback);
+    event = one_working_directory_fields(event, WorkingDirectorySlot::Primary, primary);
+    event = one_working_directory_fields(event, WorkingDirectorySlot::Fallback, fallback);
     event.field("core_cwd_selected_source", selected.unwrap_or("NONE"))
+}
+
+#[derive(Clone, Copy)]
+enum WorkingDirectorySlot {
+    Primary,
+    Fallback,
 }
 
 fn one_working_directory_fields(
     event: Event,
-    kind: &'static str,
+    slot: WorkingDirectorySlot,
     evidence: &WorkingDirectoryEvidence,
 ) -> Event {
-    let (state_field, source_field, path_field, kind_field, errno_field, error_field) = match kind {
-        "primary" => (
+    let (state_field, source_field, path_field, kind_field, errno_field, error_field) = match slot {
+        WorkingDirectorySlot::Primary => (
             "core_cwd_primary_state",
             "core_cwd_primary_source",
             "core_cwd_primary_path_hex",
@@ -514,7 +520,7 @@ fn one_working_directory_fields(
             "core_cwd_primary_raw_os_error",
             "core_cwd_primary_error_hex",
         ),
-        "fallback" => (
+        WorkingDirectorySlot::Fallback => (
             "core_cwd_fallback_state",
             "core_cwd_fallback_source",
             "core_cwd_fallback_path_hex",
@@ -522,7 +528,6 @@ fn one_working_directory_fields(
             "core_cwd_fallback_raw_os_error",
             "core_cwd_fallback_error_hex",
         ),
-        _ => unreachable!("working-directory field catalog is exhaustive"),
     };
     let event = event.field(source_field, evidence.source);
     match &evidence.result {

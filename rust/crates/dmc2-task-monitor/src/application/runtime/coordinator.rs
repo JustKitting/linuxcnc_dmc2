@@ -230,25 +230,4 @@ where
             &mut self.diagnostic_state,
         )
     }
-
-    #[cfg(test)]
-    pub(super) fn connection_state(&self) -> (bool, bool) {
-        (self.status_reader.is_some(), self.error_reader.is_some())
-    }
-
-    #[cfg(test)]
-    pub(super) fn retry_deadlines(&self) -> (Instant, Instant) {
-        (self.next_status_open, self.next_error_open)
-    }
-
-    #[cfg(test)]
-    pub(super) fn into_parts(self) -> (SC, EC, J, H, R) {
-        (
-            self.status_connector,
-            self.error_connector,
-            self.journal,
-            self.hal,
-            self.reporter,
-        )
-    }
 }

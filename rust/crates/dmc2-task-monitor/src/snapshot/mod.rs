@@ -20,9 +20,6 @@ pub(crate) use abi::{
     DMC2_TASK_STATUS_NATIVE_OK,
 };
 
-#[cfg(test)]
-pub(crate) use abi::{dmc2_task_status_snapshot_initialize, DMC2_TASK_STATUS_NATIVE_ERROR};
-
 pub const SNAPSHOT_ABI_VERSION: u32 = abi::DMC2_SNAPSHOT_ABI_VERSION;
 const STOPPED_VELOCITY_TOLERANCE: f64 = 0.000_001;
 

@@ -14,6 +14,23 @@ pub struct Journal {
     recovered_partial_record: bool,
 }
 
+pub struct FailureTracker {
+    first: Option<JournalError>,
+    last: Option<JournalErrorEvidence>,
+    failures: u64,
+    recoveries: u64,
+    failure_active: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq)]
+struct JournalErrorEvidence {
+    operation: &'static str,
+    path: PathBuf,
+    kind: io::ErrorKind,
+    raw_os_error: Option<i32>,
+    detail: String,
+}
+
 impl Journal {
     pub fn open(path: &Path) -> Result<Self, JournalError> {
         let parent = path
@@ -74,6 +91,86 @@ impl Journal {
             write_event_record(file, &self.path, event)?;
             synchronize(file, &self.path, "synchronize journal record")
         })
+    }
+}
+
+impl FailureTracker {
+    pub fn new() -> Self {
+        Self {
+            first: None,
+            last: None,
+            failures: 0,
+            recoveries: 0,
+            failure_active: false,
+        }
+    }
+
+    pub fn record_failure(&mut self, error: JournalError) {
+        self.failures = self.failures.saturating_add(1);
+        self.failure_active = true;
+        self.last = Some(JournalErrorEvidence::capture(&error));
+        if self.first.is_none() {
+            self.first = Some(error);
+        }
+    }
+
+    pub fn record_success(&mut self) {
+        if self.failure_active {
+            self.recoveries = self.recoveries.saturating_add(1);
+            self.failure_active = false;
+        }
+    }
+
+    pub fn take_first(&mut self) -> Option<JournalError> {
+        self.first.take()
+    }
+
+    pub fn additional_failures(&self) -> u64 {
+        self.failures.saturating_sub(1)
+    }
+
+    pub fn summary_event_fields(&self, event: Event) -> Event {
+        let event = event
+            .field("journal_failures_after_spawn", self.failures)
+            .field("journal_failure_recoveries", self.recoveries)
+            .field("journal_failure_active", self.failure_active);
+        match &self.last {
+            Some(last) => last.event_fields(event),
+            None => event
+                .field("last_journal_error_operation", "NONE")
+                .field("last_journal_error_path_hex", "NONE")
+                .field("last_journal_error_kind", "NONE")
+                .field("last_journal_raw_os_error", "NONE")
+                .field("last_journal_error_hex", "NONE"),
+        }
+    }
+}
+
+impl JournalErrorEvidence {
+    fn capture(error: &JournalError) -> Self {
+        Self {
+            operation: error.operation,
+            path: error.path.clone(),
+            kind: error.source.kind(),
+            raw_os_error: error.source.raw_os_error(),
+            detail: error.source.to_string(),
+        }
+    }
+
+    fn event_fields(&self, event: Event) -> Event {
+        event
+            .field("last_journal_error_operation", self.operation)
+            .encoded_path_field("last_journal_error_path_hex", &self.path)
+            .field("last_journal_error_kind", format!("{:?}", self.kind))
+            .field(
+                "last_journal_raw_os_error",
+                self.raw_os_error
+                    .map_or_else(|| "NONE".to_owned(), |value| value.to_string()),
+            )
+            .field(
+                "last_journal_error_hex",
+                crate::event::hex_bytes(self.detail.as_bytes()),
+            )
     }
 }
 
@@ -202,16 +299,15 @@ fn partial_record_offset(file: &mut File, path: &Path, length: u64) -> Result<u6
     let mut cursor = length;
     let mut buffer = vec![0_u8; SEARCH_BYTES];
     while cursor != 0 {
-        let amount = usize::try_from(cursor.min(SEARCH_BYTES as u64)).unwrap_or(SEARCH_BYTES);
-        cursor -= u64::try_from(amount).expect("search buffer length fits u64");
+        let amount_u64 = cursor.min(SEARCH_BYTES as u64);
+        let amount = amount_u64 as usize;
+        cursor -= amount_u64;
         file.seek(SeekFrom::Start(cursor))
             .map_err(|source| JournalError::io("seek partial journal record", path, source))?;
         file.read_exact(&mut buffer[..amount])
             .map_err(|source| JournalError::io("read partial journal record", path, source))?;
         if let Some(index) = buffer[..amount].iter().rposition(|byte| *byte == b'\n') {
-            return Ok(cursor
-                .saturating_add(u64::try_from(index).expect("buffer index fits u64"))
-                .saturating_add(1));
+            return Ok(cursor.saturating_add(index as u64).saturating_add(1));
         }
     }
     Ok(0)
@@ -230,11 +326,12 @@ fn crc32_file_range(
     let mut state = u32::MAX;
     let mut buffer = vec![0_u8; READ_BYTES];
     while remaining != 0 {
-        let amount = usize::try_from(remaining.min(READ_BYTES as u64)).unwrap_or(READ_BYTES);
+        let amount_u64 = remaining.min(READ_BYTES as u64);
+        let amount = amount_u64 as usize;
         file.read_exact(&mut buffer[..amount])
             .map_err(|source| JournalError::io("read partial journal checksum", path, source))?;
         state = crc32_update(state, &buffer[..amount]);
-        remaining -= u64::try_from(amount).expect("checksum buffer length fits u64");
+        remaining -= amount_u64;
     }
     Ok(!state)
 }
@@ -305,6 +402,51 @@ mod tests {
     #[test]
     fn crc32_matches_the_standard_check_vector() {
         assert_eq!(crc32(b"123456789"), 0xcbf4_3926);
+    }
+
+    #[test]
+    fn failure_tracker_bounds_evidence_and_preserves_exact_counts() {
+        let mut tracker = FailureTracker::new();
+        tracker.record_failure(JournalError::io(
+            "first operation",
+            "/tmp/first-journal",
+            io::Error::from_raw_os_error(28),
+        ));
+        tracker.record_failure(JournalError::io(
+            "second operation",
+            "/tmp/second-journal",
+            io::Error::from_raw_os_error(5),
+        ));
+        tracker.record_success();
+        tracker.record_success();
+        tracker.record_failure(JournalError::io(
+            "last operation",
+            "/tmp/last-journal",
+            io::Error::from_raw_os_error(13),
+        ));
+
+        assert_eq!(tracker.failures, 3);
+        assert_eq!(tracker.recoveries, 1);
+        assert!(tracker.failure_active);
+        assert_eq!(tracker.additional_failures(), 2);
+        assert_eq!(
+            tracker.last.as_ref().map(|item| item.operation),
+            Some("last operation")
+        );
+
+        let summary = tracker
+            .summary_event_fields(Event::new("terminal", 1, 2))
+            .render();
+        assert!(summary.contains("\tjournal_failures_after_spawn=3\t"));
+        assert!(summary.contains("\tjournal_failure_recoveries=1\t"));
+        assert!(summary.contains("\tjournal_failure_active=true\t"));
+        assert!(summary.contains("\tlast_journal_error_operation=last operation\t"));
+        assert!(summary.contains("\tlast_journal_raw_os_error=13\t"));
+
+        let first = tracker.take_first().expect("first error retained");
+        assert!(first.to_string().contains("first operation"));
+        assert_eq!(tracker.additional_failures(), 2);
+        assert!(tracker.take_first().is_none());
     }
 
     #[test]

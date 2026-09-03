@@ -137,6 +137,21 @@ The corrected terminal path is deliberately two-stage:
 6. the journal records whether the independent `waitid` and `wait4`
    interpretations agree.
 
+There is now an explicit degraded path for failure of step 1. The direct owner
+does not return and discard a potentially live `Child`; it retains rolling
+observation and polls the exact PID with nonblocking `wait4`. A real terminal
+result is reaped and recorded with resource usage, the unavailable pre-reap
+`/proc` boundary is marked, and the owner then returns a tracking-failure
+status. If fallback polling itself errors, the owner remains alive, counts the
+errors, and records changes and recovery instead of abandoning the child.
+The session subreaper uses the equivalent `wait4(-1, WNOHANG)` path after a
+`waitid(P_ALL)` failure and does not return tracking failure until all actual
+session children have been reaped.
+If the exact-PID `wait4` after a successful `waitid(WNOWAIT)` temporarily
+fails, both ownership layers retain the terminal child, continue applicable
+observation work, count the failures without journal flooding, record recovery,
+and obtain the real status before returning tracking failure.
+
 Session terminal records include the LinuxCNC root PID and a separately
 timestamped, non-reaping `waitid` probe of that exact root. This distinguishes
 an observed-nonterminal root from one already terminal or reaped when a
@@ -152,6 +167,21 @@ the journal records both limits and the host core-dump policy. A core copy is
 attempted by both the direct owner and session subreaper paths; absence,
 unsupported naming, external handling, rejection, and every copy failure are
 terminal data rather than silent omissions.
+
+The pinned `milltask`, `io`, and `halui` sources install SIGINT and SIGTERM
+through libc `signal()` and turn those deliveries into clean shutdowns. Their
+catalogued direct owners now load a narrow signal-registration interposer with
+a private nonblocking Unix sequenced-packet socket. Before invoking the
+unchanged LinuxCNC handler, it sends with `MSG_NOSIGNAL` and records the kernel
+`siginfo_t`: signal and code, target PID/TID, sender PID/UID when defined,
+and timestamp. It also records initialization and handler registration, so a
+clean exit with no delivery is distinguishable from a caught signal and from
+missing instrumentation. The owner drains the socket while the process runs and
+once more after terminal `waitid(WNOWAIT)` observation, before `wait4`.
+The pre-handler send is nonblocking and uses a finite recorded socket buffer;
+it cannot stall or SIGPIPE the target, but it is best-effort and exposes no
+signal-safe drop counter. Therefore no delivery record means only that no
+delivery evidence was retained, not that a signal was proven absent.
 
 All records are appended to
 `var/log/linuxcnc/process-lifecycle.tsv` under an exclusive lock, include a
@@ -186,10 +216,24 @@ that the currently running older session used this new binary, nor do
 they establish the cause of the historical event. The live evidence boundary
 begins only after a separately authorized launch of the newly built tracker.
 
-LinuxCNC catches `SIGINT` and `SIGTERM` and later returns zero, so ordinary
-parent wait status cannot identify the sender of either caught signal. Exact
-sender provenance for that narrow case would require separately authorized
-kernel signal auditing; it is not claimed by this implementation.
+Separate fault-injection tests force the direct owner's and session subreaper's
+first real `waitid` call plus three fallback `wait4` calls to return `EPERM`
+while their actual child remains live. The children are not given manufactured
+results: they exit themselves, nonblocking `wait4` retains the kernel status
+and resource usage, and each test requires the degraded owner to record
+recovery and reap the PID before returning tracking failure.
+Two additional real-process tests retain an actual terminal child with
+`waitid(WNOWAIT)`, force the subsequent exact-PID `wait4` calls to fail, prove
+that both owner and zombie remain present, then release the fault and require
+the real independently agreeing status to be reaped and recorded.
+
+Ordinary parent wait status still cannot identify a signal that LinuxCNC caught
+and converted to zero. The new pre-handler record supplies the kernel-defined
+sender PID/UID for process-directed SIGINT/SIGTERM, but not a durable sender
+executable or ancestry when that sender exits before `/proc` can be sampled.
+The set-user-ID `rtapi_app`, the LinuxCNC shell, and AXIS are not covered by
+this preload mechanism. Most importantly, none of this retroactively supplies
+the missing status or caught-signal evidence for historical PID 37318.
 
 ## Primary source references
 
