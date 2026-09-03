@@ -1,0 +1,13 @@
+DMC2_PROCESS_CATALOG	1
+role	program	launch_site	ownership	criticality	backtrace	argument_placement
+linuxcnc-session	/usr/bin/linuxcnc	compiled-launcher	session-root	controller-critical	none	none
+linuxcncsvr	/usr/bin/linuxcncsvr	linuxcnc-hardcoded-server	self-daemonizing-descendant	controller-critical	none	linuxcnc-appends-ini
+rtapi-app	/usr/bin/rtapi_app	halcmd-hardcoded-loadrt	persistent-master	controller-critical	none	none
+iocontrol	/usr/bin/io	ini-emcio	direct-child	controller-critical	none	linuxcnc-appends-ini
+halui	/usr/bin/halui	ini-halui	direct-child	controller-critical	none	linuxcnc-appends-ini
+serial-bridge	../native/bin/dmc2-serial-bridge	pendant-hal	direct-child	controller-critical	none	none
+task-monitor	../native/bin/dmc2-task-monitor	pendant-hal	direct-child	controller-critical	none	none
+milltask	/usr/bin/milltask	ini-task	direct-child	controller-critical	linuxcnc-task	linuxcnc-appends-ini
+axis	/usr/bin/axis	ini-display	direct-child	operator-interface	none	linuxcnc-prepends-ini
+lifecycle-test	/bin/sh	compiled-verification	direct-child	verification-only	none	none
+session-lifecycle-test	/bin/sh	compiled-verification	session-root	verification-only	none	none

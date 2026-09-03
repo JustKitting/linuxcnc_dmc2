@@ -6,6 +6,7 @@ use std::time::SystemTime;
 
 #[derive(Debug)]
 pub enum BacktraceEvidence {
+    NotApplicable,
     Absent {
         source: PathBuf,
     },
@@ -98,7 +99,7 @@ pub fn capture(
     };
 
     let parent = journal_path.parent().unwrap_or_else(|| Path::new("."));
-    let durable_copy = parent.join(format!("milltask-backtrace-{child_pid}-{exit_unix_ns}.txt"));
+    let durable_copy = parent.join(format!("process-backtrace-{child_pid}-{exit_unix_ns}.txt"));
     if let Err(error) = copy_and_sync(&source, &durable_copy) {
         return BacktraceEvidence::CaptureFailed {
             source,
@@ -153,7 +154,9 @@ fn copy_and_sync(source: &Path, destination: &Path) -> io::Result<()> {
         .open(destination)?;
     io::copy(&mut source_file, &mut destination_file)?;
     destination_file.flush()?;
-    destination_file.sync_all()
+    destination_file.sync_all()?;
+    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    File::open(parent)?.sync_all()
 }
 
 enum HeaderError {

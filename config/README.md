@@ -11,3 +11,9 @@ core refuses an inconsistent or unreviewed relationship during compilation.
 Physical jog velocity and acceleration are not duplicated here. The core
 build reads those planner limits directly from `live/dmc2.ini` and derives
 bounded completion and stop deadlines from the accepted live profile.
+
+`operations.tsv` defines reusable operator actions and their compiled
+execution contracts. `processes.tsv` defines every tracked LinuxCNC process's
+exact program, launch site, ownership topology, criticality, backtrace policy,
+and INI-argument placement. Both files are embedded into the compiled launcher
+or owner so a changed runtime contract requires a rebuild.

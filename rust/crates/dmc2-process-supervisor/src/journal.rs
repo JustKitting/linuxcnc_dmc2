@@ -2,6 +2,7 @@ use std::fmt;
 use std::fs::{self, File, OpenOptions};
 use std::io::{self, Read, Seek, SeekFrom, Write};
 use std::os::unix::fs::OpenOptionsExt;
+use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 
 use crate::event::Event;
@@ -38,7 +39,8 @@ impl Journal {
                 })?;
         }
 
-        let recovered_partial_record = separate_partial_record(&mut file, path)?;
+        let recovered_partial_record =
+            with_exclusive_lock(&mut file, path, |file| separate_partial_record(file, path))?;
         Ok(Self {
             file,
             path: path.to_path_buf(),
@@ -57,13 +59,61 @@ impl Journal {
     pub fn append(&mut self, event: &Event) -> Result<(), JournalError> {
         let payload = event.render();
         let record = format!("{payload}\tcrc32={:08x}\n", crc32(payload.as_bytes()));
-        self.file
-            .write_all(record.as_bytes())
-            .map_err(|source| JournalError::io("append journal record", &self.path, source))?;
-        self.file
-            .sync_data()
-            .map_err(|source| JournalError::io("synchronize journal record", &self.path, source))
+        with_exclusive_lock(&mut self.file, &self.path, |file| {
+            file.write_all(record.as_bytes())
+                .map_err(|source| JournalError::io("append journal record", &self.path, source))?;
+            file.sync_data().map_err(|source| {
+                JournalError::io("synchronize journal record", &self.path, source)
+            })
+        })
     }
+}
+
+fn with_exclusive_lock<T>(
+    file: &mut File,
+    path: &Path,
+    operation: impl FnOnce(&mut File) -> Result<T, JournalError>,
+) -> Result<T, JournalError> {
+    lock(file, LockOperation::Exclusive)
+        .map_err(|source| JournalError::io("lock lifecycle journal", path, source))?;
+    let result = operation(file);
+    let unlock = lock(file, LockOperation::Unlock)
+        .map_err(|source| JournalError::io("unlock lifecycle journal", path, source));
+    match (result, unlock) {
+        (Err(error), _) => Err(error),
+        (Ok(_), Err(error)) => Err(error),
+        (Ok(value), Ok(())) => Ok(value),
+    }
+}
+
+#[derive(Clone, Copy)]
+enum LockOperation {
+    Exclusive,
+    Unlock,
+}
+
+fn lock(file: &File, operation: LockOperation) -> io::Result<()> {
+    const LOCK_EX: i32 = 2;
+    const LOCK_UN: i32 = 8;
+    let value = match operation {
+        LockOperation::Exclusive => LOCK_EX,
+        LockOperation::Unlock => LOCK_UN,
+    };
+    loop {
+        // SAFETY: `file` owns a live descriptor for the duration of this call,
+        // and `flock` neither retains the descriptor nor dereferences a pointer.
+        if unsafe { flock(file.as_raw_fd(), value) } == 0 {
+            return Ok(());
+        }
+        let error = io::Error::last_os_error();
+        if error.kind() != io::ErrorKind::Interrupted {
+            return Err(error);
+        }
+    }
+}
+
+unsafe extern "C" {
+    fn flock(fd: i32, operation: i32) -> i32;
 }
 
 fn separate_partial_record(file: &mut File, path: &Path) -> Result<bool, JournalError> {

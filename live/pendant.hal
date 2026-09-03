@@ -4,8 +4,8 @@
 # motion is exchanged directly with LinuxCNC's servo-thread wheel-jog pins;
 # HALUI is retained only for non-realtime machine-state requests.
 
-loadusr -Wn dmc2-pendant ../native/bin/dmc2-serial-bridge --component dmc2-pendant --port [DMC2]PENDANT_PORT --baud [DMC2]PENDANT_BAUD --packet-timeout-ms [DMC2]PENDANT_TIMEOUT_MS
-loadusr -Wn dmc2-task-monitor ../native/bin/dmc2-task-monitor --component dmc2-task-monitor --error-journal ../var/log/linuxcnc/error-channel.tsv --diagnostic-journal ../var/log/linuxcnc/diagnostics.tsv
+loadusr -Wn dmc2-pendant ../native/bin/dmc2-process-supervisor --role serial-bridge --journal ../var/log/linuxcnc/process-lifecycle.tsv -- ../native/bin/dmc2-serial-bridge --component dmc2-pendant --port [DMC2]PENDANT_PORT --baud [DMC2]PENDANT_BAUD --packet-timeout-ms [DMC2]PENDANT_TIMEOUT_MS
+loadusr -Wn dmc2-task-monitor ../native/bin/dmc2-process-supervisor --role task-monitor --journal ../var/log/linuxcnc/process-lifecycle.tsv -- ../native/bin/dmc2-task-monitor --component dmc2-task-monitor --error-journal ../var/log/linuxcnc/error-channel.tsv --diagnostic-journal ../var/log/linuxcnc/diagnostics.tsv
 
 source hal/pendant_input_sources.hal
 

@@ -2,7 +2,7 @@ use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
-pub const SCHEMA: &str = "dmc2-milltask-lifecycle-v1";
+pub const SCHEMA: &str = "dmc2-process-lifecycle-v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
@@ -118,7 +118,7 @@ mod tests {
 
         assert_eq!(
             event.render(),
-            "schema=dmc2-milltask-lifecycle-v1\tevent=started\tunix_ns=42\tsupervisor_pid=7\tprogram_hex=6109620a63\tchild_pid=9"
+            "schema=dmc2-process-lifecycle-v1\tevent=started\tunix_ns=42\tsupervisor_pid=7\tprogram_hex=6109620a63\tchild_pid=9"
         );
     }
 }

@@ -53,10 +53,16 @@ pub fn userspace_deployments(layout: &Layout) -> Vec<(PathBuf, PathBuf)> {
             layout.project.join("rust/target/release/dmc2-task-monitor"),
         ),
         (
-            layout.project.join("native/bin/dmc2-milltask-supervisor"),
+            layout.project.join("native/bin/dmc2-process-supervisor"),
             layout
                 .project
-                .join("rust/target/release/dmc2-milltask-supervisor"),
+                .join("rust/target/release/dmc2-process-supervisor"),
+        ),
+        (
+            layout.project.join("native/bin/dmc2-session-supervisor"),
+            layout
+                .project
+                .join("rust/target/release/dmc2-session-supervisor"),
         ),
         (
             layout.project.join("native/bin/dmc2-linuxcnc"),

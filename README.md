@@ -451,14 +451,15 @@ LinuxCNC 2.9.10's legacy automatic probe also requires the absent
 setuid (`root:root`, mode `4755`) or LinuxCNC will deliberately fall back to
 POSIX non-realtime scheduling.
 
-The live profile configures `dmc2-milltask-supervisor` as the direct parent of
-the unchanged LinuxCNC 2.9.10 `/usr/bin/milltask`. It synchronously appends the
-child PID, invocation, lifetime, exit code or terminating signal, core-dump
-flag, and raw kernel wait status to
-`var/log/linuxcnc/milltask-lifecycle.tsv`. When LinuxCNC's own fatal-signal
-handler creates `/tmp/backtrace.<pid>`, a PID- and timestamp-matched copy is
-preserved beside that journal. The supervisor is observational only: it has no
-restart, signal, E-stop, enable, motion, spindle, or recovery behavior.
+The compiled launcher runs LinuxCNC beneath `dmc2-session-supervisor`, a Linux
+child subreaper, while the live INI/HAL configuration places
+`dmc2-process-supervisor` directly around `milltask`, I/O, HALUI, AXIS, and the
+two DMC2 userspace adapters. Their shared, locked journal at
+`var/log/linuxcnc/process-lifecycle.tsv` retains catalogued ownership, exact
+invocations, process/parent identity, `/proc` snapshots, kernel wait status,
+signal/core information, and `wait4` resource usage. The trackers do not
+restart, stop, signal, or otherwise control the machine; see
+`docs/process-lifecycle-tracking.md` for the exact evidence boundary.
 
 ## Sources
 

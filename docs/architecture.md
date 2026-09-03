@@ -21,10 +21,12 @@ LinuxCNC emcError queue
   -> dmc2_axis/error_journal.py (validation and presentation only)
   -> AXIS notifications
 
-LinuxCNC task launch
-  -> dmc2-milltask-supervisor (direct parent and kernel wait-status owner)
-  -> unchanged LinuxCNC 2.9.10 /usr/bin/milltask
-  -> var/log/linuxcnc/milltask-lifecycle.tsv
+LinuxCNC session launch
+  -> dmc2-session-supervisor (Linux child subreaper and session-status owner)
+  -> unchanged LinuxCNC 2.9.10 /usr/bin/linuxcnc
+  -> dmc2-process-supervisor (direct owner for configurable long-lived processes)
+  -> unchanged milltask / io / halui / axis / DMC2 userspace adapters
+  -> var/log/linuxcnc/process-lifecycle.tsv
 ```
 
 LinuxCNC is the only Mesa owner. No Python process is in the live motion,
@@ -48,11 +50,12 @@ control machine state from that journal; it validates and displays records.
 - `rust/crates/dmc2-task-monitor`: native status and sole error-queue NML
   lifecycles, source-backed total classification, transition diagnostics,
   durable error journaling, and coherent status HAL publication.
-- `rust/crates/dmc2-milltask-supervisor`: passive `milltask` process-lifecycle
-  ownership, exact child PID and kernel wait-status capture, and preservation
-  of LinuxCNC-generated fatal-signal backtraces. It never restarts LinuxCNC,
-  changes machine state, or sends a signal to `milltask`.
-  See `docs/milltask-lifecycle-tracking.md` for the exact evidence boundary and
+- `rust/crates/dmc2-process-supervisor`: passive, data-catalogued lifecycle
+  ownership for the LinuxCNC session and configurable long-lived processes.
+  It retains process and parent identity, real kernel wait status, resource
+  usage, and matching LinuxCNC task backtraces. It never restarts LinuxCNC,
+  changes machine state, or sends a signal to a tracked process.
+  See `docs/process-lifecycle-tracking.md` for the exact evidence boundary and
   the caught-signal limitations imposed by LinuxCNC 2.9.10.
 - `rust/crates/dmc2-linuxcnc-interface`: generated, version-locked values and
   layouts consumed by the task monitor, including every public header, enum,
@@ -95,8 +98,9 @@ control machine state from that journal; it validates and displays records.
    guesses.
 8. Live configuration cannot reference `reference`, `archive`, `artifacts`,
    or `var/tmp`.
-9. The configured task supervisor remains the direct parent of `milltask` so
-   later process termination cannot be discarded by `halcmd -Wn`.
+9. Every configurable long-lived process has a direct status-owning parent,
+   and the launcher-level child subreaper retains statuses for orphaned
+   `linuxcncsvr`, `rtapi_app`, and owner descendants.
 
 ## Verification boundary
 

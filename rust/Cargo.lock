@@ -30,7 +30,7 @@ name = "dmc2-linuxcnc-interface"
 version = "0.1.0"
 
 [[package]]
-name = "dmc2-milltask-supervisor"
+name = "dmc2-process-supervisor"
 version = "0.1.0"
 
 [[package]]

@@ -9,11 +9,13 @@ Runtime payloads remain ignored by Git.
   cause, operator action, source domain, original raw value, and the complete
   coherent evidence snapshot captured with that value. Unknown values retain
   an explicit `UNKNOWN_<DOMAIN>(raw=<value>)` identity and are never guessed.
-- `milltask-lifecycle.tsv` is the checksummed, append-only process-lifecycle
-  stream written by `dmc2-milltask-supervisor`. It records the supervisor and
-  child PIDs, exact invocation bytes, monotonic lifetime, raw kernel wait
-  status, exit code or terminating signal, and the core-dump status bit.
-- `milltask-backtrace-<pid>-<time>.txt` is a durable copy of a matching
+- `process-lifecycle.tsv` is the locked, checksummed, append-only lifecycle
+  stream shared by `dmc2-process-supervisor` and
+  `dmc2-session-supervisor`. It records catalogued roles and ownership,
+  tracker/child/parent identity, exact invocation bytes, `/proc` process
+  snapshots, monotonic lifetime, raw kernel wait status, exit code or
+  terminating signal, core-dump status, and `wait4` resource usage.
+- `process-backtrace-<pid>-<time>.txt` is a durable copy of a matching
   `/tmp/backtrace.<pid>` created by LinuxCNC's own `SIGSEGV`/`SIGFPE` handler.
 
 This tracking is passive. It never restarts, stops, enables, disables, homes,
@@ -23,4 +25,6 @@ those two delivered signals. Its fatal-signal handler likewise converts
 `SIGSEGV` and `SIGFPE` into a normal exit, which is why the matching backtrace
 header is preserved separately. If the supervisor and `milltask` are killed
 simultaneously, the already-synchronized start record remains but no user-space
-process can guarantee a final record after its own termination.
+process can guarantee a final record after its own termination. The outer
+session subreaper records direct-owner deaths and adopted descendants while it
+remains alive. See `docs/process-lifecycle-tracking.md` for exact boundaries.

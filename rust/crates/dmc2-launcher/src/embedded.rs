@@ -37,6 +37,7 @@ macro_rules! h100_file {
 
 pub const FILES: &[File] = &[
     project_file!("config/operations.tsv"),
+    project_file!("config/processes.tsv"),
     project_file!("live_requirements.json"),
     project_file!("live/dmc2.ini"),
     project_file!("live/machine.hal"),
