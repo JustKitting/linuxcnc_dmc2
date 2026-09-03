@@ -2,9 +2,9 @@
 
 ## What was observed
 
-The affected live session retained its outer LinuxCNC shell, AXIS,
-`linuxcncsvr`, I/O, HALUI, the serial bridge, and the task monitor. The two
-processes that owned the controller itself were absent:
+The affected live session eventually retained its outer LinuxCNC shell, AXIS,
+`linuxcncsvr`, I/O, HALUI, the serial bridge, and the task monitor while both
+controller processes were absent:
 
 - `/usr/bin/milltask`, historical PID 37318; and
 - `/usr/bin/rtapi_app`, historical PID 37265.
@@ -14,38 +14,56 @@ PID remained alive. That status proved only that the shell existed; it did not
 prove that the LinuxCNC task or realtime controller existed. A later
 `halcmd show comp` had no persistent controller components.
 
-The command and journal timeline was:
+They did **not** disappear together. The command and journal timeline was:
 
 - 17:11:49 local: the last audited action before the loss was a read-only HAL
   pin query;
 - 17:11:55.318358: PID 37318 (`milltask`) emitted
   `hm2_modbus.0: error: Modbus device address mismatch: got 0x00, expected 0x01`;
 - 17:11:55.319877: PID 37265 (`rtapi_app`) emitted the same line, about 1.5 ms
-  later; and
-- 17:11:56: the next read-only HAL query could no longer obtain controller
-  state.
+  later;
+- no later journal entry exists for PID 37318, so this is the last surviving
+  evidence from `milltask`;
+- PID 37265 continued emitting messages for another 73 minutes, proving that
+  `rtapi_app` remained alive after `milltask` disappeared;
+- 18:24:57.774835: PID 37265 reported an unexpected realtime delay on the
+  1 ms task;
+- 18:25:18.475467: PID 37265 reported
+  `hm2/hm2_7i95.0: error finishing read! iter=7085925`; and
+- 18:25:23.801163: PID 37265 reported
+  `rtapi_app: caught signal 11 - dumping core`.
 
 The audited command stream contains no stop, unload, restart, signal, or kill
-operation around the event. The kernel journal contains no matching OOM,
-segfault, trap, core, or explicit signal report. There was no
-`/tmp/backtrace.37318`, and the service descendants inherited a zero soft core
-limit. The service cgroup did not hit its PID limit, and realtime CPU time was
-unlimited.
+operation around the `milltask` disappearance. There was no
+`/tmp/backtrace.37318`. The service descendants inherited a zero soft core
+limit, the service cgroup did not hit its PID limit, and realtime CPU time was
+unlimited. No core or backtrace artifact from PID 37265 remains, despite its
+explicit SIGSEGV report. The surviving evidence does not establish why that
+artifact is absent.
 
 ## What the evidence does and does not establish
 
-The address-mismatch message is tightly correlated with the loss of both
-processes. It is not proof that the mismatch terminated either process. In the
-pinned LinuxCNC 2.9.10 source, that message's local driver path reports the
-bad response and requests a resend; it does not intentionally exit
-`milltask` or `rtapi_app`.
+The address-mismatch message is tightly correlated with the last surviving
+`milltask` output. It is not proof that the mismatch terminated `milltask`.
+The later messages from PID 37265 prove that this mismatch did not terminate
+`rtapi_app` at 17:11:55. In the pinned LinuxCNC 2.9.10 source, that message's
+local driver path reports the bad response and requests a resend; it does not
+intentionally exit either process.
+
+The later `rtapi_app` event is different: its own log explicitly identifies
+SIGSEGV. The nearby realtime-delay and HostMot2 read-error messages establish
+ordering and context, not causation. Without the terminal wait record, core,
+or stack trace, the exact code path that generated the SIGSEGV is not
+recoverable from this historical session.
 
 LinuxCNC started the task through `halcmd loadusr -Wn`. Once the component was
 ready, that `halcmd` process exited and discarded responsibility for the
-task's eventual wait status. Therefore the kernel's historical exit code,
-terminating signal, and core flag were already irretrievably reaped before
-this investigation. The exact historical cause cannot honestly be recovered
-from the remaining logs.
+task's eventual wait status. The same ownership gap applied to the persistent
+`rtapi_app` process. Therefore their kernel exit codes, terminating signals,
+core flags, and resource usage had already been irretrievably reaped before
+this investigation. The exact historical cause of `milltask`'s disappearance
+cannot honestly be recovered from the remaining logs; only `rtapi_app`'s
+self-reported SIGSEGV is known.
 
 Upstream LinuxCNC issue 3849 and its 2.9 backport address a separate
 `hm2_modbus` inter-character-delay lock-up. The pinned 2.9.10 tree already
