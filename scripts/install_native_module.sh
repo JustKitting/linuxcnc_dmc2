@@ -6,10 +6,12 @@ h100_project="${project_dir}/../h100_modbus"
 source_modules=(
     "${project_dir}/rust/target/release/libdmc2_rt.so"
     "${h100_project}/target/release/h100_spindle.so"
+    "${project_dir}/native/modules/hm2_eth.so"
 )
 target_modules=(
     "/usr/lib/linuxcnc/modules/dmc2_rt.so"
     "/usr/lib/linuxcnc/modules/h100_spindle.so"
+    "/usr/lib/linuxcnc/modules/hm2_eth.so"
 )
 
 transaction_staged=()

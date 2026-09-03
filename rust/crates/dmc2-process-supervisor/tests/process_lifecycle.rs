@@ -80,6 +80,48 @@ fn records_the_kernel_signal_from_a_real_child() {
 }
 
 #[test]
+fn preserves_a_linuxcnc_caught_fatal_signal_that_returns_zero() {
+    let directory = TestDirectory::new();
+    let journal = directory.journal();
+    let status = Command::new(env!("CARGO_BIN_EXE_dmc2-process-supervisor"))
+        .arg("--role")
+        .arg("task-backtrace-test")
+        .arg("--journal")
+        .arg(&journal)
+        .arg("--")
+        .arg("/bin/sh")
+        .arg("-c")
+        .arg("sleep 0.02; printf 'pid=%s signal=11\\n' \"$$\" > \"/tmp/backtrace.$$\"; exit 0")
+        .status()
+        .expect("run LinuxCNC caught-signal lifecycle test");
+
+    assert_eq!(status.code(), Some(0));
+    let records = fs::read_to_string(&journal).expect("read lifecycle journal");
+    let child_pid = records
+        .lines()
+        .find(|line| line.contains("\tevent=process-started\t"))
+        .and_then(|line| {
+            line.split('\t')
+                .find_map(|field| field.strip_prefix("child_pid="))
+        })
+        .and_then(|value| value.parse::<u32>().ok())
+        .expect("started child PID");
+    let backtrace_source = PathBuf::from(format!("/tmp/backtrace.{child_pid}"));
+
+    assert_complete_records(&records);
+    assert!(records.contains("\trole=task-backtrace-test\t"));
+    assert!(records.contains("\texit_code=0\t"));
+    assert!(
+        records.contains("\tbacktrace_state=captured\t"),
+        "{records}"
+    );
+    assert!(records.contains("\tbacktrace_signal=11\t"));
+    assert!(records.contains("\tbacktrace_signal_name=SIGSEGV\t"));
+    assert!(records.contains("\toutcome=linuxcnc-handled-fatal-signal\tcrc32="));
+    fs::remove_file(backtrace_source).expect("remove synthetic LinuxCNC backtrace");
+}
+
+#[test]
 fn concurrent_supervisors_commit_noninterleaved_checked_records() {
     const CHILDREN: usize = 12;
     let directory = TestDirectory::new();
@@ -136,12 +178,45 @@ fn session_subreaper_records_the_root_and_an_adopted_descendant() {
     assert!(records.contains("\tproc_state=Z\t"));
     assert!(records.contains("\twaitid_wait4_consistent=true\t"));
     assert!(records.contains("\ttracked_children_before_reap="));
+    assert!(records.contains("\tsession_root_state="));
+    assert!(records.contains("\tsession_root_observation_unix_ns="));
+    assert!(records.contains("\tsession_root_observation_method="));
+    assert!(records.contains("\tsession_root_terminal_at_child_observation="));
     assert_eq!(
         records
             .matches("\tevent=session-child-terminated\t")
             .count(),
         2
     );
+}
+
+#[test]
+fn session_subreaper_marks_a_descendant_lost_while_linuxcnc_is_still_running() {
+    let directory = TestDirectory::new();
+    let journal = directory.journal();
+    let status = Command::new(env!("CARGO_BIN_EXE_dmc2-session-supervisor"))
+        .arg("--role")
+        .arg("session-lifecycle-test")
+        .arg("--journal")
+        .arg(&journal)
+        .arg("--")
+        .arg("/bin/sh")
+        .arg("-c")
+        .arg("( (sleep 0.05; exit 42) & exit 0 ) & sleep 0.20; exit 7")
+        .status()
+        .expect("run live-session descendant-loss test");
+
+    assert_eq!(status.code(), Some(7));
+    let records = fs::read_to_string(&journal).expect("read session lifecycle journal");
+    assert_complete_records(&records);
+    let departed = records
+        .lines()
+        .find(|line| {
+            line.contains("\tevent=session-child-terminated\t") && line.contains("\texit_code=42\t")
+        })
+        .expect("adopted descendant terminal record");
+    assert!(departed.contains("\tsession_root_state=nonterminal-at-probe\t"));
+    assert!(departed.contains("\tsession_root_terminal_at_child_observation=false\t"));
 }
 
 #[test]
@@ -169,7 +244,10 @@ fn session_subreaper_identifies_an_adopted_direct_process_owner() {
     let records = fs::read_to_string(&journal).expect("read layered lifecycle journal");
     assert_complete_records(&records);
     assert!(records.contains("\trole=lifecycle-test\t"));
-    assert!(records.contains("\tlayer=direct-process-owner\t"));
+    assert!(
+        records.contains("\tlayer=direct-process-owner\t"),
+        "{records}"
+    );
     assert!(
         records.contains("\tterminal_identity_source=supervisor-process-name\t"),
         "{records}"

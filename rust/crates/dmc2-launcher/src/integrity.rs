@@ -37,6 +37,10 @@ pub fn realtime_deployments(layout: &Layout) -> Vec<(PathBuf, PathBuf)> {
             PathBuf::from("/usr/lib/linuxcnc/modules/h100_spindle.so"),
             layout.h100.join("target/release/h100_spindle.so"),
         ),
+        (
+            PathBuf::from("/usr/lib/linuxcnc/modules/hm2_eth.so"),
+            layout.project.join("native/modules/hm2_eth.so"),
+        ),
     ]
 }
 

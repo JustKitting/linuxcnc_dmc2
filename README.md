@@ -23,6 +23,8 @@ offline reference controllers are not part of this repository.
 - `firmware/`: Nano source and Mesa firmware images.
 - `tests/linuxcnc-motion/`: isolated real-LinuxCNC motion-consumer fixture.
 - `scripts/`: release build, real motion verification, and module installation.
+- `patches/`: provenance-locked post-release fixes applied to the pristine
+  LinuxCNC 2.9.10 source only in an ephemeral build tree.
 - `docs/`: architecture, signal audits, and historical machine notes.
 - `archive/local/`: ignored one-off diagnostic programs and the preserved old
   home-directory VCS history.
@@ -422,17 +424,26 @@ exists in either live-launch path.
 
 For live mode, the compiled launcher first proves no LinuxCNC/HAL owner is
 active, invokes the realtime-module installer automatically only when required,
-and re-verifies both installed module files before starting LinuxCNC. No
+and re-verifies all installed module files before starting LinuxCNC. No
 separate module-install command is part of the operator workflow. The installer
-refuses to run while `rtapi_app` is active, stages and byte-checks both
-`dmc2_rt.so` and `h100_spindle.so` beside their installed targets, takes
-byte-verified rollback copies, and uses atomic same-filesystem renames. Both
-replacements form one transaction: any commit,
+refuses to run while `rtapi_app` is active, stages and byte-checks
+`dmc2_rt.so`, `h100_spindle.so`, and the reviewed LinuxCNC 2.9.10
+`hm2_eth.so` hardening overlay beside their installed targets, takes
+byte-verified rollback copies, and uses atomic same-filesystem renames. The
+custom replacements and driver replacement form one transaction: any commit,
 verification, host-state, exit, or signal failure restores every changed
 target, while an incomplete rollback preserves its recovery files. The
-launcher then byte-compares both installed modules against the exact release
+launcher then byte-compares all three installed modules against the exact release
 artifacts. Abnormal process-probe results fail
 installation instead of being treated as proof that LinuxCNC is stopped.
+
+The driver overlay is pinned in `config/linuxcnc-driver-overlays.tsv`. It
+backports the `hm2_eth` portions of upstream commits `10dc650ad` and
+`cd8eb00ad`: bounds checks for queued Ethernet buffers and unconditional write
+queue reset after a failed `send()`. Upstream states that the old accumulating
+buffer path generated a segfault. The build verifies the pristine 2.9.10 base,
+patch checksum, installed LinuxCNC version, and exported-symbol contract, then
+produces a reproducible staged module without editing the vendor checkout.
 
 For a live GUI/controller that is owned by the user service manager instead of
 the initiating terminal, use the explicit persistent form:

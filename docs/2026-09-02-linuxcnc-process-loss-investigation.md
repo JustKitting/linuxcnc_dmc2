@@ -70,6 +70,26 @@ Upstream LinuxCNC issue 3849 and its 2.9 backport address a separate
 contains that backport, and its described lock-up is not evidence of these two
 process deaths.
 
+The audit did identify a different, concrete defect in the exact installed
+2.9.10 `hm2_eth` source. A queued-write `send()` failure returns before
+resetting `write_packet_ptr` and `write_packet_size`; later servo cycles keep
+appending to the fixed 1400-byte array with no bounds check. Upstream commit
+`10dc650adf741da16f16ffe5a850e78b91aa3ec7` describes this old path as
+generating a segfault and adds read/write queue bounds checks. Its companion
+commit `cd8eb00ad7d31f81fd40e674987c6edbc3bed23c` resets the write queue even
+when `send()` fails. Both `hm2_eth` changes apply cleanly to the exact 2.9.10
+tag and retain the module's exported-symbol set.
+
+The historical journal has no retained `ERROR: sending packet` line, so this
+known defect cannot honestly be claimed as the proven cause of PID 37265's
+old SIGSEGV. It is nevertheless a reachable memory-corruption path in the
+installed driver and is removed by the source-controlled overlay in
+`patches/linuxcnc-2.9.10/hm2-eth-buffer-safety.patch`. The overlay catalog and
+builder verify the 2.9.10 base commit, patch checksum, upstream provenance,
+installed version, and ABI exports. Building stages an artifact only; live
+deployment and hardware behavior remain unverified until a separately ordered
+launch installs and loads it.
+
 ## Tracking correction
 
 Future launches use two independent ownership layers:
@@ -91,8 +111,16 @@ The corrected terminal path is deliberately two-stage:
 5. the journal records whether the independent `waitid` and `wait4`
    interpretations agree.
 
+Session terminal records include the LinuxCNC root PID and a separately
+timestamped, non-reaping `waitid` probe of that exact root. This distinguishes
+an observed-nonterminal root from one already terminal or reaped when a
+controller-critical owner departs, while retaining probe failures explicitly.
+
 Each process owner has a unique, reviewed kernel `comm` value so its role stays
 identifiable even if it dies before the session poller reads its command line.
+The session tracker also upgrades and journals an identity first seen in the
+fork-before-`exec` window, retaining both the temporary identity and final
+catalogued owner identity.
 Tracked children receive the data-selected soft core limit before `exec`, and
 the journal records both limits and the host core-dump policy.
 
@@ -109,8 +137,10 @@ has been invented.
 
 Offline tests directly prove retained-zombie capture, real exit and signal
 status, `waitid`/`wait4` agreement, core-limit inheritance, concurrent journal
-writes, subreaper adoption, and owner identity after death. They do not prove
-that the currently stopped/older live session used this new binary, nor do
+writes, subreaper adoption, owner identity after death, descendant departure
+while the session root stays live, and preservation of a matching LinuxCNC
+SIGSEGV backtrace despite the child's later zero exit. They do not prove
+that the currently running older session used this new binary, nor do
 they establish the cause of the historical event. The live evidence boundary
 begins only after a separately authorized launch of the newly built tracker.
 
@@ -124,3 +154,5 @@ kernel signal auditing; it is not claimed by this implementation.
 - LinuxCNC issue 3849: <https://github.com/linuxcnc/linuxcnc/issues/3849>
 - Upstream correction: <https://github.com/LinuxCNC/linuxcnc/commit/582ac390274aac5543b18f66dacd271564b5ee27>
 - 2.9 backport: <https://github.com/LinuxCNC/linuxcnc/commit/ccb56bf04771713e800fde636de94a275d8143c2>
+- HostMot2 Ethernet bounds fix: <https://github.com/LinuxCNC/linuxcnc/commit/10dc650adf741da16f16ffe5a850e78b91aa3ec7>
+- HostMot2 failed-send queue reset: <https://github.com/LinuxCNC/linuxcnc/commit/cd8eb00ad7d31f81fd40e674987c6edbc3bed23c>

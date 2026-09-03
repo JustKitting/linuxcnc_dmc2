@@ -55,7 +55,11 @@ Each owner also sets its reviewed `comm` value before spawning the workload.
 Unlike `/proc/<pid>/cmdline` and `/proc/<pid>/exe`, that value remains readable
 after the owner becomes a zombie. The session tracker therefore can still map
 a short-lived or already-dead owner to its exact role without relying on its
-poll timing.
+poll timing. If the subreaper first observes a new child in the fork-before-
+`exec` interval, it continues classifying that PID and emits a
+`session-child-reclassified` record when the catalogued owner identity appears;
+the temporary shell identity is retained in the same record rather than
+silently overwritten.
 
 The shared journal records:
 
@@ -84,6 +88,12 @@ terminal record states whether they agree. It also records every session child
 known at the instant before reaping, so simultaneous `milltask`, `rtapi_app`,
 or owner loss can be ordered from synchronized records rather than inferred
 from whichever log line happened to be last.
+Every session-descendant terminal record also names the LinuxCNC root PID and
+includes a separately timestamped, non-reaping `waitid` probe of that exact
+root. The recorded state distinguishes nonterminal, terminal-but-not-yet-
+reaped, the root's own terminal event, already reaped, and probe failure. Thus
+a `milltask` owner departure during a root observed nonterminal is represented
+directly rather than inferred from a later stale heartbeat.
 
 For `milltask`, a matching LinuxCNC-generated `/tmp/backtrace.<pid>` is copied
 to the durable log directory before the terminal event is committed.
@@ -105,6 +115,11 @@ The compiled tests exercise real OS children, a real retained zombie snapshot
 followed by reap, independently agreeing `waitid`/`wait4` records, real
 non-zero exits, real signal termination, inherited core-limit application,
 concurrent writers, Linux subreaper adoption, and zombie-safe owner identity.
+They also exercise an adopted descendant terminating while the session root
+continues to run and the LinuxCNC caught-fatal-signal behavior in which a
+matching SIGSEGV backtrace must override an apparent zero exit.
+The complete lifecycle integration set is repeatedly run to cover the
+fork/`exec` classification race as well as the terminal path.
 Those tests establish the tracker mechanics. They are not a claim
 that the currently running, older LinuxCNC session has this new ownership
 topology; it takes effect on the next explicitly requested launch.

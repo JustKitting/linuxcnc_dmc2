@@ -26,6 +26,10 @@ pub struct TerminalObservation {
 }
 
 impl TerminalObservation {
+    pub fn code_name(self) -> &'static str {
+        waitid_code_name(self.code)
+    }
+
     pub fn event_fields(self, event: Event) -> Event {
         event
             .field("waitid_pid", self.pid)
@@ -171,6 +175,20 @@ pub fn observe_any_nonblocking() -> io::Result<AnyWait> {
         Err(error) if error.raw_os_error() == Some(ECHILD_LINUX) => Ok(AnyWait::NoChildren),
         Err(error) => Err(error),
     }
+}
+
+pub fn observe_pid_nonblocking(pid: u32) -> io::Result<Option<TerminalObservation>> {
+    let pid = i32::try_from(pid).map_err(|_| {
+        io::Error::new(
+            io::ErrorKind::InvalidInput,
+            format!("child PID {pid} does not fit pid_t"),
+        )
+    })?;
+    observe_id(
+        P_PID,
+        u32::try_from(pid).expect("positive pid_t fits u32"),
+        true,
+    )
 }
 
 pub fn reap(child: &mut Child) -> io::Result<WaitEvidence> {

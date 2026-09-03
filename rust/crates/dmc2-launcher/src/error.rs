@@ -92,7 +92,7 @@ impl Error {
                 "rebuild and test the launcher against the exact live input before launching"
             }
             Self::DeploymentMismatch { .. } => {
-                "rebuild the verified artifact; live launch synchronizes verified realtime modules automatically"
+                "for a /usr/lib/linuxcnc/modules target, use the standard live launch to synchronize it transactionally; otherwise rebuild and restage the named project-local binary"
             }
             Self::ExecutableUnavailable(_) => {
                 "restore the named executable from the pinned LinuxCNC system installation"

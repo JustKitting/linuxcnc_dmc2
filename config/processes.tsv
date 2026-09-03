@@ -10,4 +10,5 @@ task-monitor	../native/bin/dmc2-task-monitor	pendant-hal	direct-child	controller
 milltask	/usr/bin/milltask	ini-task	direct-child	controller-critical	linuxcnc-task	linuxcnc-appends-ini	enable-to-hard-limit	dmc2-task-owner
 axis	/usr/bin/axis	ini-display	direct-child	operator-interface	none	linuxcnc-prepends-ini	enable-to-hard-limit	dmc2-axis-owner
 lifecycle-test	/bin/sh	compiled-verification	direct-child	verification-only	none	none	enable-to-hard-limit	dmc2-test-owner
+task-backtrace-test	/bin/sh	compiled-verification	direct-child	verification-only	linuxcnc-task	none	enable-to-hard-limit	dmc2-bt-owner
 session-lifecycle-test	/bin/sh	compiled-verification	session-root	verification-only	none	none	enable-to-hard-limit	dmc2-test-sess

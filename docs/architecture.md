@@ -66,6 +66,11 @@ control machine state from that journal; it validates and displays records.
 - `rust/crates/dmc2-launcher`: the standard compiled live-launch boundary;
   byte-exact profile/deployment checks, process-owner exclusion, persistent
   service creation, and direct LinuxCNC process replacement.
+- `config/linuxcnc-driver-overlays.tsv` and `patches/linuxcnc-2.9.10`: the
+  exact base version, upstream provenance, patch digest, build entry point,
+  and deployment identity for reviewed post-release driver hardening. The
+  pristine vendor checkout is archived into a temporary build tree and is
+  never edited.
 - `rust/crates/dmc2-hal-sys`: generated LinuxCNC HAL FFI declarations plus
   source-pinned return-code, lifecycle, and signal-link semantics.
 - `config`: reviewed machine constants consumed by compiled production code.
@@ -103,6 +108,10 @@ control machine state from that journal; it validates and displays records.
 9. Every configurable long-lived process has a direct status-owning parent,
    and the launcher-level child subreaper retains statuses for orphaned
    `linuxcncsvr`, `rtapi_app`, and owner descendants.
+10. A LinuxCNC driver overlay must name an exact release commit and upstream
+    commits, pass its recorded SHA-256 check, compile against the installed
+    version, retain the installed module's export set, and deploy in the same
+    rollback transaction as the custom realtime modules.
 
 ## Verification boundary
 

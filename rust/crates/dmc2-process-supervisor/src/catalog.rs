@@ -506,6 +506,7 @@ mod tests {
                 "rtapi-app",
                 "serial-bridge",
                 "session-lifecycle-test",
+                "task-backtrace-test",
                 "task-monitor",
             ])
         );

@@ -38,6 +38,7 @@ macro_rules! h100_file {
 pub const FILES: &[File] = &[
     project_file!("config/operations.tsv"),
     project_file!("config/processes.tsv"),
+    project_file!("config/linuxcnc-driver-overlays.tsv"),
     project_file!("live_requirements.json"),
     project_file!("live/dmc2.ini"),
     project_file!("live/machine.hal"),
@@ -50,6 +51,8 @@ pub const FILES: &[File] = &[
     project_file!("live/ui/status_panel.xml"),
     project_file!("live/nc_files/dmc2_abort.ngc"),
     project_file!("scripts/install_native_module.sh"),
+    project_file!("scripts/build_linuxcnc_driver_overlays.sh"),
+    project_file!("patches/linuxcnc-2.9.10/hm2-eth-buffer-safety.patch"),
     project_file!("python/dmc2_axis/__init__.py"),
     project_file!("python/dmc2_axis/axis_user_command.py"),
     project_file!("python/dmc2_axis/base_controls.py"),

@@ -170,7 +170,15 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
                 }
                 children_probe_error_reported = false;
                 for pid in pids {
-                    if children.contains_key(&pid) {
+                    if let Some(existing) = children.get(&pid) {
+                        let mut observed = classify_child(pid);
+                        if existing.should_reclassify_as(&observed) {
+                            let event =
+                                child_reclassified_event(supervisor_pid, pid, existing, &observed);
+                            observed.first_observed = existing.first_observed;
+                            append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
+                            children.insert(pid, observed);
+                        }
                         continue;
                     }
                     let child = classify_child(pid);
@@ -206,6 +214,11 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
             match wait_result {
                 Ok(AnyWait::Terminal(observation)) => {
                     let terminal_identity = classify_child(observation.pid);
+                    let session_root = SessionRootObservation::capture(
+                        observation.pid,
+                        linuxcnc_pid,
+                        linuxcnc_status.is_some(),
+                    );
                     let observation_state = if children.contains_key(&observation.pid) {
                         "start-observed"
                     } else {
@@ -214,6 +227,8 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
                     let child = children.get(&observation.pid).or(Some(&terminal_identity));
                     let terminal_event = child_terminal_observed_event(
                         supervisor_pid,
+                        linuxcnc_pid,
+                        &session_root,
                         child,
                         &terminal_identity,
                         observation_state,
@@ -245,6 +260,8 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
                     let child = children.remove(&evidence.pid).unwrap_or(terminal_identity);
                     let event = child_terminated_event(
                         supervisor_pid,
+                        linuxcnc_pid,
+                        &session_root,
                         Some(&child),
                         observation_state,
                         observation,
@@ -323,8 +340,38 @@ fn child_started_event(supervisor_pid: u32, pid: u32, child: &ObservedChild) -> 
     process::child_event_fields(event, pid)
 }
 
+fn child_reclassified_event(
+    supervisor_pid: u32,
+    pid: u32,
+    previous: &ObservedChild,
+    observed: &ObservedChild,
+) -> Event {
+    let event = session_event(
+        "session-child-reclassified",
+        unix_ns_or_zero(),
+        supervisor_pid,
+    )
+    .field("child_pid", pid)
+    .field("role", &observed.role)
+    .field("relation", observed.relation)
+    .field("layer", observed.layer)
+    .field("identity_source", observed.identity_source)
+    .field("previous_role", &previous.role)
+    .field("previous_relation", previous.relation)
+    .field("previous_layer", previous.layer)
+    .field("previous_identity_source", previous.identity_source)
+    .field(
+        "elapsed_since_first_observed_ns",
+        previous.first_observed.elapsed().as_nanos(),
+    );
+    let event = catalog_event_fields(event, observed.catalog_role);
+    process::child_event_fields(event, pid)
+}
+
 fn child_terminal_observed_event(
     supervisor_pid: u32,
+    linuxcnc_pid: u32,
+    session_root: &SessionRootObservation,
     child: Option<&ObservedChild>,
     terminal_identity: &ObservedChild,
     observation_state: &'static str,
@@ -358,6 +405,7 @@ fn child_terminal_observed_event(
     )
     .field("observation_state", observation_state)
     .field("snapshot_phase", "terminal-before-reap");
+    let event = session_root.event_fields(event, linuxcnc_pid);
     let event = catalog_event_fields(event, child.and_then(|child| child.catalog_role));
     let event = observation.event_fields(event);
     let event = tracked_children_event_fields(event, children, observation.pid, child);
@@ -366,6 +414,8 @@ fn child_terminal_observed_event(
 
 fn child_terminated_event(
     supervisor_pid: u32,
+    linuxcnc_pid: u32,
+    session_root: &SessionRootObservation,
     child: Option<&ObservedChild>,
     observation_state: &'static str,
     observation: TerminalObservation,
@@ -394,10 +444,133 @@ fn child_terminated_event(
     .field("observation_state", observation_state)
     .field("elapsed_since_observed_ns", observed_ns)
     .field("waitid_wait4_consistent", observation.agrees_with(evidence));
+    let event = session_root.event_fields(event, linuxcnc_pid);
     let event = catalog_event_fields(event, child.and_then(|child| child.catalog_role));
     let event = observation.event_fields(event);
     let outcome = evidence.kernel_outcome();
     evidence.event_fields(event).field("outcome", outcome)
+}
+
+#[derive(Debug)]
+enum SessionRootObservation {
+    Nonterminal {
+        observed_unix_ns: u128,
+    },
+    TerminalPending {
+        observed_unix_ns: u128,
+        waitid: TerminalObservation,
+    },
+    TerminalEvent {
+        observed_unix_ns: u128,
+    },
+    AlreadyReaped {
+        observed_unix_ns: u128,
+    },
+    ProbeFailed {
+        observed_unix_ns: u128,
+        error_kind: String,
+        raw_os_error: Option<i32>,
+        error_hex: String,
+    },
+}
+
+impl SessionRootObservation {
+    fn capture(terminal_pid: u32, linuxcnc_pid: u32, status_captured: bool) -> Self {
+        let observed_unix_ns = unix_ns_or_zero();
+        if terminal_pid == linuxcnc_pid {
+            return Self::TerminalEvent { observed_unix_ns };
+        }
+        if status_captured {
+            return Self::AlreadyReaped { observed_unix_ns };
+        }
+        match wait::observe_pid_nonblocking(linuxcnc_pid) {
+            Ok(None) => Self::Nonterminal { observed_unix_ns },
+            Ok(Some(waitid)) => Self::TerminalPending {
+                observed_unix_ns,
+                waitid,
+            },
+            Err(error) => Self::ProbeFailed {
+                observed_unix_ns,
+                error_kind: format!("{:?}", error.kind()),
+                raw_os_error: error.raw_os_error(),
+                error_hex: hex_bytes(error.to_string().as_bytes()),
+            },
+        }
+    }
+
+    fn event_fields(&self, event: Event, linuxcnc_pid: u32) -> Event {
+        let event = event
+            .field("linuxcnc_pid", linuxcnc_pid)
+            .field("session_root_observation_unix_ns", self.observed_unix_ns());
+        match self {
+            Self::Nonterminal { .. } => event
+                .field("session_root_state", "nonterminal-at-probe")
+                .field(
+                    "session_root_observation_method",
+                    "waitid-p-pid-wnohang-wnowait",
+                )
+                .field("session_root_terminal_at_child_observation", "false"),
+            Self::TerminalPending { waitid, .. } => event
+                .field("session_root_state", "terminal-pending-at-probe")
+                .field(
+                    "session_root_observation_method",
+                    "waitid-p-pid-wnohang-wnowait",
+                )
+                .field("session_root_terminal_at_child_observation", "true")
+                .field("session_root_waitid_pid", waitid.pid)
+                .field("session_root_waitid_signal", waitid.signal)
+                .field("session_root_waitid_error", waitid.error)
+                .field("session_root_waitid_code", waitid.code)
+                .field("session_root_waitid_code_name", waitid.code_name())
+                .field("session_root_waitid_uid", waitid.uid)
+                .field("session_root_waitid_status", waitid.status)
+                .field("session_root_waitid_user_ticks", waitid.user_ticks)
+                .field("session_root_waitid_system_ticks", waitid.system_ticks),
+            Self::TerminalEvent { .. } => event
+                .field("session_root_state", "terminal-event")
+                .field(
+                    "session_root_observation_method",
+                    "current-waitid-p-all-wnowait",
+                )
+                .field("session_root_terminal_at_child_observation", "true"),
+            Self::AlreadyReaped { .. } => event
+                .field("session_root_state", "already-reaped")
+                .field("session_root_observation_method", "retained-wait4-status")
+                .field("session_root_terminal_at_child_observation", "true"),
+            Self::ProbeFailed {
+                error_kind,
+                raw_os_error,
+                error_hex,
+                ..
+            } => event
+                .field("session_root_state", "probe-failed")
+                .field(
+                    "session_root_observation_method",
+                    "waitid-p-pid-wnohang-wnowait",
+                )
+                .field("session_root_terminal_at_child_observation", "UNKNOWN")
+                .field("session_root_probe_error_kind", error_kind)
+                .field(
+                    "session_root_probe_raw_os_error",
+                    optional_i32(*raw_os_error),
+                )
+                .field("session_root_probe_error_hex", error_hex),
+        }
+    }
+
+    fn observed_unix_ns(&self) -> u128 {
+        match self {
+            Self::Nonterminal { observed_unix_ns }
+            | Self::TerminalPending {
+                observed_unix_ns, ..
+            }
+            | Self::TerminalEvent { observed_unix_ns }
+            | Self::AlreadyReaped { observed_unix_ns }
+            | Self::ProbeFailed {
+                observed_unix_ns, ..
+            } => *observed_unix_ns,
+        }
+    }
 }
 
 fn tracked_children_event_fields(
@@ -692,6 +865,10 @@ impl ObservedChild {
             first_observed: Instant::now(),
         }
     }
+
+    fn should_reclassify_as(&self, observed: &Self) -> bool {
+        self.catalog_role.is_none() && observed.catalog_role.is_some()
+    }
 }
 
 #[derive(Debug)]
@@ -872,5 +1049,28 @@ mod tests {
             process_supervisor_role(b"/bin/supervisor\0--journal\0x\0"),
             None
         );
+    }
+
+    #[test]
+    fn root_probe_reports_a_terminal_child_that_has_not_been_reaped() {
+        let mut child = Command::new("/bin/sh")
+            .arg("-c")
+            .arg("exit 23")
+            .spawn()
+            .expect("spawn root-probe test child");
+        let initial = wait::observe(&child).expect("retain terminal test child");
+        assert_eq!(initial.status, 23);
+
+        let observation = SessionRootObservation::capture(u32::MAX, child.id(), false);
+        let event = observation
+            .event_fields(Event::new("root-probe-test", 1, 2), child.id())
+            .render();
+        assert!(event.contains("\tsession_root_state=terminal-pending-at-probe\t"));
+        assert!(event.contains("\tsession_root_terminal_at_child_observation=true\t"));
+        assert!(event.contains("\tsession_root_waitid_code_name=CLD_EXITED\t"));
+        assert!(event.contains("\tsession_root_waitid_status=23\t"));
+
+        let reaped = wait::reap(&mut child).expect("reap root-probe test child");
+        assert_eq!(reaped.status.code(), Some(23));
     }
 }
