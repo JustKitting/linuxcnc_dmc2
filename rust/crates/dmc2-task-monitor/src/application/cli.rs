@@ -3,6 +3,8 @@ use std::ffi::{OsStr, OsString};
 use std::fmt;
 use std::path::PathBuf;
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
+
 const DEFAULT_COMPONENT: &str = "dmc2-task-monitor";
 const DEFAULT_NML_FILE: &str = "/usr/share/linuxcnc/linuxcnc.nml";
 const USAGE: &str = "Usage: dmc2-task-monitor [--component NAME] [--nml-file PATH] --error-journal PATH --diagnostic-journal PATH";
@@ -79,6 +81,21 @@ impl fmt::Display for CliError {
             Self::EmptyValue { option } => {
                 write!(formatter, "{} value cannot be empty", option.name())
             }
+        }
+    }
+}
+
+impl RecoveryClassified for CliError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::HelpCombined
+            | Self::NonUtf8Argument { .. }
+            | Self::MissingValue { .. }
+            | Self::DuplicateOption { .. }
+            | Self::UnknownArgument { .. }
+            | Self::RequiredOptionMissing { .. }
+            | Self::NonUtf8Value { .. }
+            | Self::EmptyValue { .. } => RecoveryClass::RelaunchApplication,
         }
     }
 }

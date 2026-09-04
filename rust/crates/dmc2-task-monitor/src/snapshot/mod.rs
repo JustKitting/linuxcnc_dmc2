@@ -22,6 +22,7 @@ pub(crate) use abi::{
 
 pub const SNAPSHOT_ABI_VERSION: u32 = abi::DMC2_SNAPSHOT_ABI_VERSION;
 const STOPPED_VELOCITY_TOLERANCE: f64 = 0.000_001;
+const _: () = assert!(core::mem::size_of::<NativeSnapshot>() <= u32::MAX as usize);
 
 const _: unsafe extern "C" fn() -> u32 = dmc2_task_status_snapshot_abi_version;
 const _: unsafe extern "C" fn() -> usize = dmc2_task_status_snapshot_size;
@@ -63,9 +64,7 @@ impl NativeSnapshot {
     pub fn safe() -> Self {
         let mut snapshot = Self {
             abi_version: SNAPSHOT_ABI_VERSION,
-            struct_size: core::mem::size_of::<Self>()
-                .try_into()
-                .expect("native snapshot size exceeds its u32 ABI field"),
+            struct_size: core::mem::size_of::<Self>() as u32,
             ..Self::default()
         };
         snapshot.io.aux.estop = 1;

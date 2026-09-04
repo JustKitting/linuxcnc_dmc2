@@ -1,4 +1,4 @@
-use dmc2_diagnostics::diagnostic_catalog;
+use dmc2_diagnostics::{diagnostic_catalog, RecoveryClass, RecoveryClassified};
 
 use crate::Axis;
 
@@ -179,6 +179,48 @@ diagnostic_catalog! {
     "motion-count-range-exceeded",
     "the finite target cannot be issued at the requested rate without exceeding the signed HAL count range",
     "inspect the requested distance, target rate, servo period, and count-range calculation";
+    }
+}
+
+impl RecoveryClassified for FaultCode {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::LinkFailure
+            | Self::QuadratureFailure
+            | Self::PacketTimeout
+            | Self::InvalidPendantPacket => RecoveryClass::RestorePendant,
+            Self::StartupLimitMismatch
+            | Self::StartupLimitDuringHoming
+            | Self::LimitDuringStartupReset
+            | Self::HomingDuringStartupReset
+            | Self::LimitDuringRecovery
+            | Self::UnexpectedLimit
+            | Self::BounceLostLimitAttribution
+            | Self::BounceFeedbackUnavailable
+            | Self::BounceFeedbackIncoherent
+            | Self::BounceCountMismatch
+            | Self::BounceLimitStillActive
+            | Self::BounceTimedOut
+            | Self::LimitLatchResetTimedOut => RecoveryClass::ReleaseLimit,
+            Self::AdapterFailure
+            | Self::ControllerWatchdogFailure
+            | Self::JogCountMismatch
+            | Self::JogFeedbackUnavailable
+            | Self::JogFeedbackIncoherent
+            | Self::MotionPathUnavailable
+            | Self::JogCommandNotAccepted
+            | Self::JogTimedOut
+            | Self::MotionStopTimedOut
+            | Self::MotionZeroDistance => RecoveryClass::ClearController,
+            Self::TaskHeartbeatTimeout
+            | Self::MesaStartupFailure
+            | Self::MotionCommandEncodingFailure
+            | Self::MotionInvalidPulsesPerMillimeter
+            | Self::MotionInvalidServoPeriod
+            | Self::MotionInvalidTargetRate
+            | Self::MotionNonFiniteDistance
+            | Self::MotionCountRangeExceeded => RecoveryClass::RelaunchApplication,
+        }
     }
 }
 

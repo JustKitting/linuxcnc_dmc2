@@ -4,6 +4,10 @@ mod snapshot;
 
 pub mod heartbeat;
 
-pub fn run() -> Result<(), impl std::fmt::Display> {
+pub use application::nml::RequiredCodeError;
+
+use dmc2_diagnostics::RecoveryClassified;
+
+pub fn run() -> Result<(), impl std::fmt::Display + RecoveryClassified> {
     application::run()
 }

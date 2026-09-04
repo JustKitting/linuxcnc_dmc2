@@ -11,7 +11,7 @@ use super::contracts::{
     ErrorConnector, ErrorReader, HalSink, JournalSink, RuntimeReporter, StatusConnector,
     StatusReader,
 };
-use super::error::RuntimeError;
+use super::error::{PublicationStateError, RuntimeError};
 use super::policy::{publication_policy, PublicationPolicy};
 
 pub(super) const RECONNECT_PERIOD: Duration = Duration::from_secs(1);
@@ -95,7 +95,9 @@ where
         );
         match policy {
             PublicationPolicy::Live => {
-                let outcome = status_outcome.expect("live policy requires a status outcome");
+                let outcome = status_outcome.ok_or(RuntimeError::PublicationState(
+                    PublicationStateError::LiveOutcomeMissing,
+                ))?;
                 let report = diagnostics::evaluate_with_transport(
                     &snapshot,
                     outcome.transport.nml_error,
@@ -113,7 +115,9 @@ where
             PublicationPolicy::WaitForFirstStatus => {}
             PublicationPolicy::SafeKeepStatus => self.publish_safe()?,
             PublicationPolicy::SafeDropStatus => {
-                let outcome = status_outcome.expect("drop policy requires a status outcome");
+                let outcome = status_outcome.ok_or(RuntimeError::PublicationState(
+                    PublicationStateError::DropOutcomeMissing,
+                ))?;
                 self.fault_transport = outcome.transport;
                 self.status_reader = None;
                 self.next_status_open = now + RECONNECT_PERIOD;

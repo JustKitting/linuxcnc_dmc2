@@ -2,6 +2,8 @@ use std::ffi::{OsStr, OsString};
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
+use dmc2_diagnostics::RecoveryClassified;
+
 pub const SCHEMA: &str = "dmc2-process-lifecycle-v1";
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -34,6 +36,28 @@ impl Event {
 
     pub fn encoded_path_field(self, name: &'static str, value: &Path) -> Self {
         self.encoded_os_field(name, value.as_os_str())
+    }
+
+    pub fn recovery(mut self, issue: &impl RecoveryClassified) -> Self {
+        let recovery = issue.recovery_class();
+        let operations = recovery
+            .ui_operations()
+            .iter()
+            .map(|operation| operation.id())
+            .collect::<Vec<_>>()
+            .join(";");
+        self.fields
+            .push(("recovery_class", recovery.name().to_owned()));
+        self.fields.push((
+            "recovery_transition",
+            recovery.transition().name().to_owned(),
+        ));
+        self.fields.push((
+            "recovery_clear_condition",
+            recovery.clear_transition().to_owned(),
+        ));
+        self.fields.push(("recovery_ui_operations", operations));
+        self
     }
 
     pub fn render(&self) -> String {

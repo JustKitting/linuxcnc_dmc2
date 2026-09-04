@@ -6,6 +6,10 @@ use std::path::{Path, PathBuf};
 use std::process::{Child, Command, ExitStatus, Stdio};
 use std::thread::{self, JoinHandle};
 
+use dmc2_diagnostics::RecoveryDisplay;
+
+use super::failure::SessionObservationError;
+
 pub(super) struct PreparedCapture {
     report_path: PathBuf,
     stdout_path: PathBuf,
@@ -120,12 +124,12 @@ impl RunningCapture {
         report.flush()?;
         report.sync_all()?;
         fs::rename(&temporary_path, &self.report_path)?;
-        eprintln!(
-            "DMC2 LINUXCNC SESSION FAILED: exit-code={} signal={}; full report: {}",
-            optional_i32(status.code()),
-            optional_i32(status.signal()),
-            self.report_path.display()
-        );
+        let failure = SessionObservationError::LinuxCncExited {
+            exit_code: status.code(),
+            signal: status.signal(),
+            report_path: &self.report_path,
+        };
+        eprintln!("dmc2-session-supervisor: {}", RecoveryDisplay(&failure));
         Ok(Some(self.report_path))
     }
 }

@@ -4,6 +4,8 @@ use std::fmt;
 use std::io;
 use std::path::PathBuf;
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(in crate::application) enum JournalKind {
     LinuxCncErrorChannel,
@@ -184,5 +186,23 @@ impl fmt::Display for JournalError {
             }
         }
         write!(formatter, "; action: {}", self.action())
+    }
+}
+
+impl RecoveryClassified for JournalError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::ParentUnavailable { .. }
+            | Self::ParentNotDirectory { .. }
+            | Self::TargetNotRegular { .. }
+            | Self::TargetInspectionFailed { .. }
+            | Self::FilenameMissing { .. }
+            | Self::TemporaryCreateFailed { .. }
+            | Self::TemporaryNamesExhausted { .. }
+            | Self::AtomicPublishFailed { .. }
+            | Self::SequenceExhausted { .. }
+            | Self::AppendFailed { .. }
+            | Self::SyncFailed { .. } => RecoveryClass::RelaunchApplication,
+        }
     }
 }

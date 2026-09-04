@@ -11,7 +11,6 @@ impl LinuxCncPendantSupervisor {
     fn finish_startup_power(&mut self) {
         self.clear_state_requests();
         self.transition(Phase::Idle);
-        self.startup_reset_complete = true;
         self.interpreter.reset();
     }
 
@@ -72,7 +71,6 @@ impl LinuxCncPendantSupervisor {
                 self.begin_startup_power();
             } else {
                 self.clear_state_requests();
-                self.startup_reset_complete = true;
             }
             return;
         }
@@ -132,7 +130,6 @@ impl LinuxCncPendantSupervisor {
             return;
         };
         self.clear_state_requests();
-        self.startup_reset_complete = true;
         self.start_bounce_move(inputs, path);
     }
 }

@@ -273,7 +273,7 @@ impl RuntimeController {
                     linuxcnc_estop_reset_rising,
                 },
             );
-            if self.supervisor.startup_reset_complete()
+            if self.supervisor.startup_sequence_complete()
                 && !self.watchdog_guard.runtime_committed
                 && !self.watchdog_guard.commit_runtime()
             {

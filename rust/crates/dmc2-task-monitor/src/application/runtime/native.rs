@@ -4,6 +4,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::thread;
 use std::time::{Duration, Instant};
 
+use dmc2_diagnostics::RecoveryDisplay;
+
 use crate::application::cli::Arguments;
 use crate::application::diagnostic_state::DiagnosticState;
 use crate::application::error_channel::{
@@ -121,7 +123,8 @@ impl RuntimeReporter for ConsoleReporter {
         // HAL is published fail-closed independently of diagnostic stderr.
         let _ = writeln!(
             io::stderr().lock(),
-            "dmc2-task-monitor: error channel fault: {fault}"
+            "dmc2-task-monitor: error channel fault: {}",
+            RecoveryDisplay(fault),
         );
     }
 }
@@ -132,7 +135,7 @@ pub(in crate::application) fn run(args: Arguments) -> Result<(), NativeRuntimeEr
         .ok_or(NativeRuntimeError::MissingRequiredPath(
             RequiredRuntimePath::ErrorJournal,
         ))?;
-    let codes = PollCodes::required();
+    let codes = PollCodes::required()?;
     let error_journal = ErrorJournal::create(&error_journal_path, codes)?;
     let nml_file = CString::new(args.nml_file.as_os_str().as_bytes())
         .map_err(NativeRuntimeError::NmlPathContainsNul)?;
@@ -141,7 +144,7 @@ pub(in crate::application) fn run(args: Arguments) -> Result<(), NativeRuntimeEr
             .ok_or(NativeRuntimeError::MissingRequiredPath(
                 RequiredRuntimePath::DiagnosticJournal,
             ))?;
-    let hal = HalPublisher::new(&args.component, &diagnostic_journal_path)?;
+    let hal = HalPublisher::new(&args.component, &diagnostic_journal_path, codes)?;
     let now = Instant::now();
     let mut runtime = RuntimeCoordinator::new(
         nml_file,

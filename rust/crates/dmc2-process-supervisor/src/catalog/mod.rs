@@ -4,6 +4,8 @@ use std::fmt;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
+
 const CATALOG: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../config/processes.tsv"
@@ -422,3 +424,20 @@ impl fmt::Display for CatalogError {
 }
 
 impl std::error::Error for CatalogError {}
+
+impl RecoveryClassified for CatalogError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Magic(_)
+            | Self::Header(_)
+            | Self::FieldCount { .. }
+            | Self::EmptyField { .. }
+            | Self::Value { .. }
+            | Self::NonUtf8Role(_)
+            | Self::UnknownRole(_)
+            | Self::DuplicateRole(_)
+            | Self::DuplicateOwnerComm(_)
+            | Self::OwnerCommContract { .. } => RecoveryClass::RelaunchApplication,
+        }
+    }
+}

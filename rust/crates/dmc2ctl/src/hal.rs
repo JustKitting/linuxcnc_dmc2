@@ -1,6 +1,8 @@
 use std::fmt;
 use std::process::Command;
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
+
 pub const PHYSICAL_PENDANT_ESTOP_PIN: &str = "dmc2-pendant.estop-pressed";
 
 pub fn read_bit(pin: &'static str) -> Result<bool, HalError> {
@@ -69,6 +71,17 @@ impl fmt::Display for HalError {
             Self::InvalidBit { pin, observed } => {
                 write!(formatter, "HAL pin {pin} returned invalid bit {observed:?}")
             }
+        }
+    }
+}
+
+impl RecoveryClassified for HalError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Spawn { .. }
+            | Self::Command { .. }
+            | Self::NonUtf8 { .. }
+            | Self::InvalidBit { .. } => RecoveryClass::RelaunchApplication,
         }
     }
 }

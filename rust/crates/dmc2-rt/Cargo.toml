@@ -11,6 +11,7 @@ crate-type = ["cdylib", "rlib"]
 
 [dependencies]
 dmc2-core = { path = "../dmc2-core" }
+dmc2-diagnostics = { path = "../dmc2-diagnostics" }
 dmc2-hal-sys = { path = "../dmc2-hal-sys" }
 
 [dev-dependencies]

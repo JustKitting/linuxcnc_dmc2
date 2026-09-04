@@ -11,4 +11,4 @@ name = "dmc2ctl"
 path = "src/main.rs"
 
 [dependencies]
-
+dmc2-diagnostics = { path = "../dmc2-diagnostics" }

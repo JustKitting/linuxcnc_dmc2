@@ -140,7 +140,6 @@ pub enum CommandEvent {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct SupervisorOutputs {
     pub external_enable: bool,
-    pub control_available: bool,
     pub control_ready: bool,
     pub estop_reset_request: bool,
     pub machine_on_request: bool,

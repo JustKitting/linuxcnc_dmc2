@@ -517,7 +517,6 @@ pub(in crate::component) unsafe fn publish(
         write(pins.external_enable, supervisor.external_enable);
         write(pins.position_known, outputs.position_known);
         write(pins.position_unknown, !outputs.position_known);
-        write(pins.control_available, supervisor.control_available);
         write(pins.control_ready, supervisor.control_ready);
         write(pins.fault_reset_allowed, outputs.fault_reset_allowed);
         publish_fault_record(pins, supervisor.fault_record);
@@ -627,7 +626,6 @@ pub(in crate::component) unsafe fn publish_initial_safe(pins: &Pins) {
         write(pins.heartbeat, false);
         write(pins.position_known, false);
         write(pins.position_unknown, true);
-        write(pins.control_available, false);
         write(pins.control_ready, false);
         write(pins.fault_reset_allowed, false);
         write(pins.fault_snapshot_generation, 0);

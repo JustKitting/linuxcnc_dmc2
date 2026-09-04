@@ -11,7 +11,6 @@ impl LinuxCncPendantSupervisor {
         self.bounce_start_count = None;
         self.limit_reset = [false; 3];
         self.external_enable = false;
-        self.control_available = false;
         self.control_ready = false;
         self.clear_state_requests();
         self.recovery_power_phase = None;

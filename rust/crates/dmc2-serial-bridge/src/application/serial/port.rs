@@ -1,5 +1,7 @@
 use std::ffi::{c_int, CString};
 
+use dmc2_diagnostics::RecoveryDisplay;
+
 use super::posix;
 
 pub(in crate::application) struct SerialPort(c_int);
@@ -17,7 +19,10 @@ impl SerialPort {
 impl Drop for SerialPort {
     fn drop(&mut self) {
         if let Err(error) = posix::close(self.0) {
-            eprintln!("dmc2-serial-bridge: serial close failed: {error}");
+            eprintln!(
+                "dmc2-serial-bridge: serial close failed: {}",
+                RecoveryDisplay(&error)
+            );
         }
     }
 }

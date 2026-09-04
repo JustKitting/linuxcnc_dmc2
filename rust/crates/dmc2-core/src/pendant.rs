@@ -1,5 +1,5 @@
 use crate::{Axis, JogIntent, Multiplier, PendantSelection};
-use dmc2_diagnostics::diagnostic_catalog;
+use dmc2_diagnostics::{diagnostic_catalog, RecoveryClass, RecoveryClassified};
 
 diagnostic_catalog! {
     pub enum AxisSelector: i32 {
@@ -73,6 +73,14 @@ pub enum StopReason {
 pub enum InterpreterFault {
     QuadratureErrorChanged,
     InvalidDetent,
+}
+
+impl RecoveryClassified for InterpreterFault {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::QuadratureErrorChanged | Self::InvalidDetent => RecoveryClass::RestorePendant,
+        }
+    }
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]

@@ -1,5 +1,7 @@
 use std::fmt;
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
+
 use super::cli::CliError;
 use super::runtime::NativeRuntimeError;
 
@@ -69,6 +71,18 @@ impl fmt::Display for ApplicationError {
                 self.identity()
             ),
             Self::Runtime(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl RecoveryClassified for ApplicationError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Cli(error) => error.recovery_class(),
+            Self::TaskStatusAbiMismatch { .. } | Self::ErrorMessageAbiMismatch { .. } => {
+                RecoveryClass::RelaunchApplication
+            }
+            Self::Runtime(error) => error.recovery_class(),
         }
     }
 }

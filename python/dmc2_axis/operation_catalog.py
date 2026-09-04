@@ -6,7 +6,7 @@ from dataclasses import dataclass
 from pathlib import Path
 
 
-CATALOG_MAGIC = "DMC2_OPERATION_CATALOG\t1"
+CATALOG_MAGIC = "DMC2_OPERATION_CATALOG\t2"
 CATALOG_COLUMNS = (
     "id",
     "kind",
@@ -16,6 +16,7 @@ CATALOG_COLUMNS = (
     "ui_scope",
     "effects",
     "prerequisites",
+    "ui_target",
 )
 
 
@@ -29,10 +30,15 @@ class Operation:
     ui_scope: str
     effects: tuple[str, ...]
     prerequisites: tuple[str, ...]
+    ui_target: str
 
 
 def project_catalog_path(rcfile: str) -> Path:
     return Path(rcfile).resolve().parents[2] / "config" / "operations.tsv"
+
+
+def default_catalog_path() -> Path:
+    return Path(__file__).resolve().parents[2] / "config" / "operations.tsv"
 
 
 def read_operations(path: Path) -> dict[str, Operation]:
@@ -61,9 +67,15 @@ def read_operations(path: Path) -> dict[str, Operation]:
             prerequisites=tuple(
                 value for value in fields["prerequisites"].split(";") if value
             ),
+            ui_target=fields["ui_target"],
         )
+        if operation.kind not in ("control", "program", "ui", "internal"):
+            raise RuntimeError(
+                f"Invalid operation kind at row {line_number}: {operation.kind!r}"
+            )
+        if not operation.ui_target:
+            raise RuntimeError(f"Missing UI target at row {line_number}: {path}")
         if operation.id in operations:
             raise RuntimeError(f"Duplicate operation {operation.id}: {path}")
         operations[operation.id] = operation
     return operations
-

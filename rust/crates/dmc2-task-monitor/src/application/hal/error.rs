@@ -1,6 +1,7 @@
 use std::fmt;
 
 use crate::application::journal_error::JournalError;
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 use super::RegistrationError;
 
@@ -31,6 +32,15 @@ impl fmt::Display for PublisherError {
             Self::DiagnosticJournal(error) => {
                 write!(formatter, "TASK_MONITOR_DIAGNOSTIC_JOURNAL_FAILED: {error}")
             }
+        }
+    }
+}
+
+impl RecoveryClassified for PublisherError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Registration(error) => error.recovery_class(),
+            Self::DiagnosticJournal(error) => error.recovery_class(),
         }
     }
 }

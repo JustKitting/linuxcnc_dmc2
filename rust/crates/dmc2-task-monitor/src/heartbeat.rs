@@ -2,7 +2,11 @@ use std::ffi::CString;
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
 
-use crate::application::nml::{PollCodes, PollDisposition, StatusChannel, TransportStatus};
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
+
+use crate::application::nml::{
+    PollCodes, PollDisposition, RequiredCodeError, StatusChannel, TransportStatus,
+};
 use crate::snapshot::NativeSnapshot;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -10,6 +14,7 @@ pub enum Error {
     PathContainsNul(PathBuf),
     Open { nml_error: i32, cms_status: i32 },
     Poll { nml_error: i32, cms_status: i32 },
+    RequiredCode(RequiredCodeError),
 }
 
 impl std::fmt::Display for Error {
@@ -32,6 +37,17 @@ impl std::fmt::Display for Error {
                 formatter,
                 "TASK_HEARTBEAT_CHANNEL_POLL_FAILED: nml_error={nml_error} cms_status={cms_status}"
             ),
+            Self::RequiredCode(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl RecoveryClassified for Error {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::PathContainsNul(_) => RecoveryClass::RelaunchApplication,
+            Self::Open { .. } | Self::Poll { .. } => RecoveryClass::RecheckSource,
+            Self::RequiredCode(error) => error.recovery_class(),
         }
     }
 }
@@ -45,7 +61,7 @@ impl Channel {
     pub fn open(path: &Path) -> Result<Self, Error> {
         let path = CString::new(path.as_os_str().as_bytes())
             .map_err(|_| Error::PathContainsNul(path.to_path_buf()))?;
-        let codes = PollCodes::required();
+        let codes = PollCodes::required().map_err(Error::RequiredCode)?;
         let (inner, transport) = StatusChannel::open(&path, codes);
         if !transport.healthy_after_open(codes) {
             return Err(open_error(transport));

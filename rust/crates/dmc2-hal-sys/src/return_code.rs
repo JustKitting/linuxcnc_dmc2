@@ -4,6 +4,7 @@ use core::ffi::c_int;
 use core::fmt;
 
 use crate::{EINVAL, ENOMEM, EPERM};
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum HalCall {
@@ -317,5 +318,17 @@ impl fmt::Display for HalError {
             self.summary(),
             self.action()
         )
+    }
+}
+
+impl RecoveryClassified for HalError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self.kind() {
+            HalFailureKind::SourceDeclared(_)
+            | HalFailureKind::KnownButUndeclared(_)
+            | HalFailureKind::UnknownNegative
+            | HalFailureKind::InvalidZero
+            | HalFailureKind::UnexpectedPositive => RecoveryClass::RelaunchApplication,
+        }
     }
 }

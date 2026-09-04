@@ -10,12 +10,14 @@ mod runtime;
 
 use std::mem;
 
+use dmc2_diagnostics::RecoveryClassified;
+
 use crate::snapshot::{NativeSnapshot, SNAPSHOT_ABI_VERSION};
 
 use self::cli::arguments;
 use self::error::ApplicationError;
 
-pub(super) fn run() -> Result<(), impl std::fmt::Display> {
+pub(crate) fn run() -> Result<(), impl std::fmt::Display + RecoveryClassified> {
     let args = arguments()?;
     let native_abi = nml::snapshot_abi_version();
     let native_size = nml::snapshot_size();

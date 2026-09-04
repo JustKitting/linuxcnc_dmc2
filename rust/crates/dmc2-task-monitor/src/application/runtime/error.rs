@@ -3,6 +3,8 @@ use std::fmt;
 
 use crate::application::hal::PublisherError;
 use crate::application::journal_error::JournalError;
+use crate::application::nml::RequiredCodeError;
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 #[derive(Debug)]
 pub(in crate::application) enum RuntimeError {
@@ -12,6 +14,7 @@ pub(in crate::application) enum RuntimeError {
         primary: JournalError,
         publication: PublisherError,
     },
+    PublicationState(PublicationStateError),
 }
 
 impl RuntimeError {
@@ -20,6 +23,7 @@ impl RuntimeError {
             Self::ErrorJournal(_) => "RUNTIME_ERROR_JOURNAL_FAILED",
             Self::HalPublication(_) => "RUNTIME_HAL_PUBLICATION_FAILED",
             Self::FailClosedPublication { .. } => "RUNTIME_FAIL_CLOSED_PUBLICATION_FAILED",
+            Self::PublicationState(error) => error.identity(),
         }
     }
 }
@@ -47,6 +51,59 @@ impl fmt::Display for RuntimeError {
                 "{}: primary={primary}; publication={publication}; action: restore both journals and restart the monitor",
                 self.identity()
             ),
+            Self::PublicationState(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl RecoveryClassified for RuntimeError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::ErrorJournal(error) => error.recovery_class(),
+            Self::HalPublication(error) => error.recovery_class(),
+            Self::FailClosedPublication {
+                primary,
+                publication,
+            } => {
+                let _ = (primary.recovery_class(), publication.recovery_class());
+                RecoveryClass::RelaunchApplication
+            }
+            Self::PublicationState(error) => error.recovery_class(),
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(in crate::application) enum PublicationStateError {
+    LiveOutcomeMissing,
+    DropOutcomeMissing,
+}
+
+impl PublicationStateError {
+    const fn identity(self) -> &'static str {
+        match self {
+            Self::LiveOutcomeMissing => "RUNTIME_LIVE_OUTCOME_MISSING",
+            Self::DropOutcomeMissing => "RUNTIME_DROP_OUTCOME_MISSING",
+        }
+    }
+}
+
+impl fmt::Display for PublicationStateError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        write!(
+            formatter,
+            "{}: cause: publication policy requires a status outcome that is absent; action: retain the contradiction and relaunch DMC2 LinuxCNC after correcting the runtime binary",
+            self.identity()
+        )
+    }
+}
+
+impl RecoveryClassified for PublicationStateError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::LiveOutcomeMissing | Self::DropOutcomeMissing => {
+                RecoveryClass::RelaunchApplication
+            }
         }
     }
 }
@@ -78,6 +135,7 @@ pub(in crate::application) enum NativeRuntimeError {
     MissingRequiredPath(RequiredRuntimePath),
     ErrorJournal(JournalError),
     NmlPathContainsNul(NulError),
+    RequiredCode(RequiredCodeError),
     Hal(PublisherError),
     Runtime(RuntimeError),
 }
@@ -88,6 +146,7 @@ impl NativeRuntimeError {
             Self::MissingRequiredPath(_) => "RUNTIME_REQUIRED_PATH_MISSING",
             Self::ErrorJournal(_) => "RUNTIME_ERROR_JOURNAL_STARTUP_FAILED",
             Self::NmlPathContainsNul(_) => "RUNTIME_NML_PATH_CONTAINS_NUL",
+            Self::RequiredCode(error) => error.identity(),
             Self::Hal(_) => "RUNTIME_HAL_STARTUP_FAILED",
             Self::Runtime(error) => error.identity(),
         }
@@ -103,6 +162,12 @@ impl From<JournalError> for NativeRuntimeError {
 impl From<PublisherError> for NativeRuntimeError {
     fn from(error: PublisherError) -> Self {
         Self::Hal(error)
+    }
+}
+
+impl From<RequiredCodeError> for NativeRuntimeError {
+    fn from(error: RequiredCodeError) -> Self {
+        Self::RequiredCode(error)
     }
 }
 
@@ -131,8 +196,23 @@ impl fmt::Display for NativeRuntimeError {
                 self.identity(),
                 error.nul_position()
             ),
+            Self::RequiredCode(error) => error.fmt(formatter),
             Self::Hal(error) => write!(formatter, "{}: {error}", self.identity()),
             Self::Runtime(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl RecoveryClassified for NativeRuntimeError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::MissingRequiredPath(_) | Self::NmlPathContainsNul(_) => {
+                RecoveryClass::RelaunchApplication
+            }
+            Self::RequiredCode(error) => error.recovery_class(),
+            Self::ErrorJournal(error) => error.recovery_class(),
+            Self::Hal(error) => error.recovery_class(),
+            Self::Runtime(error) => error.recovery_class(),
         }
     }
 }

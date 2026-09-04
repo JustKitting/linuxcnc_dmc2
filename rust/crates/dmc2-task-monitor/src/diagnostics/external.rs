@@ -2,14 +2,17 @@
 
 use dmc2_core::startup::{ControllerWatchdogPhase, MesaStartupPhase};
 use dmc2_core::supervisor::{FaultCode as ControllerFaultCode, Phase as ControllerPhase};
-use dmc2_diagnostics::{SelfDescribingDiagnostic, UnknownDiagnostic};
+use dmc2_diagnostics::{
+    DiagnosticMetadata, RecoverableDiagnostic, RecoveryClass, RecoveryClassified,
+    SelfDescribingDiagnostic, UnknownDiagnostic,
+};
 use dmc2_serial_bridge::{BridgeFaultCode, ProtocolError};
 use h100_spindle::sequencer::{
     main_status_reserved_mask, BlockCode as SpindleCode, MainStatusBit, State as SpindleState,
     VfdFaultCode,
 };
 
-use super::category;
+use super::category::{self, DiagnosticCategory};
 use super::report::{DiagnosticReport, Issue, Severity};
 
 const CONTROLLER_DOMAIN_ID: u32 = 1_000;
@@ -477,32 +480,69 @@ pub struct ExternalDiagnosticSnapshot {
 }
 
 #[allow(clippy::too_many_arguments)]
-fn push_known_with_evidence<T: SelfDescribingDiagnostic>(
+fn push_recoverable_with_evidence<T: RecoverableDiagnostic>(
     report: &mut DiagnosticReport,
     severity: Severity,
-    category_value: u64,
+    category_value: DiagnosticCategory,
     source: &'static str,
     domain: &'static str,
     domain_id: u32,
-    value: i64,
     diagnostic: T,
     evidence: String,
 ) {
     let metadata = diagnostic.metadata();
-    assert!(metadata.complete());
-    assert_eq!(metadata.wire_code(), value);
     report.push(Issue::new(
         severity,
         category_value,
         source,
         domain,
         domain_id,
-        value,
+        metadata.wire_code(),
         Some(metadata.name()),
         metadata.summary(),
         metadata.action(),
+        &diagnostic,
         evidence,
     ));
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum UnknownExternalDiagnostic {
+    CatalogMismatch,
+    VfdCurrentFault,
+}
+
+impl RecoveryClassified for UnknownExternalDiagnostic {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::CatalogMismatch => RecoveryClass::RelaunchApplication,
+            Self::VfdCurrentFault => RecoveryClass::ResetSpindle,
+        }
+    }
+}
+
+#[derive(Clone, Copy, Debug)]
+enum SpindleDiagnostic {
+    Block(SpindleCode),
+    VfdFault(VfdFaultCode),
+}
+
+impl SelfDescribingDiagnostic for SpindleDiagnostic {
+    fn metadata(self) -> DiagnosticMetadata {
+        match self {
+            Self::Block(code) => code.metadata(),
+            Self::VfdFault(code) => code.metadata(),
+        }
+    }
+}
+
+impl RecoveryClassified for SpindleDiagnostic {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Block(code) => spindle_recovery_class(*code),
+            Self::VfdFault(_) => RecoveryClass::ResetSpindle,
+        }
+    }
 }
 
 #[allow(clippy::too_many_arguments)]
@@ -514,6 +554,7 @@ fn push_unknown_with_evidence(
     value: i64,
     detail: &'static str,
     operator_action: &'static str,
+    recovery_source: UnknownExternalDiagnostic,
     evidence: String,
 ) {
     report.push(Issue::new(
@@ -526,6 +567,7 @@ fn push_unknown_with_evidence(
         None,
         detail,
         operator_action,
+        &recovery_source,
         evidence,
     ));
 }
@@ -572,22 +614,52 @@ fn push_inconsistent_with_evidence(
         Some(name),
         detail,
         "retain the raw interface evidence and restart only after correcting the producing component",
+        &category::DIAGNOSTIC_INTERFACE,
         evidence,
     ));
+}
+
+fn spindle_recovery_class(code: SpindleCode) -> RecoveryClass {
+    match code {
+        SpindleCode::None => RecoveryClass::RecheckSource,
+        SpindleCode::Link
+        | SpindleCode::F001
+        | SpindleCode::F002
+        | SpindleCode::F024
+        | SpindleCode::F163
+        | SpindleCode::F164
+        | SpindleCode::F165
+        | SpindleCode::F169
+        | SpindleCode::ExplicitFrequency
+        | SpindleCode::F004
+        | SpindleCode::F005
+        | SpindleCode::RpmLimits
+        | SpindleCode::VfdFault
+        | SpindleCode::DirectionChange
+        | SpindleCode::Direction
+        | SpindleCode::SpeedZero
+        | SpindleCode::SpeedLow
+        | SpindleCode::SpeedHigh
+        | SpindleCode::BelowF011
+        | SpindleCode::FrequencyRange
+        | SpindleCode::SpeedInvalid
+        | SpindleCode::CommandDisabled
+        | SpindleCode::InternalState
+        | SpindleCode::DirectionFeedback => RecoveryClass::ResetSpindle,
+    }
 }
 
 pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapshot) {
     if snapshot.controller_fault_code != 0 {
         let evidence = snapshot.controller_fault_evidence.render();
         match ControllerFaultCode::from_wire_code(snapshot.controller_fault_code) {
-            Some(code) => push_known_with_evidence(
+            Some(code) => push_recoverable_with_evidence(
                 report,
                 Severity::Error,
                 category::CONTROLLER_FAULT,
                 "dmc2-pendant-control.fault-code",
                 "dmc2_controller_fault",
                 CONTROLLER_DOMAIN_ID,
-                i64::from(snapshot.controller_fault_code),
                 code,
                 evidence,
             ),
@@ -599,6 +671,7 @@ pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapsh
                 i64::from(snapshot.controller_fault_code),
                 "the controller exported a nonzero fault value absent from its compiled exhaustive catalog",
                 "retain the controller fault-data snapshot and correct the controller/catalog mismatch before reset",
+                UnknownExternalDiagnostic::CatalogMismatch,
                 evidence,
             ),
         }
@@ -628,14 +701,13 @@ pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapsh
     if snapshot.serial_bridge_fault_valid {
         let evidence = snapshot.serial_bridge_fault_evidence.render();
         match BridgeFaultCode::from_wire_code(snapshot.serial_bridge_fault_code) {
-            Some(code) => push_known_with_evidence(
+            Some(code) => push_recoverable_with_evidence(
                 report,
                 Severity::Error,
                 category::SERIAL_BRIDGE_FAULT,
                 "dmc2-pendant.bridge-fault-code",
                 "dmc2_serial_bridge_fault",
                 SERIAL_BRIDGE_DOMAIN_ID,
-                i64::from(snapshot.serial_bridge_fault_code),
                 code,
                 evidence.clone(),
             ),
@@ -647,6 +719,7 @@ pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapsh
                 i64::from(snapshot.serial_bridge_fault_code),
                 "the serial bridge marked a current fault valid with a value absent from its compiled exhaustive catalog",
                 "retain the serial bridge evidence pins and correct the bridge/catalog mismatch before reconnecting",
+                UnknownExternalDiagnostic::CatalogMismatch,
                 evidence.clone(),
             ),
         }
@@ -656,14 +729,13 @@ pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapsh
             match ProtocolError::from_wire_code(
                 snapshot.serial_bridge_fault_evidence.protocol_error_code,
             ) {
-                Some(protocol_error) => push_known_with_evidence(
+                Some(protocol_error) => push_recoverable_with_evidence(
                     report,
                     Severity::Error,
                     category::SERIAL_BRIDGE_FAULT,
                     "dmc2-pendant.fault-data-s00",
                     "dmc2_serial_protocol_error",
                     SERIAL_BRIDGE_DOMAIN_ID,
-                    i64::from(snapshot.serial_bridge_fault_evidence.protocol_error_code),
                     protocol_error,
                     evidence.clone(),
                 ),
@@ -675,6 +747,7 @@ pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapsh
                     i64::from(snapshot.serial_bridge_fault_evidence.protocol_error_code),
                     "the serial bridge retained a nested protocol value absent from its compiled exhaustive catalog",
                     "retain the complete bridge snapshot and correct the bridge/task-monitor catalog mismatch before reconnecting",
+                    UnknownExternalDiagnostic::CatalogMismatch,
                     evidence.clone(),
                 ),
             }
@@ -717,15 +790,14 @@ pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapsh
         match SpindleCode::from_wire_code(snapshot.spindle_fault_code)
             .filter(|code| *code != SpindleCode::None)
         {
-            Some(code) => push_known_with_evidence(
+            Some(code) => push_recoverable_with_evidence(
                 report,
                 Severity::Error,
                 category::SPINDLE_FAULT,
                 "h100-spindle.fault-code",
                 "h100_spindle_fault",
                 SPINDLE_FAULT_DOMAIN_ID,
-                i64::from(snapshot.spindle_fault_code),
-                code,
+                SpindleDiagnostic::Block(code),
                 h100_evidence.clone(),
             ),
             None if snapshot.spindle_fault_code == SpindleCode::None.wire_code() => {
@@ -747,6 +819,7 @@ pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapsh
                 i64::from(snapshot.spindle_fault_code),
                 "the spindle exported a latched fault value absent from its compiled exhaustive catalog",
                 "retain the spindle fault-data snapshot and correct the spindle/catalog mismatch before reset",
+                UnknownExternalDiagnostic::CatalogMismatch,
                 h100_evidence.clone(),
             ),
         }
@@ -780,15 +853,14 @@ pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapsh
         match SpindleCode::from_wire_code(snapshot.spindle_block_code)
             .filter(|code| *code != SpindleCode::None)
         {
-            Some(code) => push_known_with_evidence(
+            Some(code) => push_recoverable_with_evidence(
                 report,
                 Severity::Warning,
                 category::SPINDLE_BLOCK,
                 "h100-spindle.block-code",
                 "h100_spindle_block",
                 SPINDLE_BLOCK_DOMAIN_ID,
-                i64::from(snapshot.spindle_block_code),
-                code,
+                SpindleDiagnostic::Block(code),
                 h100_evidence.clone(),
             ),
             None => push_unknown_with_evidence(
@@ -799,6 +871,7 @@ pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapsh
                 i64::from(snapshot.spindle_block_code),
                 "the spindle exported a nonzero command-block value absent from its compiled exhaustive catalog",
                 "retain the spindle block inputs and correct the spindle/catalog mismatch before requesting rotation",
+                UnknownExternalDiagnostic::CatalogMismatch,
                 h100_evidence.clone(),
             ),
         }
@@ -806,15 +879,14 @@ pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapsh
 
     if snapshot.h100_vfd_fault_code != 0 {
         match VfdFaultCode::decode(snapshot.h100_vfd_fault_code) {
-            Some(code) => push_known_with_evidence(
+            Some(code) => push_recoverable_with_evidence(
                 report,
                 Severity::Error,
                 category::SPINDLE_FAULT,
                 "h100-spindle.current-fault",
                 "h100_vfd_current_fault",
                 H100_VFD_DOMAIN_ID,
-                i64::from(snapshot.h100_vfd_fault_code),
-                code,
+                SpindleDiagnostic::VfdFault(code),
                 format!(
                     "source={:?} raw={} drive_display={}.{} family_slug={} phase_slug={} {}",
                     "h100-spindle.current-fault",
@@ -834,6 +906,7 @@ pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapsh
                 i64::from(snapshot.h100_vfd_fault_code),
                 "the H100 current-fault register is nonzero but absent from the exact manual V1.8 printed-page-84 table",
                 "retain the raw register, inspect the drive display, and verify the exact H100 manual code before reset",
+                UnknownExternalDiagnostic::VfdCurrentFault,
                 h100_evidence.clone(),
             ),
         }
@@ -849,6 +922,7 @@ pub fn augment(report: &mut DiagnosticReport, snapshot: ExternalDiagnosticSnapsh
             i64::from(reserved_status),
             "H100 holding register 0210H contains bits mapped only to manual-reserved addresses 0008H through 000FH",
             "retain the full main-status register and verify the exact drive/manual revision before continuing",
+            UnknownExternalDiagnostic::CatalogMismatch,
             h100_evidence,
         );
     }

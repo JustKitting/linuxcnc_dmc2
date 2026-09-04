@@ -12,9 +12,10 @@ from pathlib import Path
 from typing import BinaryIO
 
 from .constants import ERROR_CHANNEL_KIND_DEFINITIONS, REQUIRED_LINUXCNC_VERSION
+from .recovery_contract import RecoveryClassCode
 
 
-JOURNAL_SCHEMA_VERSION = 2
+JOURNAL_SCHEMA_VERSION = 3
 JOURNAL_OBJECT_CAPACITY = 280
 JOURNAL_HEADER_MARKER = "DMC2_ERROR_JOURNAL"
 JOURNAL_EVENT_MARKER = "DMC2_ERROR_EVENT"
@@ -51,6 +52,7 @@ class ErrorJournalEvent:
     class_name: str
     severity: str
     known: bool
+    recovery_code: RecoveryClassCode
     object_size: int
     declared_size: int
     serial_number: int | None
@@ -104,14 +106,17 @@ class ErrorJournalReader:
             return self._events.popleft()
         return None
 
+    def contract_ready(self) -> bool:
+        """Report whether the current file supplied the exact transport header."""
+        return (
+            self._file is not None
+            and self._failed_identity is None
+            and self._header_seen
+            and self._success_transport is not None
+        )
+
     def close(self) -> None:
         self._close()
-
-    def __del__(self):
-        try:
-            self._close()
-        except Exception:
-            pass
 
     def _refresh_file(self) -> tuple[int, int] | None:
         try:
@@ -213,20 +218,20 @@ class ErrorJournalReader:
         line: str, nml_no_error: int, cms_read_ok: int
     ) -> ErrorJournalEvent:
         fields = line.split("\t")
-        if len(fields) != 18:
+        if len(fields) != 19:
             raise RuntimeError(
-                f"error journal event has {len(fields)} fields instead of 18"
+                f"error journal event has {len(fields)} fields instead of 19"
             )
         if fields[0] != JOURNAL_EVENT_MARKER or fields[1] != str(
             JOURNAL_SCHEMA_VERSION
         ):
             raise RuntimeError("error journal event marker or schema changed")
-        prefix = "\t".join(fields[:17]).encode("ascii")
+        prefix = "\t".join(fields[:18]).encode("ascii")
         expected_checksum = f"{_fnv64(prefix):016x}"
-        if fields[17] != expected_checksum:
+        if fields[18] != expected_checksum:
             raise RuntimeError(
                 "error journal checksum mismatch: "
-                f"expected {expected_checksum}, found {fields[17]}"
+                f"expected {expected_checksum}, found {fields[18]}"
             )
 
         sequence = _bounded_int(fields[2], "sequence", 1, U64_MAX)
@@ -236,16 +241,37 @@ class ErrorJournalReader:
         if fields[6] not in ("0", "1"):
             raise RuntimeError(f"invalid error journal known flag: {fields[6]!r}")
         known = fields[6] == "1"
-        object_size = _positive_int(fields[7], "object size")
-        declared_size = _positive_int(fields[8], "declared size")
-        serial_number = _optional_i32(fields[9], "serial number")
-        operator_id = _optional_i32(fields[10], "operator id")
-        payload = _hex(fields[11], "payload")
-        text = _hex(fields[12], "text")
-        padding = _hex(fields[13], "padding")
-        object_bytes = _hex(fields[14], "object")
-        nml_error = _bounded_int(fields[15], "NML error", I32_MIN, I32_MAX)
-        cms_status = _bounded_int(fields[16], "CMS status", I32_MIN, I32_MAX)
+        raw_recovery_code = _bounded_int(fields[7], "recovery class", 1, 255)
+        try:
+            recovery_code = RecoveryClassCode(raw_recovery_code)
+        except ValueError as error:
+            raise RuntimeError(
+                "ERROR_JOURNAL_RECOVERY_CLASS_UNKNOWN: "
+                f"{raw_recovery_code}; action: run matched DMC2 binaries"
+            ) from error
+        object_size = _positive_int(fields[8], "object size")
+        declared_size = _positive_int(fields[9], "declared size")
+        serial_number = _optional_i32(fields[10], "serial number")
+        operator_id = _optional_i32(fields[11], "operator id")
+        payload = _hex(fields[12], "payload")
+        text = _hex(fields[13], "text")
+        padding = _hex(fields[14], "padding")
+        object_bytes = _hex(fields[15], "object")
+        nml_error = _bounded_int(fields[16], "NML error", I32_MIN, I32_MAX)
+        cms_status = _bounded_int(fields[17], "CMS status", I32_MIN, I32_MAX)
+
+        if known and message_type in (1, 11):
+            expected_recovery = RecoveryClassCode.ABORT_TASK
+        elif known:
+            expected_recovery = RecoveryClassCode.RECHECK_SOURCE
+        else:
+            expected_recovery = RecoveryClassCode.RELAUNCH_APPLICATION
+        if recovery_code != expected_recovery:
+            raise RuntimeError(
+                "ERROR_JOURNAL_RECOVERY_CLASS_MISMATCH: "
+                f"message_type={message_type} expected={expected_recovery.name} "
+                f"actual={recovery_code.name}; action: run matched DMC2 binaries"
+            )
 
         if nml_error != nml_no_error or cms_status != cms_read_ok:
             raise RuntimeError(
@@ -318,6 +344,7 @@ class ErrorJournalReader:
             class_name=class_name,
             severity=severity,
             known=known,
+            recovery_code=recovery_code,
             object_size=object_size,
             declared_size=declared_size,
             serial_number=serial_number,

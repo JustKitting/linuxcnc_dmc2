@@ -3,6 +3,8 @@ use std::fmt;
 use std::os::unix::ffi::{OsStrExt, OsStringExt};
 use std::path::{Path, PathBuf};
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
+
 #[allow(
     dead_code,
     non_camel_case_types,
@@ -343,6 +345,19 @@ pub enum NativeOperation {
     ProgramRun,
 }
 
+impl NativeOperation {
+    const fn failure_recovery_class(self) -> RecoveryClass {
+        match self {
+            Self::SetState(_) => RecoveryClass::RestoreMachine,
+            Self::SetManualMode | Self::SetAutoMode | Self::SetTeleop(_) | Self::Abort => {
+                RecoveryClass::RelaunchApplication
+            }
+            Self::HomeAll => RecoveryClass::EstablishPosition,
+            Self::ProgramClose | Self::ProgramOpen | Self::ProgramRun => RecoveryClass::AbortTask,
+        }
+    }
+}
+
 #[derive(Debug)]
 pub enum NativeError {
     AbiMismatch {
@@ -421,6 +436,20 @@ impl fmt::Display for NativeError {
                 receipt.nml_error,
                 receipt.cms_status
             ),
+        }
+    }
+}
+
+impl RecoveryClassified for NativeError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::AbiMismatch { .. }
+            | Self::SnapshotAbi { .. }
+            | Self::PathContainsNul { .. }
+            | Self::Open { .. }
+            | Self::Status { .. }
+            | Self::UnknownMachineState(_) => RecoveryClass::RelaunchApplication,
+            Self::Command { operation, .. } => operation.failure_recovery_class(),
         }
     }
 }

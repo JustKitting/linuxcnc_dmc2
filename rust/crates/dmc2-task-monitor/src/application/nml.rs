@@ -1,5 +1,7 @@
 use std::ffi::{c_int, CString};
+use std::fmt;
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 use dmc2_linuxcnc_interface::{CodeDomain, CMS_STATUS, EMC_NML_MESSAGE_TYPE, NML_ERROR};
 
 use crate::snapshot::{
@@ -27,15 +29,69 @@ pub(crate) struct PollCodes {
 }
 
 impl PollCodes {
-    pub(crate) fn required() -> Self {
-        Self {
-            no_error: required_nml_error("NML_NO_ERROR"),
-            invalid_configuration: required_nml_error("NML_INVALID_CONFIGURATION"),
-            invalid_message: required_nml_error("NML_INVALID_MESSAGE_ERROR"),
-            status_message_type: required_code(EMC_NML_MESSAGE_TYPE, "EMC_STAT_TYPE"),
-            cms_status_not_set: required_code(CMS_STATUS, "CMS_STATUS_NOT_SET"),
-            cms_read_old: required_code(CMS_STATUS, "CMS_READ_OLD"),
-            cms_read_ok: required_code(CMS_STATUS, "CMS_READ_OK"),
+    pub(crate) fn required() -> Result<Self, RequiredCodeError> {
+        Ok(Self {
+            no_error: required_code(NML_ERROR, "NML_NO_ERROR")?,
+            invalid_configuration: required_code(NML_ERROR, "NML_INVALID_CONFIGURATION")?,
+            invalid_message: required_code(NML_ERROR, "NML_INVALID_MESSAGE_ERROR")?,
+            status_message_type: required_code(EMC_NML_MESSAGE_TYPE, "EMC_STAT_TYPE")?,
+            cms_status_not_set: required_code(CMS_STATUS, "CMS_STATUS_NOT_SET")?,
+            cms_read_old: required_code(CMS_STATUS, "CMS_READ_OLD")?,
+            cms_read_ok: required_code(CMS_STATUS, "CMS_READ_OK")?,
+        })
+    }
+}
+
+/// A required value is absent from, or cannot be represented from, the pinned
+/// LinuxCNC interface catalog. This is an operator-facing typed startup error,
+/// never a process panic.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RequiredCodeError {
+    Missing {
+        domain: &'static str,
+        name: &'static str,
+    },
+    OutOfRange {
+        domain: &'static str,
+        name: &'static str,
+        value: i64,
+    },
+}
+
+impl RequiredCodeError {
+    pub const fn identity(self) -> &'static str {
+        match self {
+            Self::Missing { .. } => "LINUXCNC_REQUIRED_CODE_MISSING",
+            Self::OutOfRange { .. } => "LINUXCNC_REQUIRED_CODE_OUT_OF_RANGE",
+        }
+    }
+}
+
+impl fmt::Display for RequiredCodeError {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Missing { domain, name } => write!(
+                formatter,
+                "{}: domain={domain} name={name}; cause: the pinned LinuxCNC interface catalog does not contain a required value; action: reinstall the matching binaries and relaunch DMC2 LinuxCNC",
+                self.identity()
+            ),
+            Self::OutOfRange {
+                domain,
+                name,
+                value,
+            } => write!(
+                formatter,
+                "{}: domain={domain} name={name} value={value}; cause: a required LinuxCNC interface value cannot be represented by the native i32 ABI; action: reinstall the matching binaries and relaunch DMC2 LinuxCNC",
+                self.identity()
+            ),
+        }
+    }
+}
+
+impl RecoveryClassified for RequiredCodeError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Missing { .. } | Self::OutOfRange { .. } => RecoveryClass::RelaunchApplication,
         }
     }
 }
@@ -145,23 +201,21 @@ fn classify_observation(
     )
 }
 
-fn required_code(domain: CodeDomain, name: &str) -> i32 {
-    domain
+fn required_code(domain: CodeDomain, name: &'static str) -> Result<i32, RequiredCodeError> {
+    let value = domain
         .codes
         .iter()
         .find(|entry| entry.name == name)
-        .unwrap_or_else(|| panic!("LinuxCNC 2.9.10 controller interface omitted {name}"))
-        .code
-        .try_into()
-        .unwrap_or_else(|_| panic!("LinuxCNC 2.9.10 value {name} does not fit in i32"))
-}
-
-pub(super) fn required_nml_error(name: &str) -> i32 {
-    required_code(NML_ERROR, name)
-}
-
-pub(super) fn required_cms_status(name: &str) -> i32 {
-    required_code(CMS_STATUS, name)
+        .ok_or(RequiredCodeError::Missing {
+            domain: domain.name,
+            name,
+        })?
+        .code;
+    value.try_into().map_err(|_| RequiredCodeError::OutOfRange {
+        domain: domain.name,
+        name,
+        value,
+    })
 }
 
 pub(super) fn snapshot_abi_version() -> u32 {

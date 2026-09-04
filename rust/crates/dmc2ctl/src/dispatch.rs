@@ -4,8 +4,9 @@ use std::path::{Path, PathBuf};
 use std::thread;
 use std::time::Duration;
 
-use crate::catalog::{Catalog, Operation, OperationKind};
+use crate::catalog::{Catalog, Operation, OperationKind, Prerequisite};
 use crate::native::{ControlBackend, MachineState, NativeError, Receipt, Status, TaskMode};
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 const STATUS_POLL_PERIOD: Duration = Duration::from_millis(20);
 
@@ -172,24 +173,24 @@ fn check_prerequisites(
     physical_estop_pressed: Option<bool>,
 ) -> Result<(), DispatchError> {
     for prerequisite in &operation.prerequisites {
-        let satisfied = match prerequisite.as_str() {
-            "running-session" => true,
-            "physical-estop-released" => physical_estop_pressed == Some(false),
-            "estop-clear" => status.machine_state != MachineState::Estop && !status.auxiliary_estop,
-            "machine-on" => status.machine_state == MachineState::On,
-            "interpreter-idle" => status.interpreter_idle(),
-            "all-homed" => status.all_homed(),
-            unknown => {
-                return Err(DispatchError::UnknownPrerequisite {
-                    id: operation.id.clone(),
-                    prerequisite: unknown.to_owned(),
-                })
+        let satisfied = match prerequisite {
+            // This backend operates an already-running LinuxCNC session. UI
+            // launch operations are rejected by `require_kind` before this
+            // function and cannot manufacture desktop-session evidence here.
+            Prerequisite::DesktopSession => false,
+            Prerequisite::RunningSession => true,
+            Prerequisite::PhysicalEstopReleased => physical_estop_pressed == Some(false),
+            Prerequisite::EstopClear => {
+                status.machine_state != MachineState::Estop && !status.auxiliary_estop
             }
+            Prerequisite::MachineOn => status.machine_state == MachineState::On,
+            Prerequisite::InterpreterIdle => status.interpreter_idle(),
+            Prerequisite::AllHomed => status.all_homed(),
         };
         if !satisfied {
             return Err(DispatchError::Prerequisite {
                 id: operation.id.clone(),
-                prerequisite: prerequisite.clone(),
+                prerequisite: *prerequisite,
                 machine_state: status.machine_state,
                 task_mode: status.task_mode,
                 interpreter_state: status.interpreter_state,
@@ -215,13 +216,9 @@ pub enum DispatchError {
         driver: String,
         target: String,
     },
-    UnknownPrerequisite {
-        id: String,
-        prerequisite: String,
-    },
     Prerequisite {
         id: String,
-        prerequisite: String,
+        prerequisite: Prerequisite,
         machine_state: MachineState,
         task_mode: TaskMode,
         interpreter_state: i32,
@@ -282,10 +279,6 @@ impl fmt::Display for DispatchError {
                 formatter,
                 "operation {id} uses unsupported driver={driver:?} target={target:?}"
             ),
-            Self::UnknownPrerequisite { id, prerequisite } => write!(
-                formatter,
-                "operation {id} has unknown prerequisite {prerequisite:?}"
-            ),
             Self::Prerequisite {
                 id,
                 prerequisite,
@@ -297,7 +290,8 @@ impl fmt::Display for DispatchError {
                 physical_estop_pressed,
             } => write!(
                 formatter,
-                "OPERATION_PREREQUISITE_FAILED: operation={id} prerequisite={prerequisite} machine_state={} task_mode={} interpreter_state={interpreter_state} homed_mask=0x{homed_mask:08x} joint_count={joint_count} physical_estop_pressed={physical_estop_pressed:?}",
+                "OPERATION_PREREQUISITE_FAILED: operation={id} prerequisite={} machine_state={} task_mode={} interpreter_state={interpreter_state} homed_mask=0x{homed_mask:08x} joint_count={joint_count} physical_estop_pressed={physical_estop_pressed:?}",
+                prerequisite.name(),
                 machine_state.name(),
                 task_mode.name()
             ),
@@ -343,6 +337,23 @@ impl fmt::Display for DispatchError {
                 machine_state.name(),
                 auxiliary_estop
             ),
+        }
+    }
+}
+
+impl RecoveryClassified for DispatchError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Native(error) => error.recovery_class(),
+            Self::Prerequisite { prerequisite, .. } => prerequisite.recovery_class(),
+            Self::WrongKind { .. }
+            | Self::UnsupportedDriver { .. }
+            | Self::ProgramPath { .. }
+            | Self::ProgramOutsideProject { .. } => RecoveryClass::RelaunchApplication,
+            Self::LoadWhileInterpreterActive { .. }
+            | Self::LoadedFileMismatch { .. }
+            | Self::RunRequiresExactLoadedProgram { .. } => RecoveryClass::AbortTask,
+            Self::HomingInterrupted { .. } => RecoveryClass::EstablishPosition,
         }
     }
 }

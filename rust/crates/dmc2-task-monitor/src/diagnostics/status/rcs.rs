@@ -8,7 +8,7 @@ use dmc2_linuxcnc_interface::{
 use crate::snapshot::RcsStatusSnapshot;
 
 use super::super::catalog::{check_code, domain_id, issue, issue_with_evidence, unknown_code};
-use super::super::category;
+use super::super::category::{self, DiagnosticCategory};
 use super::super::report::{DiagnosticReport, Severity};
 use super::super::validation::{account_open, check_bounded_c_bytes};
 
@@ -33,10 +33,22 @@ pub(super) fn check_rcs(
     contract_class: &'static str,
     status: RcsStatusSnapshot,
     commands: CommandDomain,
-    fault_category: u64,
+    fault_category: DiagnosticCategory,
 ) {
-    let contract = status_message_contract(contract_class)
-        .unwrap_or_else(|| panic!("generated LinuxCNC catalog omitted {contract_class}"));
+    let Some(contract) = status_message_contract(contract_class) else {
+        issue(
+            report,
+            Severity::Error,
+            category::DIAGNOSTIC_INTERFACE,
+            format!("{source}.status_message_contract"),
+            "linuxcnc_status_contract",
+            u32::MAX,
+            i64::from(status.message_type),
+            None,
+            "the pinned LinuxCNC interface catalog omitted the required status-message contract",
+        );
+        return;
+    };
     let message_type_name = check_code(
         report,
         format!("{source}.message_type"),

@@ -191,7 +191,6 @@ net dmc2-controller-heartbeat <= dmc2-pendant-control.heartbeat
 net dmc2-controller-watchdog-ok => dmc2-pendant-control.software-watchdog-ok
 
 # Named status signals are consumed by the post-GUI panel.
-net dmc2-controller-available <= dmc2-pendant-control.control-available
 net dmc2-controller-ready <= dmc2-pendant-control.control-ready
 net dmc2-controller-fault <= dmc2-pendant-control.fault
 net dmc2-controller-recovery <= dmc2-pendant-control.recovery-active

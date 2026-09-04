@@ -6,6 +6,7 @@ use std::os::unix::io::AsRawFd;
 use std::path::{Path, PathBuf};
 
 use crate::event::Event;
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 pub struct Journal {
     file: File,
@@ -205,6 +206,12 @@ impl fmt::Display for JournalError {
 impl std::error::Error for JournalError {
     fn source(&self) -> Option<&(dyn std::error::Error + 'static)> {
         Some(&self.source)
+    }
+}
+
+impl RecoveryClassified for JournalError {
+    fn recovery_class(&self) -> RecoveryClass {
+        RecoveryClass::RelaunchApplication
     }
 }
 

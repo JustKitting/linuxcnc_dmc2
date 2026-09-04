@@ -4,6 +4,7 @@ use std::fmt;
 use std::path::PathBuf;
 
 use crate::catalog::default_catalog_path;
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 pub const USAGE: &str = "Usage: dmc2ctl [--catalog PATH] [--nml-file PATH] <list|describe ID|status|execute ID|load ID|run ID>";
 
@@ -123,6 +124,20 @@ impl fmt::Display for CliError {
                 write!(formatter, "{value} does not accept arguments")
             }
             Self::ExpectedOneId(value) => write!(formatter, "{value} requires exactly one ID"),
+        }
+    }
+}
+
+impl RecoveryClassified for CliError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::MissingCommand
+            | Self::MissingOptionValue(_)
+            | Self::NonUtf8Command(_)
+            | Self::NonUtf8Id(_)
+            | Self::UnknownCommand(_)
+            | Self::UnexpectedArguments(_)
+            | Self::ExpectedOneId(_) => RecoveryClass::RelaunchApplication,
         }
     }
 }

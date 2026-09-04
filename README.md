@@ -202,8 +202,9 @@ faults the same E-stop chain if the userspace controller freezes.
 
 The toolbar's pendant icon remains operator-accessible whenever AXIS is
 running. Selecting it immediately requests Pendant Mode and opens the PyVCP
-panel; it never waits for controller readiness and does not silently remove the
-request or hide the panel when readiness drops. The `control-ready` indicator
+panel; no controller-availability state exists between that UI request and the
+native Pendant Mode input, and the UI does not silently remove the request or
+hide the panel when readiness drops. The observational `control-ready` indicator
 separately reports whether the selected LinuxCNC mode, startup gate, Nano link,
 and limits currently permit a detent. During an expected limit collision,
 automatic backoff, or attributed manual release, the panel stays open while
@@ -246,6 +247,49 @@ E-stop Reset request; it does not use a separate reset state. After the
 physical pendant E-stop is released, this clears a retained controller fault
 and re-arms the same canonical latch. It does not home, move an axis, start the
 spindle, or turn Machine On.
+
+### Typed recovery contract
+
+Every admitted error state that crosses the controller/bridge/spindle
+diagnostic, LinuxCNC status/error-channel, top-level process-failure, or
+AXIS-notification boundary belongs to exactly one of nine `RecoveryClass`
+variants. One Rust declaration generates the class and transition enums,
+their counts and wire mappings, every clear condition, and every ordered UI
+route. Rust error enums use exhaustive `RecoveryClassified` matches, and the
+only top-level error renderer requires that trait. A new enum variant cannot
+cross that boundary until it has a recovery class. Every diagnostic `Issue`
+also requires a `RecoveryClassified` source at construction. Stock-AXIS Python
+exceptions admitted by the DMC2 integration are reduced to the closed
+`AxisUiFaultKind` enum before presentation.
+
+| Recovery class | Clear transition | Operator UI path |
+| --- | --- | --- |
+| `RECHECK_SOURCE` | The exact issue is absent from a later valid evaluation. | Pendant Mode |
+| `CLEAR_CONTROLLER` | Correct the named cause; Clear Fault is accepted and the retained controller fault becomes `NONE`. | Clear Fault -> Pendant Mode |
+| `RESTORE_PENDANT` | Restore a fresh coherent Nano stream; Clear Fault is accepted and pendant faults disappear. | Clear Fault -> Pendant Mode |
+| `RELEASE_LIMIT` | Clear the physical cause; Clear Fault and the configured backoff leave raw and latched limits clear. | Clear Fault -> Pendant Mode |
+| `ABORT_TASK` | Abort is acknowledged, the interpreter becomes idle, and the exact issue disappears. | Abort -> Clear Fault -> Pendant Mode |
+| `RESTORE_MACHINE` | Release the physical E-stop, reset E-stop, and reach Machine On. | Reset E-stop -> Machine On -> Pendant Mode |
+| `RESET_SPINDLE` | Abort, correct the named drive cause, then clear the H100 fault/block indications. | Abort -> Clear Fault -> Pendant Mode |
+| `RELAUNCH_APPLICATION` | Correct the named installation/runtime cause and launch a matched session with a valid recovery catalog. | DMC2 LinuxCNC in Applications -> Clear Fault -> Pendant Mode |
+| `ESTABLISH_POSITION` | Reset E-stop, turn the machine on, and complete Home All so every configured joint is homed. | Reset E-stop -> Machine On -> Home All -> Pendant Mode |
+
+The task monitor publishes that closed catalog, including a distinct typed
+transition and ordered operation IDs, before any events. The AXIS reader
+rejects missing, extra, renumbered, or remapped classes. It then resolves every
+operation through `config/operations.tsv` and checks the real stock/DMC2 widget
+and command binding. Reset E-stop, Clear Fault, and Pendant Mode are restored
+to the normal state on every UI polling cycle even if the dynamic catalog is
+temporarily unavailable. Each visible error includes its class, clear
+condition, and UI path. A presentation callback failure is itself classified
+as `RELAUNCH_APPLICATION`, while the recovery controls remain independent.
+
+The source and compiler enforce classification and declared routes. Runtime
+UI-route availability is established only when the running AXIS integration
+prints `DMC2_RECOVERY_UI_CONTRACT classes=9 status=available` after inspecting
+the actual widgets, layout, callback bindings, operation catalog, and desktop
+entry. Neither that observation nor source checks substitute for correction
+of a named physical cause or for physical motion evidence.
 
 ## LinuxCNC contact-connectivity tests — no motion
 

@@ -3,6 +3,8 @@ use std::fmt;
 use std::io;
 use std::time::SystemTimeError;
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
+
 use crate::catalog::{Ownership, ProcessRole};
 use crate::cli::CliError;
 use crate::journal::JournalError;
@@ -20,6 +22,53 @@ impl StartupStage {
             Self::OwnerIdentity => "set the process-owner identity",
             Self::CoreDumpLimit => "configure the child core-dump limit",
             Self::Spawn => "start the supervised process",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) enum SupervisorObservationError<'a> {
+    Wait4 {
+        role: ProcessRole,
+        child_pid: u32,
+        source: &'a io::Error,
+    },
+    ProcessPresence {
+        role: ProcessRole,
+        child_pid: u32,
+        source: &'a io::Error,
+    },
+}
+
+impl fmt::Display for SupervisorObservationError<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Wait4 {
+                role,
+                child_pid,
+                source,
+            } => write!(
+                formatter,
+                "PROCESS_WAIT_OBSERVATION_FAILED: wait4 failed for role {} child PID {child_pid}: {source}; action: retain exact child ownership and wait for the next healthy observation",
+                role.name(),
+            ),
+            Self::ProcessPresence {
+                role,
+                child_pid,
+                source,
+            } => write!(
+                formatter,
+                "PROCESS_PRESENCE_OBSERVATION_FAILED: presence inspection failed for role {} child PID {child_pid}: {source}; action: retain exact child ownership and wait for the next healthy observation",
+                role.name(),
+            ),
+        }
+    }
+}
+
+impl RecoveryClassified for SupervisorObservationError<'_> {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Wait4 { .. } | Self::ProcessPresence { .. } => RecoveryClass::RecheckSource,
         }
     }
 }
@@ -97,6 +146,20 @@ impl std::error::Error for SupervisorError {
             Self::Startup { source, .. } | Self::WaitStatusLost { source, .. } => Some(source),
             Self::JournalAfterChildSpawn { first, .. } => Some(first),
             Self::UnsupportedOwnership { .. } => None,
+        }
+    }
+}
+
+impl RecoveryClassified for SupervisorError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Cli(error) => error.recovery_class(),
+            Self::Journal(error) => error.recovery_class(),
+            Self::UnsupportedOwnership { .. }
+            | Self::Clock(_)
+            | Self::Startup { .. }
+            | Self::WaitStatusLost { .. } => RecoveryClass::RelaunchApplication,
+            Self::JournalAfterChildSpawn { first, .. } => first.recovery_class(),
         }
     }
 }

@@ -227,7 +227,6 @@ pub struct LinuxCncPendantSupervisor {
     recovery: EstopRecoverySequence,
     link_established: bool,
     startup_limits_checked: bool,
-    startup_reset_complete: bool,
     phase: Phase,
     phase_elapsed_ns: u64,
     phase_total_ns: u64,
@@ -242,7 +241,6 @@ pub struct LinuxCncPendantSupervisor {
     recovery_elapsed_ns: u64,
     external_enable: bool,
     pendant_mode_enabled: bool,
-    control_available: bool,
     control_ready: bool,
     limit_reset: [bool; 3],
     homing_was_active: bool,
@@ -259,7 +257,6 @@ impl LinuxCncPendantSupervisor {
             recovery: EstopRecoverySequence::new(),
             link_established: false,
             startup_limits_checked: false,
-            startup_reset_complete: false,
             phase: Phase::Idle,
             phase_elapsed_ns: 0,
             phase_total_ns: 0,
@@ -274,7 +271,6 @@ impl LinuxCncPendantSupervisor {
             recovery_elapsed_ns: 0,
             external_enable: false,
             pendant_mode_enabled: false,
-            control_available: false,
             control_ready: false,
             limit_reset: [false; 3],
             homing_was_active: false,
@@ -317,13 +313,10 @@ impl LinuxCncPendantSupervisor {
         self.homing_was_active = false;
         self.homing_reset_elapsed_ns = 0;
         self.external_enable = false;
-        self.control_available = false;
         self.control_ready = false;
         self.clear_state_requests();
         self.interpreter.reset();
-        if !self.startup_reset_complete {
-            self.startup_limits_checked = false;
-        }
+        self.startup_limits_checked = false;
         self.fault = None;
         // Reassert the native realtime stop while the cleared controller is
         // still deliberately held disabled for this complete update cycle.
@@ -335,8 +328,8 @@ impl LinuxCncPendantSupervisor {
         self.last_inputs = Some(inputs);
     }
 
-    pub const fn startup_reset_complete(&self) -> bool {
-        self.startup_reset_complete
+    pub const fn startup_sequence_complete(&self) -> bool {
+        self.startup_limits_checked && !self.phase.startup_power() && !self.phase.startup_bounce()
     }
 
     fn transition(&mut self, phase: Phase) {
@@ -451,7 +444,6 @@ impl LinuxCncPendantSupervisor {
         self.bounce_start_count = None;
         self.limit_reset = [false; 3];
         self.external_enable = false;
-        self.control_available = false;
         self.control_ready = false;
         self.clear_state_requests();
         self.fault = Some(record);
@@ -506,7 +498,6 @@ impl LinuxCncPendantSupervisor {
         }
         SupervisorOutputs {
             external_enable: self.external_enable,
-            control_available: self.control_available,
             control_ready: self.control_ready,
             estop_reset_request: self.estop_reset_request,
             machine_on_request: self.machine_on_request,

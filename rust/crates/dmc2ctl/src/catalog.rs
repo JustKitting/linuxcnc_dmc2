@@ -4,14 +4,68 @@ use std::fmt;
 use std::fs;
 use std::path::{Path, PathBuf};
 
-const MAGIC: &str = "DMC2_OPERATION_CATALOG\t1";
-const HEADER: &str = "id\tkind\tlabel\tdriver\ttarget\tui_scope\teffects\tprerequisites";
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
+
+const MAGIC: &str = "DMC2_OPERATION_CATALOG\t2";
+const HEADER: &str = "id\tkind\tlabel\tdriver\ttarget\tui_scope\teffects\tprerequisites\tui_target";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum OperationKind {
     Control,
     Program,
+    Ui,
     Internal,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum Prerequisite {
+    DesktopSession,
+    RunningSession,
+    PhysicalEstopReleased,
+    EstopClear,
+    MachineOn,
+    InterpreterIdle,
+    AllHomed,
+}
+
+impl Prerequisite {
+    fn parse(value: &str) -> Option<Self> {
+        match value {
+            "desktop-session" => Some(Self::DesktopSession),
+            "running-session" => Some(Self::RunningSession),
+            "physical-estop-released" => Some(Self::PhysicalEstopReleased),
+            "estop-clear" => Some(Self::EstopClear),
+            "machine-on" => Some(Self::MachineOn),
+            "interpreter-idle" => Some(Self::InterpreterIdle),
+            "all-homed" => Some(Self::AllHomed),
+            _ => None,
+        }
+    }
+
+    pub const fn name(self) -> &'static str {
+        match self {
+            Self::DesktopSession => "desktop-session",
+            Self::RunningSession => "running-session",
+            Self::PhysicalEstopReleased => "physical-estop-released",
+            Self::EstopClear => "estop-clear",
+            Self::MachineOn => "machine-on",
+            Self::InterpreterIdle => "interpreter-idle",
+            Self::AllHomed => "all-homed",
+        }
+    }
+}
+
+impl RecoveryClassified for Prerequisite {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::DesktopSession | Self::RunningSession => RecoveryClass::RelaunchApplication,
+            Self::PhysicalEstopReleased | Self::EstopClear | Self::MachineOn => {
+                RecoveryClass::RestoreMachine
+            }
+            Self::InterpreterIdle => RecoveryClass::AbortTask,
+            Self::AllHomed => RecoveryClass::EstablishPosition,
+        }
+    }
 }
 
 impl OperationKind {
@@ -19,6 +73,7 @@ impl OperationKind {
         match value {
             "control" => Some(Self::Control),
             "program" => Some(Self::Program),
+            "ui" => Some(Self::Ui),
             "internal" => Some(Self::Internal),
             _ => None,
         }
@@ -28,6 +83,7 @@ impl OperationKind {
         match self {
             Self::Control => "control",
             Self::Program => "program",
+            Self::Ui => "ui",
             Self::Internal => "internal",
         }
     }
@@ -42,7 +98,8 @@ pub struct Operation {
     pub target: String,
     pub ui_scope: String,
     pub effects: Vec<String>,
-    pub prerequisites: Vec<String>,
+    pub prerequisites: Vec<Prerequisite>,
+    pub ui_target: String,
 }
 
 #[derive(Debug)]
@@ -77,7 +134,7 @@ impl Catalog {
                 continue;
             }
             let fields = line.split('\t').collect::<Vec<_>>();
-            if fields.len() != 8 {
+            if fields.len() != 9 {
                 return Err(CatalogError::ColumnCount {
                     path,
                     line: line_number,
@@ -98,7 +155,8 @@ impl Catalog {
                 target: fields[4].to_owned(),
                 ui_scope: fields[5].to_owned(),
                 effects: split_list(fields[6]),
-                prerequisites: split_list(fields[7]),
+                prerequisites: parse_prerequisites(&path, line_number, fields[7])?,
+                ui_target: fields[8].to_owned(),
             };
             validate_operation(&path, line_number, &operation)?;
             if operations.insert(operation.id.clone(), operation).is_some() {
@@ -152,6 +210,24 @@ fn split_list(value: &str) -> Vec<String> {
         .collect()
 }
 
+fn parse_prerequisites(
+    path: &Path,
+    line: usize,
+    value: &str,
+) -> Result<Vec<Prerequisite>, CatalogError> {
+    value
+        .split(';')
+        .filter(|item| !item.is_empty())
+        .map(|item| {
+            Prerequisite::parse(item).ok_or_else(|| CatalogError::Prerequisite {
+                path: path.to_path_buf(),
+                line,
+                value: item.to_owned(),
+            })
+        })
+        .collect()
+}
+
 fn validate_operation(path: &Path, line: usize, operation: &Operation) -> Result<(), CatalogError> {
     for (field, value) in [
         ("id", operation.id.as_str()),
@@ -159,6 +235,7 @@ fn validate_operation(path: &Path, line: usize, operation: &Operation) -> Result
         ("driver", operation.driver.as_str()),
         ("target", operation.target.as_str()),
         ("ui_scope", operation.ui_scope.as_str()),
+        ("ui_target", operation.ui_target.as_str()),
     ] {
         if value.is_empty() {
             return Err(CatalogError::EmptyField {
@@ -212,6 +289,11 @@ pub enum CatalogError {
         line: usize,
         value: String,
     },
+    Prerequisite {
+        path: PathBuf,
+        line: usize,
+        value: String,
+    },
     EmptyField {
         path: PathBuf,
         line: usize,
@@ -259,12 +341,17 @@ impl fmt::Display for CatalogError {
                 observed,
             } => write!(
                 formatter,
-                "operation catalog {} line {line} has {observed} columns; expected 8",
+                "operation catalog {} line {line} has {observed} columns; expected 9",
                 path.display()
             ),
             Self::OperationKind { path, line, value } => write!(
                 formatter,
                 "operation catalog {} line {line} has unknown kind {value:?}",
+                path.display()
+            ),
+            Self::Prerequisite { path, line, value } => write!(
+                formatter,
+                "operation catalog {} line {line} has unknown prerequisite {value:?}",
                 path.display()
             ),
             Self::EmptyField { path, line, field } => write!(
@@ -285,6 +372,23 @@ impl fmt::Display for CatalogError {
                 "cannot derive project root from operation catalog {}",
                 path.display()
             ),
+        }
+    }
+}
+
+impl RecoveryClassified for CatalogError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Read { .. }
+            | Self::Magic { .. }
+            | Self::Header { .. }
+            | Self::ColumnCount { .. }
+            | Self::OperationKind { .. }
+            | Self::Prerequisite { .. }
+            | Self::EmptyField { .. }
+            | Self::DuplicateId { .. }
+            | Self::UnknownId { .. }
+            | Self::ProjectRoot { .. } => RecoveryClass::RelaunchApplication,
         }
     }
 }

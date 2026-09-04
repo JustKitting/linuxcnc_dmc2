@@ -6,7 +6,7 @@
 //! on the realtime schedule.
 
 use crate::supervisor::{CommandEvent, JogCommand, JogPath};
-use dmc2_diagnostics::diagnostic_catalog;
+use dmc2_diagnostics::{diagnostic_catalog, RecoveryClass, RecoveryClassified};
 
 diagnostic_catalog! {
     pub enum MotionCommandPhase: i32 {
@@ -66,6 +66,12 @@ impl MotionCommandError {
             Self::ZeroDistance => FaultCode::MotionZeroDistance,
             Self::CountRangeExceeded => FaultCode::MotionCountRangeExceeded,
         }
+    }
+}
+
+impl RecoveryClassified for MotionCommandError {
+    fn recovery_class(&self) -> RecoveryClass {
+        self.fault_code().recovery_class()
     }
 }
 

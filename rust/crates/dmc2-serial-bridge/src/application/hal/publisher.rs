@@ -3,6 +3,7 @@ use std::ptr;
 use std::sync::atomic::{AtomicU32, Ordering};
 
 use crate::{AxisCode, BridgeFaultCode, MultiplierCode, ProtocolError, Snapshot};
+use dmc2_diagnostics::RecoveryDisplay;
 use dmc2_hal_sys as hal;
 
 use super::pins::HalPins;
@@ -176,7 +177,10 @@ impl Drop for HalPublisher {
     fn drop(&mut self) {
         if let Err(error) = hal::HalCall::Exit.classify(unsafe { hal::hal_exit(self.component_id) })
         {
-            eprintln!("dmc2-serial-bridge: hal_exit failed: {error}");
+            eprintln!(
+                "dmc2-serial-bridge: hal_exit failed: {}",
+                RecoveryDisplay(&error)
+            );
         }
     }
 }

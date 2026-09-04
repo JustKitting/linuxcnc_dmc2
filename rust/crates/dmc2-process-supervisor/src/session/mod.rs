@@ -12,6 +12,8 @@ use std::process::{Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, SystemTimeError, UNIX_EPOCH};
 
+use dmc2_diagnostics::RecoveryDisplay;
+
 use crate::backtrace::{self, BacktraceEvidence};
 use crate::catalog::{BacktraceKind, Ownership, ProcessRole};
 use crate::cli::Invocation;
@@ -23,7 +25,7 @@ use crate::runtime::TRACKING_FAILURE_EXIT_CODE;
 use crate::wait::{self, Poll, WaitEvidence};
 
 pub use failure::SessionError;
-use failure::StartupStage;
+use failure::{SessionObservationError, SessionObservationKind, StartupStage};
 use output_capture::{PreparedCapture, RunningCapture};
 
 const OBSERVATION_PERIOD: Duration = Duration::from_millis(10);
@@ -143,12 +145,16 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
             Ok(capture) => Some(capture),
             Err(source) => {
                 capture_failures = 1;
+                let observation = SessionObservationError::OutputCaptureStart {
+                    linuxcnc_pid,
+                    source: &source,
+                };
                 let event = session_event("session-output-capture-start-failed", supervisor_pid)
                     .field("linuxcnc_pid", linuxcnc_pid)
-                    .field("error", source.to_string())
-                    .field("recovery", "retain-session-ownership-and-report-after-exit");
+                    .field("error", observation.to_string())
+                    .recovery(&observation);
                 append_after_spawn(&mut journal, &event, &mut journal_failures);
-                eprintln!("dmc2-session-supervisor: LinuxCNC PID {linuxcnc_pid} output capture failed to start: {source}; retaining process ownership until exit");
+                eprintln!("dmc2-session-supervisor: {}", RecoveryDisplay(&observation));
                 capture_error = Some(source);
                 None
             }
@@ -163,8 +169,8 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
     children.insert(linuxcnc_pid, root);
 
     let mut linuxcnc_status = None;
-    let mut child_scan_issue = IssueState::new("session-child-scan");
-    let mut wait_issue = IssueState::new("session-wait4");
+    let mut child_scan_issue = IssueState::new(SessionObservationKind::ChildScan);
+    let mut wait_issue = IssueState::new(SessionObservationKind::Wait4);
     loop {
         match direct_children(supervisor_pid) {
             Ok(pids) => {
@@ -381,7 +387,8 @@ fn finish_capture(
         Ok(path) => path,
         Err(error) => {
             *failure_count = (*failure_count).saturating_add(1);
-            eprintln!("dmc2-session-supervisor: LinuxCNC output/report capture failed at session exit: {error}; recovery: correct log/report storage and relaunch from the desktop application");
+            let observation = SessionObservationError::OutputCaptureFinish { source: &error };
+            eprintln!("dmc2-session-supervisor: {}", RecoveryDisplay(&observation));
             if first_error.is_none() {
                 *first_error = Some(error);
             }
@@ -419,7 +426,10 @@ fn append_after_spawn(journal: &mut Journal, event: &Event, failures: &mut Failu
             }
         }
         Err(error) => {
-            eprintln!("dmc2-session-supervisor: lifecycle journal failed: {error}; recovery: writing will be retried while the LinuxCNC session remains owned");
+            eprintln!(
+                "dmc2-session-supervisor: lifecycle journal failed: {}; writing will be retried while the LinuxCNC session remains owned",
+                RecoveryDisplay(&error),
+            );
             failures.record_failure(error);
         }
     }
@@ -454,16 +464,16 @@ impl ObservedChild {
 }
 
 struct IssueState {
-    name: &'static str,
+    kind: SessionObservationKind,
     active: bool,
     failures: u64,
     recoveries: u64,
 }
 
 impl IssueState {
-    const fn new(name: &'static str) -> Self {
+    const fn new(kind: SessionObservationKind) -> Self {
         Self {
-            name,
+            kind,
             active: false,
             failures: 0,
             recoveries: 0,
@@ -494,12 +504,16 @@ fn record_issue_failure(
     failures: &mut FailureTracker,
 ) {
     if issue.fail() {
+        let observation = SessionObservationError::Source {
+            kind: issue.kind,
+            source: &error,
+        };
         let event = session_event("session-observation-failed", supervisor_pid)
-            .field("state", issue.name)
-            .field("error", error.to_string())
-            .field("recovery", "retain-session-ownership-and-retry");
+            .field("state", issue.kind.name())
+            .field("error", observation.to_string())
+            .recovery(&observation);
         append_after_spawn(journal, &event, failures);
-        eprintln!("dmc2-session-supervisor: {} failed: {error}; retaining the LinuxCNC session and retrying", issue.name);
+        eprintln!("dmc2-session-supervisor: {}", RecoveryDisplay(&observation));
     }
 }
 
@@ -511,11 +525,17 @@ fn record_issue_recovery(
 ) {
     if issue.recover() {
         let event = session_event("session-observation-recovered", supervisor_pid)
-            .field("state", issue.name)
+            .field("state", issue.kind.name())
             .field("failures", issue.failures)
             .field("recoveries", issue.recoveries);
         append_after_spawn(journal, &event, failures);
-        eprintln!("dmc2-session-supervisor: {} recovered", issue.name);
+        eprintln!(
+            "dmc2-session-supervisor: state={} transition={} recovered",
+            issue.kind.name(),
+            dmc2_diagnostics::RecoveryClass::RecheckSource
+                .transition()
+                .name(),
+        );
     }
 }
 

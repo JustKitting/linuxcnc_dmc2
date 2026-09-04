@@ -3,12 +3,13 @@ use std::path::Path;
 use std::ptr;
 use std::sync::atomic::{AtomicU32, Ordering};
 
+use dmc2_diagnostics::RecoveryDisplay;
 use dmc2_hal_sys as hal;
 use dmc2_linuxcnc_interface::{CMS_STATUS, NML_ERROR, TASK_INTERP, TASK_MODE, TRAJ_MODE};
 
 use crate::application::diagnostic_journal::DiagnosticJournal;
 use crate::application::diagnostic_state::DiagnosticState;
-use crate::application::nml::TransportStatus;
+use crate::application::nml::{PollCodes, TransportStatus};
 use crate::diagnostics::{
     self, ControllerFaultEvidenceSnapshot, DiagnosticReport, ExternalDiagnosticSnapshot,
     H100FaultEvidenceSnapshot, SerialBridgeFaultEvidenceSnapshot,
@@ -312,10 +313,11 @@ impl HalPublisher {
     pub(in crate::application) fn new(
         component: &str,
         diagnostic_journal_path: &Path,
+        codes: PollCodes,
     ) -> Result<Self, PublisherError> {
         let diagnostic_journal = DiagnosticJournal::create(diagnostic_journal_path)?;
         let (component_id, pins) = unsafe { create_hal(component)? };
-        Ok(Self {
+        let publisher = Self {
             component_id,
             pins,
             publications: AtomicU32::new(0),
@@ -323,7 +325,30 @@ impl HalPublisher {
             serial_bridge_fault_snapshot: SerialBridgeFaultSnapshot::default(),
             h100_diagnostic_snapshot: H100DiagnosticSnapshot::default(),
             diagnostic_journal,
-        })
+        };
+        publisher.publish_initial_transport(codes);
+        Ok(publisher)
+    }
+
+    fn publish_initial_transport(&self, codes: PollCodes) {
+        let pins = unsafe { &*self.pins };
+        unsafe {
+            ptr::write_volatile(pins.nml_error_code, codes.invalid_configuration);
+            ptr::write_volatile(pins.nml_error_known, true);
+            ptr::write_volatile(pins.nml_error_unknown, false);
+            for (entry, pointer) in NML_ERROR.codes.iter().zip(pins.nml_error_kind) {
+                ptr::write_volatile(
+                    pointer,
+                    entry.code == i64::from(codes.invalid_configuration),
+                );
+            }
+            ptr::write_volatile(pins.cms_status_code, codes.cms_status_not_set);
+            ptr::write_volatile(pins.cms_status_known, true);
+            ptr::write_volatile(pins.cms_status_unknown, false);
+            for (entry, pointer) in CMS_STATUS.codes.iter().zip(pins.cms_status_kind) {
+                ptr::write_volatile(pointer, entry.code == i64::from(codes.cms_status_not_set));
+            }
+        }
     }
 
     pub(in crate::application) fn increment_poll_errors(&self) {
@@ -504,7 +529,10 @@ impl Drop for HalPublisher {
     fn drop(&mut self) {
         if let Err(error) = hal::HalCall::Exit.classify(unsafe { hal::hal_exit(self.component_id) })
         {
-            eprintln!("dmc2-task-monitor: hal_exit failed: {error}");
+            eprintln!(
+                "dmc2-task-monitor: hal_exit failed: {}",
+                RecoveryDisplay(&error)
+            );
         }
     }
 }

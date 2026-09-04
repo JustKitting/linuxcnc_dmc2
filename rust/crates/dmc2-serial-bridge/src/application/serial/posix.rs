@@ -2,6 +2,8 @@ use std::ffi::{c_int, CStr};
 use std::fmt;
 use std::mem::MaybeUninit;
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
+
 use super::ffi;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -30,6 +32,15 @@ impl fmt::Display for Error {
                     "POSIX_RESULT_CONTRACT_VIOLATION (operation={operation}, raw={result}): the named POSIX operation returned a value outside its verified result contract; action: retain the operation and raw result, stop the bridge, and verify the running libc/kernel ABI"
                 )
             }
+        }
+    }
+}
+
+impl RecoveryClassified for Error {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::OperatingSystem { .. } => RecoveryClass::RestorePendant,
+            Self::Contract { .. } => RecoveryClass::RelaunchApplication,
         }
     }
 }

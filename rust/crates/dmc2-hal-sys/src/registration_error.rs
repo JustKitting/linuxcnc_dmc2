@@ -3,6 +3,7 @@
 use core::fmt;
 
 use crate::HalError;
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum HalNameKind {
@@ -109,5 +110,22 @@ impl<Context: fmt::Display> fmt::Display for HalRegistrationError<Context> {
             write!(formatter, "; hal_exit cleanup failed: {cleanup}")?;
         }
         Ok(())
+    }
+}
+
+impl<Context> RecoveryClassified for HalRegistrationFailure<Context> {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::NameTooLong { .. }
+            | Self::InvalidCString { .. }
+            | Self::Call { .. }
+            | Self::Allocation { .. } => RecoveryClass::RelaunchApplication,
+        }
+    }
+}
+
+impl<Context> RecoveryClassified for HalRegistrationError<Context> {
+    fn recovery_class(&self) -> RecoveryClass {
+        self.failure.recovery_class()
     }
 }

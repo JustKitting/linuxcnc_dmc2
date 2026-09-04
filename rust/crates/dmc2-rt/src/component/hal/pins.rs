@@ -119,7 +119,6 @@ hal::realtime_hal_pin_catalog! {
         heartbeat: bit out => "dmc2-pendant-control.heartbeat";
         position_known: bit out => "dmc2-pendant-control.position-known";
         position_unknown: bit out => "dmc2-pendant-control.position-unknown";
-        control_available: bit out => "dmc2-pendant-control.control-available";
         control_ready: bit out => "dmc2-pendant-control.control-ready";
         fault_reset_allowed: bit out => "dmc2-pendant-control.fault-reset-allowed";
         fault: bit out => "dmc2-pendant-control.fault";

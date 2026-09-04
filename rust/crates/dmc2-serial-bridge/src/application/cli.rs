@@ -2,6 +2,8 @@ use std::env;
 use std::ffi::OsString;
 use std::fmt;
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
+
 const DEFAULT_COMPONENT: &str = "dmc2-pendant";
 const DEFAULT_PORT: &str = "/dev/ttyUSB0";
 const DEFAULT_BAUD: u32 = 115_200;
@@ -44,6 +46,19 @@ impl fmt::Display for CliError {
             Self::UnsupportedBaud { .. } => {
                 formatter.write_str("this audited bridge accepts exactly 115200 baud")
             }
+        }
+    }
+}
+
+impl RecoveryClassified for CliError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::NonUtf8Argument { .. }
+            | Self::MissingValue { .. }
+            | Self::InvalidUnsigned { .. }
+            | Self::UnknownArgument { .. }
+            | Self::ZeroPacketTimeout
+            | Self::UnsupportedBaud { .. } => RecoveryClass::RelaunchApplication,
         }
     }
 }

@@ -11,7 +11,7 @@ use crate::application::nml::{PollCodes, TransportStatus};
 use super::native::ERROR_OBJECT_CAPACITY;
 use super::record::ErrorMessageRecord;
 
-pub(super) const JOURNAL_SCHEMA_VERSION: u32 = 2;
+pub(super) const JOURNAL_SCHEMA_VERSION: u32 = 3;
 const HEADER_MARKER: &str = "DMC2_ERROR_JOURNAL";
 const EVENT_MARKER: &str = "DMC2_ERROR_EVENT";
 const FNV64_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
@@ -194,6 +194,7 @@ fn encode_event(sequence: u64, transport: TransportStatus, record: &ErrorMessage
         record.class_name().to_owned(),
         record.severity.journal_name().to_owned(),
         u8::from(record.known()).to_string(),
+        record.recovery_class().wire_code().to_string(),
         record.object_size.to_string(),
         record.declared_size.to_string(),
         serial,
@@ -212,12 +213,12 @@ fn encode_event(sequence: u64, transport: TransportStatus, record: &ErrorMessage
 
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = Vec::with_capacity(bytes.len() * 2);
+    let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
-        output.push(HEX[usize::from(byte >> 4)]);
-        output.push(HEX[usize::from(byte & 0x0f)]);
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
-    String::from_utf8(output).expect("hex encoding is ASCII")
+    output
 }
 
 fn fnv64(bytes: &[u8]) -> u64 {

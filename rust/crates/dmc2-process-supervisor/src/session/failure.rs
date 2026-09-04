@@ -1,8 +1,10 @@
 use std::ffi::OsString;
 use std::fmt;
 use std::io;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::SystemTimeError;
+
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 use crate::catalog::{Ownership, ProcessRole};
 use crate::cli::CliError;
@@ -27,6 +29,84 @@ impl StartupStage {
             Self::VerifySubreaper => "verify Linux child-subreaper ownership",
             Self::PrepareOutputCapture => "prepare LinuxCNC output capture",
             Self::Spawn => "start LinuxCNC",
+        }
+    }
+}
+
+#[derive(Debug, Clone, Copy)]
+pub(super) enum SessionObservationKind {
+    ChildScan,
+    Wait4,
+}
+
+impl SessionObservationKind {
+    pub(super) const fn name(self) -> &'static str {
+        match self {
+            Self::ChildScan => "session-child-scan",
+            Self::Wait4 => "session-wait4",
+        }
+    }
+}
+
+#[derive(Debug)]
+pub(super) enum SessionObservationError<'a> {
+    OutputCaptureStart {
+        linuxcnc_pid: u32,
+        source: &'a io::Error,
+    },
+    OutputCaptureFinish {
+        source: &'a io::Error,
+    },
+    Source {
+        kind: SessionObservationKind,
+        source: &'a io::Error,
+    },
+    LinuxCncExited {
+        exit_code: Option<i32>,
+        signal: Option<i32>,
+        report_path: &'a Path,
+    },
+}
+
+impl fmt::Display for SessionObservationError<'_> {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::OutputCaptureStart {
+                linuxcnc_pid,
+                source,
+            } => write!(
+                formatter,
+                "LINUXCNC_OUTPUT_CAPTURE_START_FAILED: LinuxCNC PID {linuxcnc_pid} output capture could not start: {source}; action: retain the session, use the visible machine controls, and relaunch from Applications after the session to restore capture"
+            ),
+            Self::OutputCaptureFinish { source } => write!(
+                formatter,
+                "LINUXCNC_OUTPUT_CAPTURE_FINISH_FAILED: LinuxCNC output/report capture failed at session exit: {source}; action: correct log/report storage and relaunch from Applications"
+            ),
+            Self::Source { kind, source } => write!(
+                formatter,
+                "SESSION_OBSERVATION_FAILED: {} failed: {source}; action: retain session ownership and wait for the next healthy observation",
+                kind.name(),
+            ),
+            Self::LinuxCncExited {
+                exit_code,
+                signal,
+                report_path,
+            } => write!(
+                formatter,
+                "LINUXCNC_SESSION_EXITED_NONZERO: LinuxCNC exited unsuccessfully with exit-code={exit_code:?} signal={signal:?}; full report: {}; action: inspect the report, correct the named cause, and relaunch from Applications",
+                report_path.display(),
+            ),
+        }
+    }
+}
+
+impl RecoveryClassified for SessionObservationError<'_> {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Source { .. } => RecoveryClass::RecheckSource,
+            Self::OutputCaptureStart { .. }
+            | Self::OutputCaptureFinish { .. }
+            | Self::LinuxCncExited { .. } => RecoveryClass::RelaunchApplication,
         }
     }
 }
@@ -110,6 +190,21 @@ impl std::error::Error for SessionError {
             }
             Self::JournalAfterSpawn { first, .. } => Some(first),
             Self::UnsupportedOwnership { .. } | Self::LinuxCncStatusMissing { .. } => None,
+        }
+    }
+}
+
+impl RecoveryClassified for SessionError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Cli(error) => error.recovery_class(),
+            Self::Journal(error) => error.recovery_class(),
+            Self::UnsupportedOwnership { .. }
+            | Self::Clock(_)
+            | Self::Startup { .. }
+            | Self::LinuxCncStatusMissing { .. }
+            | Self::OutputCaptureAfterSpawn { .. } => RecoveryClass::RelaunchApplication,
+            Self::JournalAfterSpawn { first, .. } => first.recovery_class(),
         }
     }
 }

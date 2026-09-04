@@ -1,6 +1,7 @@
 use std::ffi::CString;
 use std::fmt;
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 use dmc2_linuxcnc_interface::{CodeDomain, CMS_STATUS, NML_ERROR};
 
 use crate::application::nml::{PollCodes, TransportStatus};
@@ -46,6 +47,19 @@ impl NativeResult {
     }
 }
 
+impl RecoveryClassified for NativeResult {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::TransportError => RecoveryClass::RecheckSource,
+            Self::InvalidArgument
+            | Self::InvalidMessage
+            | Self::Empty
+            | Self::Message
+            | Self::Unknown(_) => RecoveryClass::RelaunchApplication,
+        }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(in crate::application) struct ErrorChannelFault {
     pub(in crate::application) transport: TransportStatus,
@@ -75,6 +89,12 @@ impl fmt::Display for ErrorChannelFault {
     }
 }
 
+impl RecoveryClassified for ErrorChannelFault {
+    fn recovery_class(&self) -> RecoveryClass {
+        self.reason.recovery_class()
+    }
+}
+
 struct SourceCodeDisplay {
     domain: CodeDomain,
     raw: i32,
@@ -95,6 +115,16 @@ enum FaultReason {
     Native(NativeResult),
     InconsistentState,
     Decode(DecodeError),
+}
+
+impl RecoveryClassified for FaultReason {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Native(result) => result.recovery_class(),
+            Self::InconsistentState => RecoveryClass::RelaunchApplication,
+            Self::Decode(error) => error.recovery_class(),
+        }
+    }
 }
 
 impl FaultReason {

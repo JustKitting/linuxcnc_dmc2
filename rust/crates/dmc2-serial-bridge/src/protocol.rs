@@ -1,6 +1,6 @@
 //! Parser and wire-level types for the Nano P3 protocol.
 
-use dmc2_diagnostics::diagnostic_catalog;
+use dmc2_diagnostics::{diagnostic_catalog, RecoveryClass, RecoveryClassified};
 
 pub const BOOT_MARKER: &str = "BOOT,P3,MYST1474-001,MONITOR_ONLY";
 pub const MAX_SERIAL_LINE_BYTES: usize = 128;
@@ -99,6 +99,24 @@ diagnostic_catalog! {
     "overlong-line",
     "the serial frame exceeded the bounded 128-byte P3 line length",
     "inspect firmware framing and serial corruption before reconnecting";
+    }
+}
+
+impl RecoveryClassified for ProtocolError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::WrongFieldCount
+            | Self::WrongMarker
+            | Self::InvalidInteger
+            | Self::InvalidDetent
+            | Self::InvalidAxis
+            | Self::InvalidMultiplier
+            | Self::InvalidBoolean
+            | Self::RepeatedOrReversedSequence
+            | Self::UnexpectedBootMarker
+            | Self::NonAscii
+            | Self::OverlongLine => RecoveryClass::RestorePendant,
+        }
     }
 }
 

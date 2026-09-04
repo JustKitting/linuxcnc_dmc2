@@ -4,24 +4,97 @@ from __future__ import annotations
 
 from collections.abc import Mapping
 
+from .recovery_ui import RecoveryUiNotice
+from .ui_fault import AxisUiFault, AxisUiFaultKind
+
 
 class AxisRunGuard:
     """Prevent AXIS from submitting AUTO_RUN while any joint is unhomed."""
 
-    def __init__(self, *, status, stock_task_run) -> None:
+    RECOVERABLE_FAULTS = (
+        AxisUiFaultKind.PROGRAM_RUN_STATUS_UNAVAILABLE,
+        AxisUiFaultKind.PROGRAM_RUN_REQUIRES_HOMED_POSITION,
+        AxisUiFaultKind.PROGRAM_RUN_SUBMISSION_FAILED,
+    )
+
+    def __init__(self, *, namespace, status, linuxcnc_module, stock_task_run) -> None:
+        self.namespace = namespace
         self.status = status
+        self.linuxcnc_module = linuxcnc_module
         self.stock_task_run = stock_task_run
+        self.error_notices = {
+            kind: RecoveryUiNotice(namespace) for kind in self.RECOVERABLE_FAULTS
+        }
+        self.active_faults: set[AxisUiFaultKind] = set()
+
+    def _present(
+        self,
+        *,
+        kind: AxisUiFaultKind,
+        cause: object,
+    ) -> None:
+        route = None
+        presentation_cause = cause
+        try:
+            reader = self.namespace["live_plotter"]._dmc2_diagnostic_reader
+            route = reader.recovery_route(kind.contract.recovery_code)
+        except Exception as presentation_error:
+            presentation_cause = (
+                f"{cause}; dynamic recovery catalog unavailable: {presentation_error}"
+            )
+        self.error_notices[kind].present(
+            fault=AxisUiFault(
+                kind,
+                presentation_cause,
+            ),
+            route=route,
+        )
+        self.active_faults.add(kind)
+
+    def _clear(self, kind: AxisUiFaultKind) -> None:
+        if kind not in self.active_faults:
+            return
+        if self.error_notices[kind].clear():
+            self.active_faults.remove(kind)
+
+    def _status_snapshot(self) -> tuple[int, tuple[bool, ...], int]:
+        self.status.poll()
+        joint_count = int(self.status.joints)
+        homed = tuple(bool(value) for value in self.status.homed[:joint_count])
+        return joint_count, homed, int(self.status.interp_state)
+
+    def reconcile(self) -> None:
+        """Clear each retained run fault only after its typed transition occurs."""
+        if not self.active_faults:
+            return
+        try:
+            joint_count, homed, interp_state = self._status_snapshot()
+        except Exception as error:
+            if AxisUiFaultKind.PROGRAM_RUN_STATUS_UNAVAILABLE not in self.active_faults:
+                self._present(
+                    kind=AxisUiFaultKind.PROGRAM_RUN_STATUS_UNAVAILABLE,
+                    cause=error,
+                )
+            return
+
+        self._clear(AxisUiFaultKind.PROGRAM_RUN_STATUS_UNAVAILABLE)
+        if joint_count > 0 and len(homed) == joint_count and all(homed):
+            self._clear(AxisUiFaultKind.PROGRAM_RUN_REQUIRES_HOMED_POSITION)
+        if interp_state == int(self.linuxcnc_module.INTERP_IDLE):
+            self._clear(AxisUiFaultKind.PROGRAM_RUN_SUBMISSION_FAILED)
 
     def __call__(self, *args):
         try:
-            self.status.poll()
-            joint_count = int(self.status.joints)
-            homed = tuple(bool(value) for value in self.status.homed[:joint_count])
+            joint_count, homed, _interp_state = self._status_snapshot()
         except Exception as error:
             print(
                 "DMC2_AXIS_RUN_REQUEST result=blocked "
                 f"reason=status-unavailable error={error!r}",
                 flush=True,
+            )
+            self._present(
+                kind=AxisUiFaultKind.PROGRAM_RUN_STATUS_UNAVAILABLE,
+                cause=error,
             )
             return "break"
 
@@ -32,6 +105,12 @@ class AxisRunGuard:
                 f"joint_count={joint_count} homed_mask=0x{homed_mask:08x}",
                 flush=True,
             )
+            self._present(
+                kind=AxisUiFaultKind.PROGRAM_RUN_REQUIRES_HOMED_POSITION,
+                cause=(
+                    f"joint_count={joint_count} homed_mask=0x{homed_mask:08x}"
+                ),
+            )
             return "break"
 
         print(
@@ -39,7 +118,18 @@ class AxisRunGuard:
             f"joint_count={joint_count}",
             flush=True,
         )
-        return self.stock_task_run(*args)
+        self._clear(AxisUiFaultKind.PROGRAM_RUN_STATUS_UNAVAILABLE)
+        self._clear(AxisUiFaultKind.PROGRAM_RUN_REQUIRES_HOMED_POSITION)
+        try:
+            result = self.stock_task_run(*args)
+        except Exception as error:
+            self._present(
+                kind=AxisUiFaultKind.PROGRAM_RUN_SUBMISSION_FAILED,
+                cause=error,
+            )
+            return "break"
+        self._clear(AxisUiFaultKind.PROGRAM_RUN_SUBMISSION_FAILED)
+        return result
 
 
 def install_axis_run_guard(namespace: Mapping[str, object]) -> AxisRunGuard:
@@ -53,7 +143,9 @@ def install_axis_run_guard(namespace: Mapping[str, object]) -> AxisRunGuard:
     commands = namespace["commands"]
     stock_task_run = commands.task_run
     guard = AxisRunGuard(
+        namespace=namespace,
         status=namespace["s"],
+        linuxcnc_module=namespace["linuxcnc"],
         stock_task_run=stock_task_run,
     )
 

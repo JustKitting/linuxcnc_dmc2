@@ -9,34 +9,52 @@ from .constants import (
     SPINDLE_ACTUAL_RPM_PIN,
     SPINDLE_FEEDBACK_POLL_MILLISECONDS,
 )
+from .recovery_ui import RecoveryUiNotice
+from .ui_fault import AxisUiFault, AxisUiFaultKind
 
 
 class SpindleFeedbackBinding:
     """Render the AXIS-owned HAL feedback pin in the manual spindle row."""
 
-    def __init__(self, *, component, root_window, text_variable) -> None:
+    def __init__(self, *, component, namespace, root_window, text_variable) -> None:
         self.component = component
+        self.namespace = namespace
         self.root_window = root_window
         self.text_variable = text_variable
         self.poll_after_id = None
+        self.refresh_error_notice = RecoveryUiNotice(namespace)
 
-    def _rpm(self) -> float | None:
-        try:
-            rpm = float(self.component[SPINDLE_ACTUAL_RPM_PIN])
-        except (KeyError, RuntimeError, TypeError, ValueError):
-            return None
-        return rpm if math.isfinite(rpm) else None
+    def _rpm(self) -> float:
+        rpm = float(self.component[SPINDLE_ACTUAL_RPM_PIN])
+        if not math.isfinite(rpm):
+            raise ValueError(f"non-finite spindle feedback: {rpm!r}")
+        return rpm
 
     def poll(self) -> None:
-        rpm = self._rpm()
-        if rpm is None:
-            self.text_variable.set("Actual: INVALID RPM")
-        else:
+        try:
+            rpm = self._rpm()
             self.text_variable.set(f"Actual: {abs(rpm):,.0f} RPM")
-        self.poll_after_id = self.root_window.after(
-            SPINDLE_FEEDBACK_POLL_MILLISECONDS,
-            self.poll,
-        )
+        except Exception as error:
+            self.refresh_error_notice.present(
+                fault=AxisUiFault(
+                    AxisUiFaultKind.SPINDLE_FEEDBACK_REFRESH_FAILED,
+                    error,
+                )
+            )
+        else:
+            self.refresh_error_notice.clear()
+        try:
+            self.poll_after_id = self.root_window.after(
+                SPINDLE_FEEDBACK_POLL_MILLISECONDS,
+                self.poll,
+            )
+        except Exception as error:
+            self.refresh_error_notice.present(
+                fault=AxisUiFault(
+                    AxisUiFaultKind.SPINDLE_FEEDBACK_RESCHEDULE_FAILED,
+                    error,
+                )
+            )
 
 
 def install_axis_spindle_feedback(
@@ -91,9 +109,10 @@ def install_axis_spindle_feedback(
 
     binding = SpindleFeedbackBinding(
         component=component,
+        namespace=namespace,
         root_window=root_window,
         text_variable=text_variable,
     )
-    binding.poll()
     live_plotter._dmc2_spindle_feedback_binding = binding
+    binding.poll()
     return binding

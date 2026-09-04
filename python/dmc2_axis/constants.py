@@ -15,8 +15,7 @@ AGGREGATED_ERROR_PREFIXES = (
     "hm2_modbus.0: error:",
 )
 PENDANT_MODE_PIN = "pendant-mode-enabled"
-CONTROLLER_AVAILABLE_PIN = "controller-available"
-CONTROLLER_READY_PIN = "controller-ready"
+PENDANT_MODE_OPERATION_ID = "controller.pendant-mode"
 CONTROLLER_FAULT_PIN = "controller-fault"
 CLEAR_FAULT_OPERATION_ID = "controller.clear-fault"
 CLEAR_FAULT_WIDGET_PATH = ".toolbar.dmc2_clear_fault"
@@ -27,7 +26,6 @@ POSITION_KNOWN_PIN = "position-known"
 POSITION_UNKNOWN_PIN = "position-unknown"
 PENDANT_WIDGET_PATH = ".toolbar.dmc2_pendant_mode"
 PENDANT_ICON_FILE = "pendant_icon.xbm"
-READINESS_POLL_MILLISECONDS = 20
 SPINDLE_ACTUAL_RPM_PIN = "spindle-actual-rpm"
 SPINDLE_FEEDBACK_POLL_MILLISECONDS = 100
 REQUIRED_LINUXCNC_VERSION = "2.9.10"

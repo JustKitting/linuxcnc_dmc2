@@ -1,4 +1,4 @@
-use super::super::feedback::{stepgen_position_pulses, StepgenFeedbackError};
+use super::super::feedback::{stepgen_position_pulses, StepgenFeedbackContext};
 use super::super::SupervisorInputs;
 use super::*;
 use crate::BOUNCE_PULSES;
@@ -39,24 +39,17 @@ impl LinuxCncPendantSupervisor {
         if any(inputs.raw_limits) || any(inputs.safety_limits) {
             return;
         }
-        let Some(path) = inputs.machine.ready_jog_path() else {
+        let Some(path) = inputs.ready_jog_path() else {
             return;
         };
-        if !inputs.motion.ready_for_path(path) {
-            self.fail(FaultCode::MotionPathUnavailable);
-            return;
-        }
         let start_position_pulses = match stepgen_position_pulses(
             inputs.counts_by_motor[intent.motor],
             inputs.position_feedback_by_motor[intent.motor],
+            StepgenFeedbackContext::Jog,
         ) {
             Ok(value) => value,
-            Err(StepgenFeedbackError::Unavailable) => {
-                self.fail(FaultCode::JogFeedbackUnavailable);
-                return;
-            }
-            Err(StepgenFeedbackError::Incoherent) => {
-                self.fail(FaultCode::JogFeedbackIncoherent);
+            Err(error) => {
+                self.fail(error.fault_code());
                 return;
             }
         };
@@ -170,14 +163,11 @@ impl LinuxCncPendantSupervisor {
         let position_pulses = match stepgen_position_pulses(
             inputs.counts_by_motor[motor],
             inputs.position_feedback_by_motor[motor],
+            StepgenFeedbackContext::LimitRecovery,
         ) {
             Ok(value) => value,
-            Err(StepgenFeedbackError::Unavailable) => {
-                self.fail(FaultCode::BounceFeedbackUnavailable);
-                return;
-            }
-            Err(StepgenFeedbackError::Incoherent) => {
-                self.fail(FaultCode::BounceFeedbackIncoherent);
+            Err(error) => {
+                self.fail(error.fault_code());
                 return;
             }
         };
@@ -251,24 +241,17 @@ impl LinuxCncPendantSupervisor {
             self.fail(FaultCode::BounceLostLimitAttribution);
             return;
         }
-        let Some(path) = inputs.machine.ready_jog_path() else {
+        let Some(path) = inputs.ready_jog_path() else {
             return;
         };
-        if !inputs.motion.ready_for_path(path) {
-            self.fail(FaultCode::MotionPathUnavailable);
-            return;
-        }
         let start_position_pulses = match stepgen_position_pulses(
             inputs.counts_by_motor[motor],
             inputs.position_feedback_by_motor[motor],
+            StepgenFeedbackContext::LimitRecovery,
         ) {
             Ok(value) => value,
-            Err(StepgenFeedbackError::Unavailable) => {
-                self.fail(FaultCode::BounceFeedbackUnavailable);
-                return;
-            }
-            Err(StepgenFeedbackError::Incoherent) => {
-                self.fail(FaultCode::BounceFeedbackIncoherent);
+            Err(error) => {
+                self.fail(error.fault_code());
                 return;
             }
         };
@@ -326,14 +309,11 @@ impl LinuxCncPendantSupervisor {
         let actual_position_pulses = match stepgen_position_pulses(
             inputs.counts_by_motor[motor],
             inputs.position_feedback_by_motor[motor],
+            StepgenFeedbackContext::LimitRecovery,
         ) {
             Ok(value) => value,
-            Err(StepgenFeedbackError::Unavailable) => {
-                self.fail(FaultCode::BounceFeedbackUnavailable);
-                return;
-            }
-            Err(StepgenFeedbackError::Incoherent) => {
-                self.fail(FaultCode::BounceFeedbackIncoherent);
+            Err(error) => {
+                self.fail(error.fault_code());
                 return;
             }
         };
@@ -472,20 +452,22 @@ impl LinuxCncPendantSupervisor {
             }
             Phase::Idle => {
                 if !inputs.path_ready(active.path) {
-                    self.fail(FaultCode::MotionPathUnavailable);
+                    // Task and realtime motion state can cross between free and
+                    // teleop modes on different observations.  A pendant
+                    // increment at that boundary is discarded through the
+                    // existing controlled-stop path; it is not a machine
+                    // fault and never latches recovery.
+                    self.cancel_pendant_motion();
                     return;
                 }
                 let actual_position_pulses = match stepgen_position_pulses(
                     inputs.counts_by_motor[active.intent.motor],
                     inputs.position_feedback_by_motor[active.intent.motor],
+                    StepgenFeedbackContext::Jog,
                 ) {
                     Ok(value) => value,
-                    Err(StepgenFeedbackError::Unavailable) => {
-                        self.fail(FaultCode::JogFeedbackUnavailable);
-                        return;
-                    }
-                    Err(StepgenFeedbackError::Incoherent) => {
-                        self.fail(FaultCode::JogFeedbackIncoherent);
+                    Err(error) => {
+                        self.fail(error.fault_code());
                         return;
                     }
                 };

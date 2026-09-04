@@ -6,13 +6,20 @@ from collections.abc import Mapping
 from pathlib import Path
 
 from .constants import (
-    CONTROLLER_AVAILABLE_PIN,
-    CONTROLLER_READY_PIN,
     PENDANT_ICON_FILE,
     PENDANT_MODE_PIN,
+    PENDANT_MODE_OPERATION_ID,
     PENDANT_WIDGET_PATH,
-    READINESS_POLL_MILLISECONDS,
 )
+from .operation_catalog import project_catalog_path, read_operations
+from .recovery_contract import RecoveryOperationCode
+from .recovery_ui import (
+    RECOVERY_OPERATION_CONTRACTS,
+    RecoveryUiNotice,
+    present_recovery_ui_error,
+    register_recovery_widget_command,
+)
+from .ui_fault import AxisUiFault, AxisUiFaultKind
 
 
 class PendantModeBinding:
@@ -24,43 +31,39 @@ class PendantModeBinding:
         component,
         show_panel_variable,
         toggle_panel,
-        root_window,
         tk,
         widget_path: str,
         inactive_image,
         active_image,
+        namespace,
     ) -> None:
         self.component = component
         self.show_panel_variable = show_panel_variable
         self.toggle_panel = toggle_panel
-        self.root_window = root_window
         self.tk = tk
         self.widget_path = widget_path
         self.inactive_image = inactive_image
         self.active_image = active_image
+        self.namespace = namespace
         self.menu_index: int | None = None
         self.requested = False
-        self.enabled = False
-        self.poll_after_id = None
+        self.transition_error_notice = RecoveryUiNotice(namespace)
 
-    def _pin(self, name: str) -> bool:
-        try:
-            return bool(self.component[name])
-        except (KeyError, RuntimeError):
-            return False
-
-    def _configure_controls(self, *, active: bool, available: bool) -> None:
-        del available
-        self.tk.call(
+    def _configure_controls(self, *, active: bool) -> None:
+        options = [
             self.widget_path,
             "configure",
-            "-image",
-            str(self.active_image if active else self.inactive_image),
             "-relief",
             "sunken" if active else "link",
             "-state",
             "normal",
-        )
+        ]
+        image = self.active_image if active else self.inactive_image
+        if image is None:
+            options.extend(("-text", "Pendant"))
+        else:
+            options.extend(("-image", str(image)))
+        self.tk.call(*options)
         if self.menu_index is not None:
             self.tk.call(
                 ".menu.view",
@@ -80,57 +83,43 @@ class PendantModeBinding:
     def _disarm_and_hide(self) -> None:
         self.component[PENDANT_MODE_PIN] = False
         self.requested = False
-        self.enabled = False
         self._set_panel_visible(False)
 
-    def synchronize_readiness(self) -> None:
-        """Make UI visibility follow the controller's acknowledged state."""
-        available = self._pin(CONTROLLER_AVAILABLE_PIN)
-        ready = self._pin(CONTROLLER_READY_PIN)
-
+    def synchronize_visibility(self) -> None:
+        """Keep the requested mode and panel visible without a readiness gate."""
         if self.requested:
-            try:
-                self._set_panel_visible(True)
-            except Exception:
-                self._disarm_and_hide()
-                raise
-            self.enabled = available and ready
-        elif self.enabled or bool(self.show_panel_variable.get()):
+            # Panel rendering is presentation only. It must never revoke the
+            # already requested HAL control mode if Tk raises an exception.
+            self._set_panel_visible(True)
+        elif bool(self.show_panel_variable.get()):
             self._disarm_and_hide()
 
-        self._configure_controls(active=self.requested, available=available)
-
-    def poll_readiness(self) -> None:
-        self.synchronize_readiness()
-        self.poll_after_id = self.root_window.after(
-            READINESS_POLL_MILLISECONDS,
-            self.poll_readiness,
-        )
-
-    def start_readiness_poll(self) -> None:
-        self.synchronize_readiness()
-        self.poll_after_id = self.root_window.after(
-            READINESS_POLL_MILLISECONDS,
-            self.poll_readiness,
-        )
+        self._configure_controls(active=self.requested)
 
     def set_enabled(self, enabled: bool) -> bool:
         enabled = bool(enabled)
         if enabled:
             self.component[PENDANT_MODE_PIN] = True
             self.requested = True
-            self.synchronize_readiness()
-            return self.enabled
+            self.synchronize_visibility()
+            return True
 
         self._disarm_and_hide()
-        self._configure_controls(
-            active=False,
-            available=self._pin(CONTROLLER_AVAILABLE_PIN),
-        )
+        self._configure_controls(active=False)
         return False
 
     def toggle(self, *event):
-        self.set_enabled(not (self.requested or self.enabled))
+        try:
+            self.set_enabled(not self.requested)
+        except Exception as error:
+            self.transition_error_notice.present(
+                fault=AxisUiFault(
+                    AxisUiFaultKind.PENDANT_MODE_UI_TRANSITION_FAILED,
+                    error,
+                )
+            )
+        else:
+            self.transition_error_notice.clear()
         if event:
             return "break"
         return None
@@ -173,61 +162,40 @@ def install_axis_pendant_mode(namespace: Mapping[str, object]) -> PendantModeBin
     component = namespace["comp"]
     hal_module = namespace["hal"]
     component.newpin(PENDANT_MODE_PIN, hal_module.HAL_BIT, hal_module.HAL_OUT)
-    component.newpin(
-        CONTROLLER_AVAILABLE_PIN,
-        hal_module.HAL_BIT,
-        hal_module.HAL_IN,
-    )
-    component.newpin(
-        CONTROLLER_READY_PIN,
-        hal_module.HAL_BIT,
-        hal_module.HAL_IN,
-    )
     component[PENDANT_MODE_PIN] = False
 
     root_window = namespace["root_window"]
     tkinter_module = namespace["Tkinter"]
-    icon_path = Path(str(namespace["rcfile"])).resolve().with_name(PENDANT_ICON_FILE)
-    if not icon_path.is_file():
-        raise RuntimeError(f"Pendant toolbar icon is missing: {icon_path}")
-
-    inactive_image = tkinter_module.BitmapImage(
-        master=root_window,
-        file=str(icon_path),
-        foreground="#202020",
-    )
-    active_image = tkinter_module.BitmapImage(
-        master=root_window,
-        file=str(icon_path),
-        foreground="#08752d",
-    )
+    pendant_contract = RECOVERY_OPERATION_CONTRACTS[
+        RecoveryOperationCode.PENDANT_MODE
+    ]
     binding = PendantModeBinding(
         component=component,
         show_panel_variable=namespace["vars"].show_pyvcppanel,
         toggle_panel=namespace["commands"].toggle_show_pyvcppanel,
-        root_window=root_window,
         tk=root_window.tk,
         widget_path=PENDANT_WIDGET_PATH,
-        inactive_image=inactive_image,
-        active_image=active_image,
+        inactive_image=None,
+        active_image=None,
+        namespace=namespace,
     )
     command_name = root_window.register(binding.toggle)
-    root_window.tk.call(
+    button_options = [
         "Button",
         PENDANT_WIDGET_PATH,
         "-command",
         command_name,
         "-helptext",
-        "Toggle Pendant Mode: arm/show or disarm/hide",
-        "-image",
-        str(inactive_image),
+        f"Toggle {pendant_contract.label}: arm/show or disarm/hide",
         "-relief",
         "link",
         "-state",
-        "disabled",
+        "normal",
         "-takefocus",
         0,
-    )
+    ]
+    button_options.extend(("-text", pendant_contract.label))
+    root_window.tk.call(*button_options)
     root_window.tk.call(
         "pack",
         PENDANT_WIDGET_PATH,
@@ -236,8 +204,76 @@ def install_axis_pendant_mode(namespace: Mapping[str, object]) -> PendantModeBin
         "-after",
         ".toolbar.clear_plot",
     )
-    root_window.bind("<Control-e>", binding.toggle)
-    binding.menu_index = _replace_pyvcppanel_menu_command(namespace, command_name)
-    binding.start_readiness_poll()
+    register_recovery_widget_command(
+        namespace,
+        RecoveryOperationCode.PENDANT_MODE,
+        command_name,
+    )
     live_plotter._dmc2_pendant_mode_binding = binding
+
+    # The essential text control now exists before any auxiliary catalog,
+    # icon, key-binding, or menu integration can fail.
+    operations = read_operations(project_catalog_path(str(namespace["rcfile"])))
+    operation = operations.get(PENDANT_MODE_OPERATION_ID)
+    if operation is None:
+        raise RuntimeError(f"Operation is missing: {PENDANT_MODE_OPERATION_ID}")
+    if not pendant_contract.matches(operation):
+        raise RuntimeError(
+            f"Operation has invalid Pendant Mode contract: {operation!r}"
+        )
+
+    icon_path = Path(str(namespace["rcfile"])).resolve().with_name(PENDANT_ICON_FILE)
+    icon_error = None
+    try:
+        if not icon_path.is_file():
+            raise RuntimeError(f"Pendant toolbar icon is missing: {icon_path}")
+        binding.inactive_image = tkinter_module.BitmapImage(
+            master=root_window,
+            file=str(icon_path),
+            foreground="#202020",
+        )
+        binding.active_image = tkinter_module.BitmapImage(
+            master=root_window,
+            file=str(icon_path),
+            foreground="#08752d",
+        )
+    except Exception as error:
+        icon_error = error
+    if icon_error is not None:
+        present_recovery_ui_error(
+            namespace,
+            fault=AxisUiFault(
+                AxisUiFaultKind.PENDANT_MODE_ICON_LOAD_FAILED,
+                icon_error,
+            )
+        )
+    try:
+        root_window.bind("<Control-e>", binding.toggle)
+    except Exception as error:
+        present_recovery_ui_error(
+            namespace,
+            fault=AxisUiFault(
+                AxisUiFaultKind.PENDANT_MODE_KEY_BINDING_FAILED,
+                error,
+            )
+        )
+    try:
+        binding.menu_index = _replace_pyvcppanel_menu_command(namespace, command_name)
+    except Exception as error:
+        present_recovery_ui_error(
+            namespace,
+            fault=AxisUiFault(
+                AxisUiFaultKind.PENDANT_MODE_MENU_BINDING_FAILED,
+                error,
+            )
+        )
+    try:
+        binding.synchronize_visibility()
+    except Exception as error:
+        binding.transition_error_notice.present(
+            fault=AxisUiFault(
+                AxisUiFaultKind.PENDANT_MODE_INITIAL_PRESENTATION_FAILED,
+                error,
+            )
+        )
     return binding

@@ -6,7 +6,9 @@ mod native;
 
 use std::fmt;
 
-use catalog::{Catalog, CatalogError, Operation, OperationKind};
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified, RecoveryDisplay};
+
+use catalog::{Catalog, CatalogError, Operation, OperationKind, Prerequisite};
 use cli::{Action, CliError};
 use dispatch::DispatchError;
 use hal::HalError;
@@ -16,7 +18,7 @@ fn main() {
     match run() {
         Ok(()) => {}
         Err(error) => {
-            eprintln!("dmc2ctl: {error}");
+            eprintln!("dmc2ctl: {}", RecoveryDisplay(&error));
             eprintln!("{}", cli::USAGE);
             std::process::exit(1);
         }
@@ -41,7 +43,7 @@ fn run() -> Result<(), ApplicationError> {
             let physical_estop_pressed = if operation
                 .prerequisites
                 .iter()
-                .any(|value| value == "physical-estop-released")
+                .any(|value| *value == Prerequisite::PhysicalEstopReleased)
             {
                 Some(hal::read_bit(hal::PHYSICAL_PENDANT_ESTOP_PIN)?)
             } else {
@@ -83,19 +85,25 @@ fn run() -> Result<(), ApplicationError> {
 
 fn print_operations(catalog: &Catalog) {
     println!("catalog={}", catalog.path().display());
-    println!("id\tkind\tlabel\tdriver\teffects\tprerequisites");
+    println!("id\tkind\tlabel\tdriver\teffects\tprerequisites\tui_target");
     for operation in catalog
         .operations()
         .filter(|operation| operation.kind != OperationKind::Internal)
     {
         println!(
-            "{}\t{}\t{}\t{}\t{}\t{}",
+            "{}\t{}\t{}\t{}\t{}\t{}\t{}",
             operation.id,
             operation.kind.name(),
             operation.label,
             operation.driver,
             operation.effects.join(";"),
-            operation.prerequisites.join(";")
+            operation
+                .prerequisites
+                .iter()
+                .map(|value| value.name())
+                .collect::<Vec<_>>()
+                .join(";"),
+            operation.ui_target,
         );
     }
 }
@@ -107,8 +115,17 @@ fn print_operation(operation: &Operation) {
     println!("driver={}", operation.driver);
     println!("target={}", operation.target);
     println!("ui_scope={}", operation.ui_scope);
+    println!("ui_target={}", operation.ui_target);
     println!("effects={}", operation.effects.join(";"));
-    println!("prerequisites={}", operation.prerequisites.join(";"));
+    println!(
+        "prerequisites={}",
+        operation
+            .prerequisites
+            .iter()
+            .map(|value| value.name())
+            .collect::<Vec<_>>()
+            .join(";")
+    );
 }
 
 fn print_status(status: &Status) {
@@ -184,6 +201,18 @@ impl fmt::Display for ApplicationError {
             Self::Native(error) => error.fmt(formatter),
             Self::Dispatch(error) => error.fmt(formatter),
             Self::Hal(error) => error.fmt(formatter),
+        }
+    }
+}
+
+impl RecoveryClassified for ApplicationError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Cli(error) => error.recovery_class(),
+            Self::Catalog(error) => error.recovery_class(),
+            Self::Native(error) => error.recovery_class(),
+            Self::Dispatch(error) => error.recovery_class(),
+            Self::Hal(error) => error.recovery_class(),
         }
     }
 }

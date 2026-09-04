@@ -2,10 +2,9 @@
 
 # LinuxCNC-owned pendant motion supervisor.
 net dmc2-pendant-mode-enabled axisui.pendant-mode-enabled => dmc2-pendant-control.pendant-mode-enabled
-net dmc2-controller-available     => axisui.controller-available
 net dmc2-position-known           dmc2-pendant-control.position-known   => axisui.position-known
 net dmc2-position-unknown         dmc2-pendant-control.position-unknown => axisui.position-unknown
-net dmc2-controller-ready         => axisui.controller-ready pyvcp.controller-ready
+net dmc2-controller-ready         => pyvcp.controller-ready
 net dmc2-controller-fault         => axisui.controller-fault pyvcp.controller-fault
 net dmc2-controller-recovery      => pyvcp.controller-recovery
 net dmc2-controller-jog-active    => pyvcp.controller-jog-active

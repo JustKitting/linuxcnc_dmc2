@@ -3,6 +3,13 @@
 use core::fmt;
 use core::fmt::Write;
 
+mod recovery;
+
+pub use recovery::{
+    RecoverableDiagnostic, RecoveryClass, RecoveryClassified, RecoveryContract, RecoveryDisplay,
+    RecoveryOperation, RecoveryTransition, RECOVERY_CONTRACTS,
+};
+
 /// Complete operator-facing meaning of one stable numeric diagnostic code.
 ///
 /// A raw value is transport compatibility only. Every owning subsystem must
@@ -18,8 +25,10 @@ pub struct DiagnosticMetadata {
 }
 
 impl DiagnosticMetadata {
-    /// Construct one catalog entry while enforcing the global diagnostic
-    /// grammar at the only public construction boundary.
+    /// Construct one catalog entry. Literal catalogs are validated at compile
+    /// time by `diagnostic_catalog!`; generic consumers must call `complete`
+    /// and surface an invalid external implementation as a typed interface
+    /// diagnostic rather than panicking.
     pub const fn new(
         wire_code: i64,
         name: &'static str,
@@ -27,10 +36,6 @@ impl DiagnosticMetadata {
         summary: &'static str,
         action: &'static str,
     ) -> Self {
-        assert!(valid_symbolic_identity(name));
-        assert!(valid_hal_slug(hal_slug));
-        assert!(!summary.is_empty());
-        assert!(!action.is_empty());
         Self {
             wire_code,
             name,
@@ -170,6 +175,15 @@ macro_rules! diagnostic_catalog {
             $($variant = $code,)+
         }
 
+        const _: () = {
+            $(
+                assert!($crate::valid_symbolic_identity($identity));
+                assert!($crate::valid_hal_slug($slug));
+                assert!(!$summary.is_empty());
+                assert!(!$action.is_empty());
+            )+
+        };
+
         impl $name {
             pub const COUNT: usize = $crate::diagnostic_catalog!(@count $($variant),+);
             pub const ALL: [Self; Self::COUNT] = [$(Self::$variant,)+];
@@ -220,20 +234,54 @@ macro_rules! diagnostic_catalog {
     (@unit $variant:ident) => { () };
 }
 
-/// Consistent textual rendering used by logs and command output.
-pub struct DiagnosticDisplay<T: SelfDescribingDiagnostic>(pub T);
+/// Consistent operator-facing rendering used by logs and command output.
+///
+/// A numeric diagnostic cannot cross this boundary unless its complete
+/// recovery state machine is also defined.
+pub struct DiagnosticDisplay<T: RecoverableDiagnostic>(pub T);
 
-impl<T: SelfDescribingDiagnostic> fmt::Display for DiagnosticDisplay<T> {
+impl<T: RecoverableDiagnostic> fmt::Display for DiagnosticDisplay<T> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         let metadata = self.0.metadata();
+        let recovery = self.0.recovery_class();
+        if !metadata.complete() {
+            let fallback = RecoveryClass::RelaunchApplication;
+            write!(
+                formatter,
+                "DIAGNOSTIC_METADATA_INVALID: code={} name={:?} slug={:?}; cause: a diagnostic provider returned incomplete metadata; action: correct and relaunch the matched application; recovery-class={}; recovery-transition={}; clear-condition={:?}; ui-path=",
+                metadata.wire_code(),
+                metadata.name(),
+                metadata.hal_slug(),
+                fallback.name(),
+                fallback.transition().name(),
+                fallback.clear_transition(),
+            )?;
+            for (index, operation) in fallback.ui_operations().iter().enumerate() {
+                if index != 0 {
+                    formatter.write_str(" -> ")?;
+                }
+                formatter.write_str(operation.id())?;
+            }
+            return Ok(());
+        }
         write!(
             formatter,
-            "{} (code={}): {}; action: {}",
+            "{} (code={}): {}; action: {}; recovery-class={}; recovery-transition={}; clear-condition={:?}; ui-path=",
             metadata.name(),
             metadata.wire_code(),
             metadata.summary(),
-            metadata.action()
-        )
+            metadata.action(),
+            recovery.name(),
+            recovery.transition().name(),
+            recovery.clear_transition(),
+        )?;
+        for (index, operation) in recovery.ui_operations().iter().enumerate() {
+            if index != 0 {
+                formatter.write_str(" -> ")?;
+            }
+            formatter.write_str(operation.id())?;
+        }
+        Ok(())
     }
 }
 
@@ -250,13 +298,19 @@ impl<'a> UnknownDiagnostic<'a> {
     /// exact raw value. The identity is generated here rather than supplied
     /// by a caller, so it cannot be mislabeled.
     pub const fn new(domain: &'a str, raw: i64) -> Self {
-        assert!(valid_diagnostic_domain(domain));
         Self { domain, raw }
     }
 }
 
 impl fmt::Display for UnknownDiagnostic<'_> {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        if !valid_diagnostic_domain(self.domain) {
+            return write!(
+                formatter,
+                "UNKNOWN_DIAGNOSTIC_DOMAIN_INVALID(raw={}): source domain {:?} violates the diagnostic grammar; action: correct and relaunch the matched application",
+                self.raw, self.domain
+            );
+        }
         formatter.write_str("UNKNOWN_")?;
         for byte in self.domain.bytes() {
             formatter.write_char(char::from(byte).to_ascii_uppercase())?;

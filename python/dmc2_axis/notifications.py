@@ -11,12 +11,21 @@ from .constants import (
     REQUIRED_LINUXCNC_VERSION,
 )
 from .error_journal import ErrorJournalReader
-from .diagnostic_journal import DiagnosticJournalReader
-
-
-def _reader_failure_text(identity: str, cause: object, action: str) -> str:
-    return f"{identity}\nCause: {cause}\nAction: {action}"
-
+from .diagnostic_journal import (
+    DiagnosticJournalReader,
+)
+from .recovery_contract import RecoveryClassCode, RecoveryOperationCode
+from .recovery_ui import (
+    RecoveryUiNotice,
+    ensure_essential_recovery_controls,
+    present_recovery_ui_error,
+    recovery_contract_identity,
+    recovery_fallback_text,
+    recovery_route_text,
+    validate_local_recovery_ui,
+    validate_recovery_ui,
+)
+from .ui_fault import AxisUiFault, AxisUiFaultKind
 
 def error_channel_kind_catalog(linuxcnc_module) -> dict[int, tuple[str, str]]:
     """Return the complete public LinuxCNC 2.9.10 error-channel catalog."""
@@ -82,39 +91,113 @@ def install_axis_ui_policy(
     namespace["e"] = None
     notifications = namespace["notifications"]
     original_add = notifications.add
+    live_plotter._dmc2_recovery_notification_add = original_add
     active_diagnostic_widgets = {}
+    checked_recovery_contract = None
+    recovery_contract_error_identity = None
+    recovery_contract_error_notice = RecoveryUiNotice(namespace)
+    diagnostic_reader_error_notice = RecoveryUiNotice(namespace)
+    error_reader_error_notice = RecoveryUiNotice(namespace)
+    unexpected_poll_error_notice = RecoveryUiNotice(namespace)
+    reschedule_error_notice = RecoveryUiNotice(namespace)
+    notification_layout_notice = RecoveryUiNotice(
+        namespace,
+        notification_add=original_add,
+    )
+    diagnostic_clear_error_notice = RecoveryUiNotice(
+        namespace,
+        notification_add=original_add,
+    )
+    essential_controls_notice = RecoveryUiNotice(
+        namespace,
+        notification_add=original_add,
+    )
 
     def add_without_covering_status_panel(icon_name, message):
-        original_add(icon_name, message)
-        notifications.place_configure(
-            relx=0,
-            rely=1,
-            x=20,
-            y=-20,
-            anchor="sw",
-        )
+        try:
+            original_add(icon_name, message)
+        except Exception as error:
+            if not notification_layout_notice.is_visible():
+                notification_layout_notice.present_fallback(
+                    fault=AxisUiFault(
+                        AxisUiFaultKind.NOTIFICATION_DELIVERY_FAILED,
+                        error,
+                    )
+                )
+            return False
+        try:
+            notifications.place_configure(
+                relx=0,
+                rely=1,
+                x=20,
+                y=-20,
+                anchor="sw",
+            )
+        except Exception as error:
+            if not notification_layout_notice.is_visible():
+                notification_layout_notice.present(
+                    fault=AxisUiFault(
+                        AxisUiFaultKind.NOTIFICATION_DELIVERY_FAILED,
+                        error,
+                    )
+                )
+        else:
+            notification_layout_notice.clear()
+        return True
 
     def filtered_error_task():
+        nonlocal checked_recovery_contract
+        nonlocal recovery_contract_error_identity
         try:
-            pending_diagnostic_asserts = {}
+            run_guard = getattr(live_plotter, "_dmc2_axis_run_guard", None)
+            if run_guard is not None:
+                run_guard.reconcile()
+            try:
+                ensure_essential_recovery_controls(namespace)
+            except Exception as controls_error:
+                essential_controls_notice.present(
+                    fault=AxisUiFault(
+                        AxisUiFaultKind.ESSENTIAL_RECOVERY_CONTROLS_UNAVAILABLE,
+                        controls_error,
+                    )
+                )
+            else:
+                essential_controls_notice.clear()
+            prefetched_diagnostic = None
+            diagnostic_poll_failed = False
+            try:
+                # Load and validate the typed recovery catalog before presenting
+                # any LinuxCNC message that refers to one of its class codes.
+                prefetched_diagnostic = diagnostic_reader.poll()
+            except Exception as polling_error:
+                diagnostic_poll_failed = True
+                kind = AxisUiFaultKind.DIAGNOSTIC_JOURNAL_POLL_FAILED
+                print(
+                    "DMC2_DIAGNOSTIC_PRESENTATION "
+                    f"transition=reader-failure identity={kind.contract.identity} "
+                    f"cause={polling_error!r} action={kind.contract.action!r} "
+                    f"recovery_class={kind.contract.recovery_code.name!r}",
+                    flush=True,
+                )
+                diagnostic_reader_error_notice.present(
+                    fault=AxisUiFault(kind, polling_error),
+                )
+            error_poll_failed = False
             while True:
                 try:
                     event = journal_reader.poll()
                 except Exception as polling_error:
-                    identity = "DMC2_ERROR_JOURNAL_POLL_FAILED"
-                    action = (
-                        "preserve the error journal, restore a readable regular file, "
-                        "then restart the task monitor and AXIS"
-                    )
+                    error_poll_failed = True
+                    kind = AxisUiFaultKind.ERROR_JOURNAL_POLL_FAILED
                     print(
                         "DMC2_LINUXCNC_ERROR_CHANNEL "
-                        f"kind=poll_failure name={identity} severity=error suppressed=0 "
+                        f"kind=poll_failure name={kind.contract.identity} "
+                        "severity=error suppressed=0 "
                         f"exception={polling_error!r}",
                         flush=True,
                     )
-                    notifications.add(
-                        "error",
-                        _reader_failure_text(identity, polling_error, action),
+                    error_reader_error_notice.present(
+                        fault=AxisUiFault(kind, polling_error),
                     )
                     break
                 if event is None:
@@ -123,24 +206,40 @@ def install_axis_ui_policy(
                     kind = int(event.message_type)
                     message = str(event.display_text())
                 except Exception as malformed:
-                    identity = "DMC2_ERROR_JOURNAL_RECORD_PRESENTATION_FAILED"
-                    action = (
-                        "preserve the raw record and restart AXIS with the matched "
-                        "DMC2 reader"
-                    )
+                    kind = AxisUiFaultKind.ERROR_JOURNAL_RECORD_PRESENTATION_FAILED
                     print(
                         "DMC2_LINUXCNC_ERROR_CHANNEL "
-                        f"kind=malformed name={identity} severity=error suppressed=0 "
+                        f"kind=malformed name={kind.contract.identity} "
+                        "severity=error suppressed=0 "
                         f"record={event!r} exception={malformed!r}",
                         flush=True,
                     )
-                    notifications.add(
-                        "error",
-                        _reader_failure_text(identity, malformed, action)
-                        + f"\nRaw record: {event!r}",
+                    present_recovery_ui_error(
+                        namespace,
+                        fault=AxisUiFault(
+                            kind,
+                            f"{malformed}; raw record: {event!r}",
+                        )
                     )
                 else:
                     name, severity = kind_catalog.get(kind, ("UNKNOWN", "error"))
+                    try:
+                        recovery_route = diagnostic_reader.recovery_route(
+                            event.recovery_code
+                        )
+                    except Exception as recovery_error:
+                        recovery_text = recovery_fallback_text(event.recovery_code)
+                        recovery_name = event.recovery_code.name
+                        print(
+                            "DMC2_LINUXCNC_ERROR_CHANNEL_RECOVERY "
+                            f"sequence={event.sequence} status=unavailable "
+                            f"cause={recovery_error!r} "
+                            f"fallback={recovery_name}",
+                            flush=True,
+                        )
+                    else:
+                        recovery_text = recovery_route_text(recovery_route)
+                        recovery_name = recovery_route.identity
                     suppressed = should_suppress_notification(
                         kind,
                         message,
@@ -151,30 +250,39 @@ def install_axis_ui_policy(
                         f"sequence={event.sequence} kind={kind} name={name} "
                         f"severity={severity} serial={event.serial_number!r} "
                         f"operator_id={event.operator_id!r} "
+                        f"recovery_class={recovery_name!r} "
                         f"suppressed={int(suppressed)} message={message!r}",
                         flush=True,
                     )
                     if not suppressed:
-                        notifications.add(severity, message)
+                        accepted = notifications.add(
+                            severity,
+                            f"{message}\n{recovery_text}",
+                        )
+                        if accepted is False:
+                            raise RuntimeError(
+                                "LINUXCNC_ERROR_NOTIFICATION_REJECTED: "
+                                f"sequence={event.sequence}; action: use the visible "
+                                "recovery controls and correct notification delivery"
+                            )
 
-            while True:
+            while not diagnostic_poll_failed:
                 try:
-                    diagnostic = diagnostic_reader.poll()
+                    if prefetched_diagnostic is not None:
+                        diagnostic = prefetched_diagnostic
+                        prefetched_diagnostic = None
+                    else:
+                        diagnostic = diagnostic_reader.poll()
                 except Exception as polling_error:
-                    identity = "DMC2_DIAGNOSTIC_JOURNAL_POLL_FAILED"
-                    action = (
-                        "preserve the diagnostic journal, restore a readable regular "
-                        "file, then restart the task monitor and AXIS"
-                    )
+                    kind = AxisUiFaultKind.DIAGNOSTIC_JOURNAL_POLL_FAILED
                     print(
                         "DMC2_DIAGNOSTIC_PRESENTATION "
-                        f"transition=reader-failure identity={identity} "
-                        f"cause={polling_error!r} action={action!r}",
+                        f"transition=reader-failure identity={kind.contract.identity} "
+                        f"cause={polling_error!r} action={kind.contract.action!r}",
                         flush=True,
                     )
-                    notifications.add(
-                        "error",
-                        _reader_failure_text(identity, polling_error, action),
+                    diagnostic_reader_error_notice.present(
+                        fault=AxisUiFault(kind, polling_error),
                     )
                     break
                 if diagnostic is None:
@@ -189,67 +297,225 @@ def install_axis_ui_policy(
                     source = str(diagnostic.source)
                     domain = str(diagnostic.domain)
                     evidence = str(diagnostic.evidence)
-                    active_key = tuple(diagnostic.active_key())
+                    recovery_class = str(diagnostic.recovery.identity)
+                    recovery_path = str(diagnostic.recovery.ui_path)
                 except Exception as malformed:
-                    failure_identity = (
-                        "DMC2_DIAGNOSTIC_JOURNAL_RECORD_PRESENTATION_FAILED"
-                    )
-                    action = (
-                        "preserve the raw record and restart AXIS with the matched "
-                        "DMC2 reader"
+                    kind = (
+                        AxisUiFaultKind.DIAGNOSTIC_JOURNAL_RECORD_PRESENTATION_FAILED
                     )
                     print(
                         "DMC2_DIAGNOSTIC_PRESENTATION "
-                        f"transition=malformed identity={failure_identity} "
-                        f"record={diagnostic!r} cause={malformed!r} action={action!r}",
+                        f"transition=malformed identity={kind.contract.identity} "
+                        f"record={diagnostic!r} cause={malformed!r} "
+                        f"action={kind.contract.action!r}",
                         flush=True,
                     )
-                    notifications.add(
-                        "error",
-                        _reader_failure_text(failure_identity, malformed, action)
-                        + f"\nRaw record: {diagnostic!r}",
+                    present_recovery_ui_error(
+                        namespace,
+                        fault=AxisUiFault(
+                            kind,
+                            f"{malformed}; raw record: {diagnostic!r}",
+                        )
                     )
                     continue
                 print(
                     "DMC2_DIAGNOSTIC_PRESENTATION "
                     f"sequence={sequence} transition={transition} "
                     f"severity={severity} identity={identity!r} source={source!r} "
-                    f"domain={domain!r} raw={raw_value} evidence={evidence!r}",
+                    f"domain={domain!r} raw={raw_value} "
+                    f"recovery_class={recovery_class!r} "
+                    f"ui_path={recovery_path!r} evidence={evidence!r}",
                     flush=True,
                 )
-                if transition == "ASSERT":
-                    pending_diagnostic_asserts[active_key] = (
-                        sequence,
-                        severity,
-                        message,
-                        active_key,
-                    )
-                else:
-                    pending_diagnostic_asserts.pop(active_key, None)
-                    widget = active_diagnostic_widgets.pop(active_key, None)
-                    if widget is not None and widget in notifications.widgets:
-                        notifications.remove(widget)
-
-            for _sequence, severity, message, active_key in sorted(
-                pending_diagnostic_asserts.values(),
-                key=lambda pending: pending[0],
+            recovery_routes = diagnostic_reader.recovery_routes()
+            if (
+                not recovery_routes
+                and not diagnostic_poll_failed
             ):
+                checked_recovery_contract = None
+                error_identity = ("catalog-unavailable",)
+                try:
+                    validate_local_recovery_ui(namespace)
+                except Exception as local_recovery_error:
+                    error_identity = (
+                        "local-contract-invalid",
+                        str(local_recovery_error),
+                    )
+                    if (
+                        not recovery_contract_error_notice.is_visible()
+                        or recovery_contract_error_identity != error_identity
+                    ):
+                        print(
+                            "DMC2_RECOVERY_UI_CONTRACT "
+                            f"classes={len(RecoveryClassCode)} status=invalid "
+                            f"cause={local_recovery_error!r}",
+                            flush=True,
+                        )
+                        recovery_contract_error_notice.present(
+                            fault=AxisUiFault(
+                                AxisUiFaultKind.RECOVERY_UI_CONTRACT_INVALID,
+                                local_recovery_error,
+                            )
+                        )
+                        recovery_contract_error_identity = error_identity
+                else:
+                    if (
+                        not recovery_contract_error_notice.is_visible()
+                        or recovery_contract_error_identity != error_identity
+                    ):
+                        print(
+                            "DMC2_RECOVERY_UI_CONTRACT "
+                            f"classes={len(RecoveryClassCode)} "
+                            f"local_fault_types={len(AxisUiFaultKind)} "
+                            f"ui_operations={len(RecoveryOperationCode)} "
+                            "rust_catalog=unavailable status=invalid",
+                            flush=True,
+                        )
+                        recovery_contract_error_notice.present(
+                            fault=AxisUiFault(
+                                AxisUiFaultKind.RECOVERY_CLASS_CATALOG_UNAVAILABLE,
+                                "the task monitor has not published the closed recovery catalog",
+                            )
+                        )
+                        recovery_contract_error_identity = error_identity
+            elif recovery_routes:
+                recovery_identity = recovery_contract_identity(recovery_routes)
+                try:
+                    # Re-evaluate every cycle. AXIS may alter toolbar state
+                    # after initial construction, while these three recovery
+                    # controls must remain operator-accessible in every state.
+                    validate_recovery_ui(namespace, recovery_routes)
+                except Exception as recovery_error:
+                    checked_recovery_contract = None
+                    error_identity = (recovery_identity, str(recovery_error))
+                    if (
+                        not recovery_contract_error_notice.is_visible()
+                        or recovery_contract_error_identity != error_identity
+                    ):
+                        relaunch = next(
+                            (
+                                route
+                                for route in recovery_routes
+                                if route.identity == "RELAUNCH_APPLICATION"
+                            ),
+                            None,
+                        )
+                        print(
+                            "DMC2_RECOVERY_UI_CONTRACT "
+                            f"classes={len(recovery_routes)} status=invalid "
+                            f"cause={recovery_error!r}",
+                            flush=True,
+                        )
+                        recovery_contract_error_notice.present(
+                            fault=AxisUiFault(
+                                AxisUiFaultKind.RECOVERY_UI_CONTRACT_INVALID,
+                                recovery_error,
+                            ),
+                            route=relaunch,
+                        )
+                        recovery_contract_error_identity = error_identity
+                else:
+                    if recovery_identity != checked_recovery_contract:
+                        checked_recovery_contract = recovery_identity
+                        recovery_contract_error_identity = None
+                        recovery_contract_error_notice.clear()
+                        print(
+                            "DMC2_RECOVERY_UI_CONTRACT "
+                            f"classes={len(recovery_routes)} "
+                            f"local_fault_types={len(AxisUiFaultKind)} "
+                            f"ui_operations={len(RecoveryOperationCode)} "
+                            "rust_catalog=matched status=available",
+                            flush=True,
+                        )
+
+            active_diagnostics = {
+                tuple(diagnostic.active_key()): diagnostic
+                for diagnostic in diagnostic_reader.active_events()
+            }
+            clear_failures = []
+            for active_key, widget in tuple(active_diagnostic_widgets.items()):
+                if active_key in active_diagnostics:
+                    continue
+                try:
+                    if widget in notifications.widgets:
+                        notifications.remove(widget)
+                except Exception as clear_error:
+                    clear_failures.append((active_key, clear_error))
+                else:
+                    active_diagnostic_widgets.pop(active_key, None)
+            if clear_failures:
+                diagnostic_clear_error_notice.present(
+                    fault=AxisUiFault(
+                        AxisUiFaultKind.RECOVERY_UI_CLEAR_FAILED,
+                        "; ".join(
+                            f"diagnostic={active_key!r} error={clear_error}"
+                            for active_key, clear_error in clear_failures
+                        ),
+                    )
+                )
+            else:
+                diagnostic_clear_error_notice.clear()
+
+            for active_key, diagnostic in active_diagnostics.items():
                 previous_widget = active_diagnostic_widgets.get(active_key)
                 if (
                     previous_widget is not None
                     and previous_widget in notifications.widgets
                 ):
                     continue
-                notifications.add(severity, message)
+                accepted = notifications.add(
+                    str(diagnostic.severity),
+                    str(diagnostic.notification_text()),
+                )
+                if accepted is False:
+                    raise RuntimeError(
+                        "DMC2_DIAGNOSTIC_NOTIFICATION_REJECTED: "
+                        f"diagnostic={active_key!r}; action: use the visible "
+                        "recovery controls and correct notification delivery"
+                    )
                 active_diagnostic_widgets[active_key] = notifications.widgets[-1]
-        finally:
+            if not error_poll_failed:
+                if journal_reader.contract_ready():
+                    error_reader_error_notice.clear()
+                else:
+                    journal_path = getattr(journal_reader, "path", "unknown")
+                    error_reader_error_notice.present(
+                        fault=AxisUiFault(
+                            AxisUiFaultKind.ERROR_JOURNAL_UNAVAILABLE,
+                            (
+                                f"journal={journal_path}; the current task monitor "
+                                "has not published the exact error-journal transport "
+                                "header"
+                            ),
+                        )
+                    )
+            if diagnostic_reader.contract_ready():
+                diagnostic_reader_error_notice.clear()
+        except Exception as unexpected_error:
+            unexpected_poll_error_notice.present(
+                fault=AxisUiFault(
+                    AxisUiFaultKind.AXIS_DIAGNOSTIC_CALLBACK_FAILED,
+                    unexpected_error,
+                )
+            )
+        else:
+            unexpected_poll_error_notice.clear()
+        try:
             live_plotter.error_after = live_plotter.win.after(
                 200,
                 filtered_error_task,
+            )
+        except Exception as error:
+            reschedule_error_notice.present(
+                fault=AxisUiFault(
+                    AxisUiFaultKind.AXIS_DIAGNOSTIC_RESCHEDULE_FAILED,
+                    error,
+                )
             )
 
     notifications.add = add_without_covering_status_panel
     live_plotter.error_task = filtered_error_task
     live_plotter._dmc2_diagnostic_reader = diagnostic_reader
     live_plotter._dmc2_active_diagnostic_widgets = active_diagnostic_widgets
+    live_plotter._dmc2_recovery_contract = lambda: checked_recovery_contract
     live_plotter._dmc2_ui_policy_installed = True

@@ -7,6 +7,8 @@ use std::process::{Command, ExitStatus};
 use std::thread;
 use std::time::{Duration, Instant, SystemTime, SystemTimeError, UNIX_EPOCH};
 
+use dmc2_diagnostics::RecoveryDisplay;
+
 use crate::backtrace::{self, BacktraceEvidence};
 use crate::catalog::{BacktraceKind, Ownership, ProcessRole};
 use crate::cli::Invocation;
@@ -15,8 +17,8 @@ use crate::journal::{FailureTracker, Journal};
 use crate::limits::CoreDumpPlan;
 use crate::{process, wait};
 
-use failure::StartupStage;
 pub use failure::SupervisorError;
+use failure::{StartupStage, SupervisorObservationError};
 
 pub const TRACKING_FAILURE_EXIT_CODE: u8 = 125;
 const WAIT_RETRY_DELAY: Duration = Duration::from_millis(10);
@@ -135,17 +137,22 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
             Err(source) => {
                 wait_failures = wait_failures.saturating_add(1);
                 if wait_failures == 1 {
+                    let observation = SupervisorObservationError::Wait4 {
+                        role: invocation.role,
+                        child_pid,
+                        source: &source,
+                    };
                     let event = base_event("process-wait-failed", supervisor_pid, invocation.role)
                         .field("child_pid", child_pid)
-                        .field("error", source.to_string())
-                        .field("recovery", "retry-exact-child-without-releasing-ownership");
+                        .field("error", observation.to_string())
+                        .recovery(&observation);
                     append_after_spawn(
                         &mut journal,
                         &event,
                         invocation.role,
                         &mut journal_failures,
                     );
-                    eprintln!("dmc2-process-supervisor: role={} child_pid={child_pid} wait4 failed: {source}; retaining ownership and retrying", invocation.role.name());
+                    eprintln!("dmc2-process-supervisor: {}", RecoveryDisplay(&observation));
                 }
                 match process::exists(child_pid) {
                     Ok(false) => {
@@ -158,14 +165,19 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
                     }
                     Ok(true) => {}
                     Err(presence_error) if wait_failures == 1 => {
+                        let observation = SupervisorObservationError::ProcessPresence {
+                            role: invocation.role,
+                            child_pid,
+                            source: &presence_error,
+                        };
                         let event = base_event(
                             "process-presence-check-failed",
                             supervisor_pid,
                             invocation.role,
                         )
                         .field("child_pid", child_pid)
-                        .field("error", presence_error.to_string())
-                        .field("recovery", "retain-owner-and-retry");
+                        .field("error", observation.to_string())
+                        .recovery(&observation);
                         append_after_spawn(
                             &mut journal,
                             &event,
@@ -233,7 +245,11 @@ fn append_after_spawn(
             }
         }
         Err(error) => {
-            eprintln!("dmc2-process-supervisor: role={} lifecycle journal failed: {error}; recovery: writing will be retried while the child remains owned", role.name());
+            eprintln!(
+                "dmc2-process-supervisor: role={} lifecycle journal failed: {}; writing will be retried while the child remains owned",
+                role.name(),
+                RecoveryDisplay(&error),
+            );
             failures.record_failure(error);
         }
     }

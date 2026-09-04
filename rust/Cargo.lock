@@ -16,10 +16,16 @@ version = "0.1.0"
 [[package]]
 name = "dmc2-hal-sys"
 version = "0.1.0"
+dependencies = [
+ "dmc2-diagnostics",
+]
 
 [[package]]
 name = "dmc2-launcher"
 version = "0.1.0"
+dependencies = [
+ "dmc2-diagnostics",
+]
 
 [[package]]
 name = "dmc2-linuxcnc-interface"
@@ -28,12 +34,16 @@ version = "0.1.0"
 [[package]]
 name = "dmc2-process-supervisor"
 version = "0.1.0"
+dependencies = [
+ "dmc2-diagnostics",
+]
 
 [[package]]
 name = "dmc2-rt"
 version = "0.1.0"
 dependencies = [
  "dmc2-core",
+ "dmc2-diagnostics",
  "dmc2-hal-sys",
  "dmc2-linuxcnc-interface",
  "dmc2-serial-bridge",
@@ -62,6 +72,9 @@ dependencies = [
 [[package]]
 name = "dmc2ctl"
 version = "0.1.0"
+dependencies = [
+ "dmc2-diagnostics",
+]
 
 [[package]]
 name = "h100-spindle"

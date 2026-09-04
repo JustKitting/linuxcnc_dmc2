@@ -206,9 +206,25 @@ pub(super) fn evaluate(snapshot: &NativeSnapshot, report: &mut DiagnosticReport)
         .codes
         .iter()
         .find(|code| code.name == "GM_FLAG_MAX_FLAGS")
-        .expect("generated state-tag catalog omitted GM_FLAG_MAX_FLAGS")
-        .code as u32;
-    let valid_state_tag_flags = (1_u64 << state_tag_flag_count) - 1;
+        .map(|code| code.code);
+    let valid_state_tag_flags = match state_tag_flag_count {
+        Some(count) if (0..64).contains(&count) => (1_u64 << count) - 1,
+        Some(64) => u64::MAX,
+        observed => {
+            issue(
+                report,
+                Severity::Error,
+                category::DIAGNOSTIC_INTERFACE,
+                "trajectory.state_tag.flag_contract",
+                STATE_TAG_FLAG.name,
+                domain_id(STATE_TAG_FLAG),
+                observed.unwrap_or(-1),
+                None,
+                "the pinned LinuxCNC interface catalog omitted or invalidated GM_FLAG_MAX_FLAGS",
+            );
+            0
+        }
+    };
     if trajectory.state_tag.packed_flags & !valid_state_tag_flags != 0 {
         issue(
             report,

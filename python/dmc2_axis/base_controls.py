@@ -15,6 +15,13 @@ from .constants import (
     POSITION_UNKNOWN_PIN,
 )
 from .operation_catalog import project_catalog_path, read_operations
+from .recovery_contract import RecoveryOperationCode
+from .recovery_ui import (
+    RECOVERY_OPERATION_CONTRACTS,
+    RecoveryUiNotice,
+    register_recovery_widget_command,
+)
+from .ui_fault import AxisUiFault, AxisUiFaultKind
 
 
 class HomingSectionBinding:
@@ -24,62 +31,73 @@ class HomingSectionBinding:
         self,
         *,
         component,
+        namespace,
         root_window,
         known_indicator_path: str,
         unknown_indicator_path: str,
-        operation,
-        clear_fault_operation,
-        clear_fault_command,
         clear_fault_widget_path: str,
     ) -> None:
         self.component = component
+        self.namespace = namespace
         self.root_window = root_window
         self.known_indicator_path = known_indicator_path
         self.unknown_indicator_path = unknown_indicator_path
-        self.operation = operation
-        self.clear_fault_operation = clear_fault_operation
-        self.clear_fault_command = clear_fault_command
         self.clear_fault_widget_path = clear_fault_widget_path
         self.poll_after_id = None
+        self.refresh_error_notice = RecoveryUiNotice(namespace)
 
     def _pin(self, name: str) -> bool:
-        try:
-            return bool(self.component[name])
-        except (KeyError, RuntimeError):
-            return False
+        return bool(self.component[name])
 
     def poll(self) -> None:
         """Refresh the base-control indicators without restricting their commands."""
-        self.root_window.tk.call(
-            self.known_indicator_path,
-            "itemconfigure",
-            "led",
-            "-fill",
-            "#00a000" if self._pin(POSITION_KNOWN_PIN) else "#595959",
-        )
-        self.root_window.tk.call(
-            self.unknown_indicator_path,
-            "itemconfigure",
-            "led",
-            "-fill",
-            "#d00000" if self._pin(POSITION_UNKNOWN_PIN) else "#595959",
-        )
-        self.root_window.tk.call(
-            self.clear_fault_widget_path,
-            "configure",
-            "-background",
-            "#d00000" if self._pin(CONTROLLER_FAULT_PIN) else "#d9d9d9",
-            "-activebackground",
-            "#ef3030" if self._pin(CONTROLLER_FAULT_PIN) else "#ececec",
-        )
-        self.poll_after_id = self.root_window.after(
-            HOMING_STATE_POLL_MILLISECONDS,
-            self.poll,
-        )
-
-    def request_fault_clear(self) -> None:
-        """Issue only LinuxCNC's canonical E-stop-reset state request."""
-        self.clear_fault_command()
+        try:
+            self.root_window.tk.call(
+                self.known_indicator_path,
+                "itemconfigure",
+                "led",
+                "-fill",
+                "#00a000" if self._pin(POSITION_KNOWN_PIN) else "#595959",
+            )
+            self.root_window.tk.call(
+                self.unknown_indicator_path,
+                "itemconfigure",
+                "led",
+                "-fill",
+                "#d00000" if self._pin(POSITION_UNKNOWN_PIN) else "#595959",
+            )
+            self.root_window.tk.call(
+                self.clear_fault_widget_path,
+                "configure",
+                "-background",
+                "#d00000" if self._pin(CONTROLLER_FAULT_PIN) else "#d9d9d9",
+                "-activebackground",
+                "#ef3030" if self._pin(CONTROLLER_FAULT_PIN) else "#ececec",
+                "-state",
+                "normal",
+            )
+        except Exception as error:
+            if not self.refresh_error_notice.is_visible():
+                self.refresh_error_notice.present(
+                    fault=AxisUiFault(
+                        AxisUiFaultKind.BASE_RECOVERY_CONTROL_REFRESH_FAILED,
+                        error,
+                    )
+                )
+        else:
+            self.refresh_error_notice.clear()
+        try:
+            self.poll_after_id = self.root_window.after(
+                HOMING_STATE_POLL_MILLISECONDS,
+                self.poll,
+            )
+        except Exception as error:
+            self.refresh_error_notice.present(
+                fault=AxisUiFault(
+                    AxisUiFaultKind.BASE_RECOVERY_CONTROL_RESCHEDULE_FAILED,
+                    error,
+                )
+            )
 
 
 def _create_indicator(tk, *, path: str) -> None:
@@ -119,6 +137,70 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
     if existing is not None:
         return existing
 
+    root_window = namespace["root_window"]
+    tk = root_window.tk
+    linuxcnc_module = namespace["linuxcnc"]
+    command_channel = namespace["c"]
+    clear_fault_contract = RECOVERY_OPERATION_CONTRACTS[
+        RecoveryOperationCode.CLEAR_FAULT
+    ]
+
+    clear_fault_error_notice = RecoveryUiNotice(namespace)
+
+    def clear_fault_command() -> None:
+        """Issue only LinuxCNC's canonical E-stop-reset state request."""
+        try:
+            command_channel.state(linuxcnc_module.STATE_ESTOP_RESET)
+        except Exception as error:
+            clear_fault_error_notice.present(
+                fault=AxisUiFault(AxisUiFaultKind.CLEAR_FAULT_UI_COMMAND_FAILED, error)
+            )
+        else:
+            clear_fault_error_notice.clear()
+
+    # Install the recovery control before the optional homing layout and
+    # indicator pins. A failure in either must not remove fault clearing.
+    clear_fault_tcl_command = root_window.register(clear_fault_command)
+    tk.call(
+        "button",
+        CLEAR_FAULT_WIDGET_PATH,
+        "-command",
+        clear_fault_tcl_command,
+        "-text",
+        clear_fault_contract.label.upper(),
+        "-padx",
+        "2m",
+        "-pady",
+        0,
+        "-state",
+        "normal",
+        "-takefocus",
+        0,
+    )
+    tk.call(
+        "pack",
+        CLEAR_FAULT_WIDGET_PATH,
+        "-side",
+        "left",
+        "-after",
+        ".toolbar.machine_estop",
+        "-padx",
+        2,
+    )
+    register_recovery_widget_command(
+        namespace,
+        RecoveryOperationCode.CLEAR_FAULT,
+        clear_fault_tcl_command,
+    )
+    tk.call(
+        "DynamicHelp::add",
+        CLEAR_FAULT_WIDGET_PATH,
+        "-text",
+        "Clear the retained controller fault through LinuxCNC E-stop Reset",
+    )
+
+    # Optional catalog validation and the homing layout run only after the
+    # state-independent Clear Fault control is visible and callable.
     operations = read_operations(project_catalog_path(str(namespace["rcfile"])))
     operation = operations.get(HOME_ALL_OPERATION_ID)
     if operation is None:
@@ -127,17 +209,13 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
         operation.kind != "control"
         or operation.driver != "linuxcnc.home-all"
         or operation.ui_scope != "manual-tab-homing"
+        or operation.ui_target != HOME_ALL_WIDGET_PATH
     ):
         raise RuntimeError(f"Operation has invalid Home All contract: {operation!r}")
     clear_fault_operation = operations.get(CLEAR_FAULT_OPERATION_ID)
     if clear_fault_operation is None:
         raise RuntimeError(f"Operation is missing: {CLEAR_FAULT_OPERATION_ID}")
-    if (
-        clear_fault_operation.kind != "control"
-        or clear_fault_operation.driver != "linuxcnc.task-state"
-        or clear_fault_operation.target != "estop-reset"
-        or clear_fault_operation.ui_scope != "base-toolbar"
-    ):
+    if not clear_fault_contract.matches(clear_fault_operation):
         raise RuntimeError(
             f"Operation has invalid Clear Fault contract: {clear_fault_operation!r}"
         )
@@ -148,8 +226,6 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
     component.newpin(POSITION_UNKNOWN_PIN, hal_module.HAL_BIT, hal_module.HAL_IN)
     component.newpin(CONTROLLER_FAULT_PIN, hal_module.HAL_BIT, hal_module.HAL_IN)
 
-    root_window = namespace["root_window"]
-    tk = root_window.tk
     tabs_manual = str(namespace["tabs_manual"])
     section_path = f"{tabs_manual}.dmc2_homing"
     section_label_path = f"{tabs_manual}.dmc2_homing_label"
@@ -158,12 +234,6 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
     unknown_indicator_path = f"{section_path}.unknown_led"
     if home_widget_path != HOME_ALL_WIDGET_PATH:
         raise RuntimeError(f"Unexpected AXIS Manual-tab path: {home_widget_path!r}")
-
-    linuxcnc_module = namespace["linuxcnc"]
-    command_channel = namespace["c"]
-
-    def clear_fault_command() -> None:
-        command_channel.state(linuxcnc_module.STATE_ESTOP_RESET)
 
     stock_home_button = namespace["widgets"].homebutton
     stock_home_path = str(stock_home_button)
@@ -275,45 +345,12 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
 
     binding = HomingSectionBinding(
         component=component,
+        namespace=namespace,
         root_window=root_window,
         known_indicator_path=known_indicator_path,
         unknown_indicator_path=unknown_indicator_path,
-        operation=operation,
-        clear_fault_operation=clear_fault_operation,
-        clear_fault_command=clear_fault_command,
         clear_fault_widget_path=CLEAR_FAULT_WIDGET_PATH,
     )
-    clear_fault_tcl_command = root_window.register(binding.request_fault_clear)
-    tk.call(
-        "button",
-        CLEAR_FAULT_WIDGET_PATH,
-        "-command",
-        clear_fault_tcl_command,
-        "-text",
-        clear_fault_operation.label.upper(),
-        "-padx",
-        "2m",
-        "-pady",
-        0,
-        "-takefocus",
-        0,
-    )
-    tk.call(
-        "pack",
-        CLEAR_FAULT_WIDGET_PATH,
-        "-side",
-        "left",
-        "-after",
-        ".toolbar.machine_estop",
-        "-padx",
-        2,
-    )
-    tk.call(
-        "DynamicHelp::add",
-        CLEAR_FAULT_WIDGET_PATH,
-        "-text",
-        "Clear the retained controller fault through LinuxCNC E-stop Reset",
-    )
-    binding.poll()
     live_plotter._dmc2_base_controls = binding
+    binding.poll()
     return binding

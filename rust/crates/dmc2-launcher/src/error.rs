@@ -3,6 +3,8 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
 use std::path::PathBuf;
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct OwnerMatch {
     pub pattern: &'static str,
@@ -235,14 +237,13 @@ impl Error {
                 let mut cause = "another LinuxCNC/HAL/Mesa owner may be active".to_owned();
                 for item in matches {
                     use fmt::Write;
-                    write!(
+                    let _ = write!(
                         &mut cause,
                         "; pattern={:?} stdout={} stderr={}",
                         item.pattern,
                         render_bytes(&item.stdout),
                         render_bytes(&item.stderr)
-                    )
-                    .expect("writing to String cannot fail");
+                    );
                 }
                 cause
             }
@@ -276,8 +277,10 @@ pub fn render_bytes(bytes: &[u8]) -> String {
             b'\r' => rendered.push_str("\\r"),
             b'\t' => rendered.push_str("\\t"),
             other => {
-                use fmt::Write;
-                write!(&mut rendered, "\\x{other:02x}").expect("writing to String cannot fail");
+                rendered.push('\\');
+                rendered.push('x');
+                rendered.push(char::from(b"0123456789abcdef"[usize::from(other >> 4)]));
+                rendered.push(char::from(b"0123456789abcdef"[usize::from(other & 0x0f)]));
             }
         }
     }
@@ -290,8 +293,10 @@ fn render_multiline_bytes(bytes: &[u8]) -> String {
         match *byte {
             b' '..=b'~' | b'\n' | b'\r' | b'\t' => rendered.push(char::from(*byte)),
             other => {
-                use fmt::Write;
-                write!(&mut rendered, "\\x{other:02x}").expect("writing to String cannot fail");
+                rendered.push('\\');
+                rendered.push('x');
+                rendered.push(char::from(b"0123456789abcdef"[usize::from(other >> 4)]));
+                rendered.push(char::from(b"0123456789abcdef"[usize::from(other & 0x0f)]));
             }
         }
     }
@@ -315,3 +320,25 @@ impl fmt::Display for Error {
 }
 
 impl std::error::Error for Error {}
+
+impl RecoveryClassified for Error {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Usage(_)
+            | Self::OperatingSystem { .. }
+            | Self::ProjectRootNotFound(_)
+            | Self::NotRegularFile(_)
+            | Self::EmbeddedFileChanged(_)
+            | Self::HalSourceInvalidUtf8 { .. }
+            | Self::HalPinSignalConflict { .. }
+            | Self::DeploymentMismatch { .. }
+            | Self::ExecutableUnavailable(_)
+            | Self::ProcessFailed { .. }
+            | Self::LinuxCncSessionFailed { .. }
+            | Self::LinuxCncVersion { .. }
+            | Self::OwnerConflict(_)
+            | Self::OwnerProbe { .. }
+            | Self::ExecReturned => RecoveryClass::RelaunchApplication,
+        }
+    }
+}

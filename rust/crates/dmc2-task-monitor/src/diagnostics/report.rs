@@ -2,8 +2,11 @@
 
 use std::collections::BTreeMap;
 
-use super::category;
-use dmc2_diagnostics::{diagnostic_catalog, valid_diagnostic_domain, valid_symbolic_identity};
+use super::category::{self, DiagnosticCategory};
+use dmc2_diagnostics::{
+    diagnostic_catalog, valid_diagnostic_domain, valid_symbolic_identity, RecoveryClass,
+    RecoveryClassified,
+};
 
 #[derive(Clone, Copy, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub enum Severity {
@@ -23,7 +26,7 @@ impl Severity {
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 pub struct Issue {
     severity: Severity,
-    category: u64,
+    category: DiagnosticCategory,
     source: String,
     domain: &'static str,
     domain_id: u32,
@@ -31,6 +34,7 @@ pub struct Issue {
     name: Option<&'static str>,
     detail: &'static str,
     operator_action: &'static str,
+    recovery_class: RecoveryClass,
     /// Complete captured context for this exact assertion. This is persisted
     /// with the identity/cause/action so an operator never has to reconstruct
     /// a numeric failure from a separate pin lookup.
@@ -42,9 +46,9 @@ pub struct Issue {
 
 impl Issue {
     #[allow(clippy::too_many_arguments)]
-    pub(crate) fn new(
+    pub(crate) fn new<R: RecoveryClassified + ?Sized>(
         severity: Severity,
-        category: u64,
+        category: DiagnosticCategory,
         source: impl Into<String>,
         domain: &'static str,
         domain_id: u32,
@@ -52,27 +56,50 @@ impl Issue {
         name: Option<&'static str>,
         detail: &'static str,
         operator_action: &'static str,
+        recovery_source: &R,
         evidence: impl Into<String>,
     ) -> Self {
         let source = source.into();
         let evidence = evidence.into();
-        assert!(category != 0, "diagnostic category must be nonzero");
-        assert!(!source.is_empty(), "diagnostic source must be present");
-        assert!(
-            valid_diagnostic_domain(domain),
-            "diagnostic domain {domain:?} must be lowercase ASCII snake case"
-        );
-        assert!(!detail.is_empty(), "diagnostic cause must be present");
-        assert!(
-            !operator_action.is_empty(),
-            "diagnostic operator action must be present"
-        );
-        assert!(!evidence.is_empty(), "diagnostic evidence must be present");
-        if let Some(identity) = name {
-            assert!(
-                valid_symbolic_identity(identity),
-                "known diagnostic identity {identity:?} must be an uppercase symbolic name"
-            );
+        let recovery_class = recovery_source.recovery_class();
+        let invalid_reason = if category.mask() == 0 {
+            Some("zero diagnostic category")
+        } else if source.is_empty() {
+            Some("empty diagnostic source")
+        } else if !valid_diagnostic_domain(domain) {
+            Some("invalid diagnostic domain")
+        } else if detail.is_empty() {
+            Some("empty diagnostic cause")
+        } else if operator_action.is_empty() {
+            Some("empty diagnostic operator action")
+        } else if evidence.is_empty() {
+            Some("empty diagnostic evidence")
+        } else if !recovery_class.contract_complete() {
+            Some("incomplete recovery-class contract")
+        } else if name.is_some_and(|identity| !valid_symbolic_identity(identity)) {
+            Some("invalid symbolic diagnostic identity")
+        } else {
+            None
+        };
+        if let Some(reason) = invalid_reason {
+            return Self {
+                severity: Severity::Error,
+                category: category::DIAGNOSTIC_INTERFACE,
+                source: "dmc2-task-monitor.diagnostic-construction".to_owned(),
+                domain: "dmc2_diagnostic_contract",
+                domain_id: u32::MAX,
+                value: 0,
+                name: Some("DIAGNOSTIC_CONTRACT_INVALID"),
+                detail: "a diagnostic producer violated the typed identity, cause, action, evidence, or recovery contract",
+                operator_action: "retain the original fields below, correct the named diagnostic producer, and relaunch DMC2 LinuxCNC",
+                recovery_class: RecoveryClass::RelaunchApplication,
+                evidence: format!(
+                    "reason={reason:?} original_category=0x{:016x} original_source={source:?} original_domain={domain:?} original_domain_id={domain_id} original_value={value} original_name={name:?} original_detail={detail:?} original_action={operator_action:?} original_recovery_class={} original_evidence={evidence:?}",
+                    category.mask(),
+                    recovery_class.name(),
+                ),
+                _validated: (),
+            };
         }
         Self {
             severity,
@@ -84,6 +111,7 @@ impl Issue {
             name,
             detail,
             operator_action,
+            recovery_class,
             evidence,
             _validated: (),
         }
@@ -93,8 +121,12 @@ impl Issue {
         self.severity
     }
 
-    pub(crate) const fn category(&self) -> u64 {
+    pub(crate) const fn category(&self) -> DiagnosticCategory {
         self.category
+    }
+
+    pub(crate) const fn recovery_class(&self) -> RecoveryClass {
+        self.recovery_class
     }
 
     pub(crate) fn source(&self) -> &str {
@@ -179,8 +211,8 @@ impl DiagnosticReport {
 
     pub(super) fn push(&mut self, issue: Issue) {
         match issue.severity {
-            Severity::Warning => self.active_warning_mask |= issue.category,
-            Severity::Error => self.active_error_mask |= issue.category,
+            Severity::Warning => self.active_warning_mask |= issue.category.mask(),
+            Severity::Error => self.active_error_mask |= issue.category.mask(),
         }
         if issue.category == category::UNKNOWN_CODE && issue.domain_id < 64 {
             self.unknown_domain_mask |= 1_u64 << issue.domain_id;
@@ -209,7 +241,7 @@ pub struct TransitionLogger {
 #[derive(Clone, Debug, Eq, Ord, PartialEq, PartialOrd)]
 struct IssueIdentity {
     severity: Severity,
-    category: u64,
+    category: DiagnosticCategory,
     source: String,
     domain: &'static str,
     domain_id: u32,
@@ -217,6 +249,7 @@ struct IssueIdentity {
     name: Option<&'static str>,
     detail: &'static str,
     operator_action: &'static str,
+    recovery_class: RecoveryClass,
 }
 
 impl From<&Issue> for IssueIdentity {
@@ -231,6 +264,7 @@ impl From<&Issue> for IssueIdentity {
             name: issue.name,
             detail: issue.detail,
             operator_action: issue.operator_action,
+            recovery_class: issue.recovery_class,
         }
     }
 }
@@ -324,10 +358,10 @@ impl TransitionLogger {
 fn log_issue(event: &DiagnosticTransition) {
     let issue = &event.issue;
     eprintln!(
-        "DMC2_LINUXCNC_DIAGNOSTIC transition={} severity={} category=0x{:016x} source={} domain={} domain_id={} code={} identity={:?} cause={:?} operator_action={:?} evidence={:?}",
+        "DMC2_LINUXCNC_DIAGNOSTIC transition={} severity={} category=0x{:016x} source={} domain={} domain_id={} code={} identity={:?} cause={:?} operator_action={:?} recovery_class={} recovery_transition={} clear_condition={:?} ui_operations={:?} evidence={:?}",
         event.action.hal_slug(),
         issue.severity.as_str(),
-        issue.category,
+        issue.category.mask(),
         issue.source,
         issue.domain,
         issue.domain_id,
@@ -335,6 +369,10 @@ fn log_issue(event: &DiagnosticTransition) {
         event.identity(),
         issue.detail,
         issue.operator_action,
+        issue.recovery_class.name(),
+        issue.recovery_class.transition().name(),
+        issue.recovery_class.clear_transition(),
+        issue.recovery_class.ui_operations(),
         issue.evidence,
     );
 }

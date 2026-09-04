@@ -9,3 +9,6 @@ build = "build.rs"
 
 [lib]
 path = "src/lib.rs"
+
+[dependencies]
+dmc2-diagnostics = { path = "../dmc2-diagnostics" }

@@ -1,6 +1,7 @@
 use std::fmt;
 
 use super::cli::CliError;
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 use dmc2_serial_bridge::hal::RegistrationError;
 
 #[derive(Debug)]
@@ -36,6 +37,18 @@ impl fmt::Display for ApplicationError {
                 "SERIAL_BRIDGE_DEVICE_PATH_NUL: byte={position}; action: configure a device path without an embedded NUL byte"
             ),
             Self::Hal(error) => write!(formatter, "SERIAL_BRIDGE_HAL_REGISTRATION_FAILED: {error}"),
+        }
+    }
+}
+
+impl RecoveryClassified for ApplicationError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Cli(error) => error.recovery_class(),
+            Self::PacketTimeoutOverflow { .. } | Self::SerialPathNul { .. } => {
+                RecoveryClass::RelaunchApplication
+            }
+            Self::Hal(error) => error.recovery_class(),
         }
     }
 }

@@ -1,4 +1,4 @@
-use dmc2_diagnostics::diagnostic_catalog;
+use dmc2_diagnostics::{diagnostic_catalog, RecoveryClass, RecoveryClassified};
 
 use crate::ProtocolError;
 
@@ -34,6 +34,19 @@ diagnostic_catalog! {
     "quadrature-counter-changed",
     "the Nano reported a changed quadrature-error counter after the accepted baseline",
     "inspect retained previous/current counters and the pendant wheel signals before restarting control";
+    }
+}
+
+impl RecoveryClassified for BridgeFaultCode {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::AwaitingFirstPacket
+            | Self::SerialOpenFailure
+            | Self::SerialReadFailure
+            | Self::ProtocolRejected
+            | Self::PacketTimeout
+            | Self::QuadratureCounterChanged => RecoveryClass::RestorePendant,
+        }
     }
 }
 

@@ -4,6 +4,7 @@ use std::os::unix::ffi::OsStrExt;
 use std::path::PathBuf;
 
 use crate::catalog::{self, ArgumentPlacement, ProcessRole};
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Invocation {
@@ -206,6 +207,27 @@ impl fmt::Display for CliError {
 }
 
 impl std::error::Error for CliError {}
+
+impl RecoveryClassified for CliError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::Role(error) => error.recovery_class(),
+            Self::ExpectedLiteral { .. }
+            | Self::MissingForwardedIniPath
+            | Self::EmptyForwardedIniPath
+            | Self::MissingRole
+            | Self::ForwardedIniRequired { .. }
+            | Self::ForwardedIniUnexpected { .. }
+            | Self::MissingJournalPath
+            | Self::EmptyJournalPath
+            | Self::MissingFailureReportPath
+            | Self::EmptyFailureReportPath
+            | Self::MissingProgram
+            | Self::EmptyProgram
+            | Self::ProgramMismatch { .. } => RecoveryClass::RelaunchApplication,
+        }
+    }
+}
 
 fn usage() -> &'static str {
     "usage: [-ini PATH] --role ROLE --journal PATH [--failure-report PATH] -- PROGRAM [ARG ...]"

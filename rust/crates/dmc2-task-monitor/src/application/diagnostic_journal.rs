@@ -5,13 +5,15 @@ use std::fs::{self, File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 
+use dmc2_diagnostics::{RecoveryClass, RECOVERY_CONTRACTS};
 use dmc2_linuxcnc_interface::{LINUXCNC_SOURCE_COMMIT, LINUXCNC_VERSION};
 
 use crate::application::journal_error::{AtomicPublishStep, JournalError, JournalKind};
 use crate::diagnostics::DiagnosticTransition;
 
-pub(super) const JOURNAL_SCHEMA_VERSION: u32 = 2;
+pub(super) const JOURNAL_SCHEMA_VERSION: u32 = 3;
 const HEADER_MARKER: &str = "DMC2_DIAGNOSTIC_JOURNAL";
+const RECOVERY_MARKER: &str = "DMC2_RECOVERY_CLASS";
 const EVENT_MARKER: &str = "DMC2_DIAGNOSTIC_EVENT";
 const FNV64_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
 const FNV64_PRIME: u64 = 0x100000001b3;
@@ -96,7 +98,7 @@ impl DiagnosticJournal {
                 path: path.to_owned(),
             })?;
         let preparation: Result<(), (AtomicPublishStep, std::io::Error)> = (|| {
-            file.write_all(header_line().as_bytes())
+            file.write_all(header_block().as_bytes())
                 .map_err(|source| (AtomicPublishStep::WriteHeader, source))?;
             file.sync_all()
                 .map_err(|source| (AtomicPublishStep::SyncTemporary, source))?;
@@ -159,10 +161,39 @@ impl DiagnosticJournal {
     }
 }
 
-fn header_line() -> String {
-    format!(
-        "{HEADER_MARKER}\t{JOURNAL_SCHEMA_VERSION}\t{LINUXCNC_VERSION}\t{LINUXCNC_SOURCE_COMMIT}\n"
-    )
+fn header_block() -> String {
+    let mut block = format!(
+        "{HEADER_MARKER}\t{JOURNAL_SCHEMA_VERSION}\t{LINUXCNC_VERSION}\t{LINUXCNC_SOURCE_COMMIT}\t{}\n",
+        RecoveryClass::COUNT,
+    );
+    for contract in RECOVERY_CONTRACTS {
+        block.push_str(&encode_recovery_class(contract.recovery_class()));
+    }
+    block
+}
+
+fn encode_recovery_class(recovery: RecoveryClass) -> String {
+    let operations = recovery
+        .ui_operations()
+        .iter()
+        .map(|operation| operation.id())
+        .collect::<Vec<_>>()
+        .join(";");
+    let transition = recovery.transition();
+    let prefix = [
+        RECOVERY_MARKER.to_owned(),
+        JOURNAL_SCHEMA_VERSION.to_string(),
+        recovery.wire_code().to_string(),
+        encode_hex(recovery.name().as_bytes()),
+        encode_hex(recovery.hal_slug().as_bytes()),
+        transition.wire_code().to_string(),
+        encode_hex(transition.name().as_bytes()),
+        encode_hex(transition.description().as_bytes()),
+        encode_hex(operations.as_bytes()),
+    ]
+    .join("\t");
+    let checksum = fnv64(prefix.as_bytes());
+    format!("{prefix}\t{checksum:016x}\n")
 }
 
 fn encode_event(sequence: u64, transition: &DiagnosticTransition) -> Vec<u8> {
@@ -174,7 +205,8 @@ fn encode_event(sequence: u64, transition: &DiagnosticTransition) -> Vec<u8> {
         transition.action.name().to_owned(),
         transition.action.wire_code().to_string(),
         issue.severity().as_str().to_owned(),
-        format!("{:016x}", issue.category()),
+        format!("{:016x}", issue.category().mask()),
+        issue.recovery_class().wire_code().to_string(),
         issue.domain_id().to_string(),
         issue.value().to_string(),
         encode_hex(issue.source().as_bytes()),
@@ -192,12 +224,12 @@ fn encode_event(sequence: u64, transition: &DiagnosticTransition) -> Vec<u8> {
 
 fn encode_hex(bytes: &[u8]) -> String {
     const HEX: &[u8; 16] = b"0123456789abcdef";
-    let mut output = Vec::with_capacity(bytes.len() * 2);
+    let mut output = String::with_capacity(bytes.len() * 2);
     for byte in bytes {
-        output.push(HEX[usize::from(byte >> 4)]);
-        output.push(HEX[usize::from(byte & 0x0f)]);
+        output.push(char::from(HEX[usize::from(byte >> 4)]));
+        output.push(char::from(HEX[usize::from(byte & 0x0f)]));
     }
-    String::from_utf8(output).expect("hex encoding is ASCII")
+    output
 }
 
 fn fnv64(bytes: &[u8]) -> u64 {

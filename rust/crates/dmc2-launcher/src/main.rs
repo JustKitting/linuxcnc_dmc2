@@ -3,6 +3,8 @@ use std::fs::{self, OpenOptions};
 use std::io::{self, Write};
 use std::path::{Path, PathBuf};
 
+use dmc2_diagnostics::RecoveryDisplay;
+
 const FAILURE_REPORT: &str = "/tmp/linuxcnc.report";
 
 fn main() {
@@ -11,12 +13,23 @@ fn main() {
     match dmc2_launcher::run(&platform, &arguments, &mut io::stdout().lock()) {
         Ok(code) => std::process::exit(code),
         Err(error) => {
-            let message = format!("DMC2 LIVE LAUNCH FAILURE\nLIVE LAUNCH REFUSED: {error}\n");
+            let message = format!(
+                "DMC2 LIVE LAUNCH FAILURE\nLIVE LAUNCH REFUSED: {}\n",
+                RecoveryDisplay(&error),
+            );
             match write_failure_report(Path::new(FAILURE_REPORT), message.as_bytes()) {
                 Ok(()) => eprintln!("{message}Full report: {FAILURE_REPORT}"),
-                Err(report_error) => eprintln!(
-                    "{message}FAILURE REPORT WRITE FAILED: path={FAILURE_REPORT}; error={report_error}"
-                ),
+                Err(report_error) => {
+                    let report_error = dmc2_launcher::Error::os(
+                        "write launch failure report",
+                        PathBuf::from(FAILURE_REPORT),
+                        report_error,
+                    );
+                    eprintln!(
+                        "{message}FAILURE REPORT WRITE FAILED: {}",
+                        RecoveryDisplay(&report_error),
+                    );
+                }
             }
             std::process::exit(2);
         }

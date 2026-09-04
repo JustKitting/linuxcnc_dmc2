@@ -1,6 +1,6 @@
 use super::super::{SupervisorInputs, SupervisorOutputs};
 use super::*;
-use crate::pendant::PendantDecision;
+use crate::pendant::{InterpreterFault, PendantDecision};
 
 impl LinuxCncPendantSupervisor {
     fn set_pendant_mode(&mut self, enabled: bool) {
@@ -27,7 +27,9 @@ impl LinuxCncPendantSupervisor {
                     self.start_limit_release_jog(intent, inputs);
                 }
             }
-            PendantDecision::Fault(_) => self.fail(FaultCode::InvalidPendantPacket),
+            PendantDecision::Fault(
+                InterpreterFault::QuadratureErrorChanged | InterpreterFault::InvalidDetent,
+            ) => self.fail(FaultCode::InvalidPendantPacket),
         }
     }
 
@@ -36,7 +38,6 @@ impl LinuxCncPendantSupervisor {
         self.command = None;
         self.phase_elapsed_ns = self.phase_elapsed_ns.saturating_add(period_ns);
         self.set_pendant_mode(inputs.pendant_mode_enabled);
-        self.control_available = false;
         self.control_ready = false;
 
         if inputs.packet.is_some() {
@@ -115,12 +116,6 @@ impl LinuxCncPendantSupervisor {
             return self.outputs();
         }
 
-        self.control_available = self.external_enable
-            && self.startup_reset_complete
-            && self.recovery_power_phase.is_none()
-            && inputs.ready_jog_path().is_some()
-            && (self.phase.bounce() || (!any(inputs.raw_limits) && !any(inputs.safety_limits)));
-
         if self.pendant_mode_enabled {
             if matches!(
                 self.phase,
@@ -133,12 +128,18 @@ impl LinuxCncPendantSupervisor {
                         PendantDecision::Stop(_) => self.cancel_pendant_motion(),
                         PendantDecision::NoDetent => {}
                         PendantDecision::Jog(intent) => self.request_jog(intent, &inputs),
-                        PendantDecision::Fault(_) => self.fail(FaultCode::InvalidPendantPacket),
+                        PendantDecision::Fault(
+                            InterpreterFault::QuadratureErrorChanged
+                            | InterpreterFault::InvalidDetent,
+                        ) => self.fail(FaultCode::InvalidPendantPacket),
                     }
                 }
             }
         }
-        self.control_ready = self.control_available
+        self.control_ready = self.external_enable
+            && self.startup_sequence_complete()
+            && self.recovery_power_phase.is_none()
+            && inputs.ready_jog_path().is_some()
             && self.pendant_mode_enabled
             && !self.phase.bounce()
             && !any(inputs.raw_limits)

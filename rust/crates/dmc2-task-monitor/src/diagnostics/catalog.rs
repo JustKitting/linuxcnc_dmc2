@@ -2,16 +2,15 @@
 
 use dmc2_linuxcnc_interface::{CodeDomain, DEBUG_FLAG, DOMAINS};
 
-use super::category;
+use super::category::{self, DiagnosticCategory};
 use super::report::{DiagnosticReport, Issue, Severity};
 
 pub(super) fn domain_id(domain: CodeDomain) -> u32 {
     DOMAINS
         .iter()
         .position(|candidate| candidate.name == domain.name)
-        .expect("generated LinuxCNC domain was omitted from DOMAINS")
-        .try_into()
-        .expect("LinuxCNC domain index does not fit in u32")
+        .and_then(|index| index.try_into().ok())
+        .unwrap_or(u32::MAX)
 }
 
 // Every argument maps directly to one field of `Issue`; keeping that mapping
@@ -20,7 +19,7 @@ pub(super) fn domain_id(domain: CodeDomain) -> u32 {
 pub(super) fn issue(
     report: &mut DiagnosticReport,
     severity: Severity,
-    category: u64,
+    category: DiagnosticCategory,
     source: impl Into<String>,
     domain: &'static str,
     domain_id: u32,
@@ -39,7 +38,7 @@ pub(super) fn issue(
 pub(super) fn issue_with_evidence(
     report: &mut DiagnosticReport,
     severity: Severity,
-    category: u64,
+    category: DiagnosticCategory,
     source: impl Into<String>,
     domain: &'static str,
     domain_id: u32,
@@ -57,47 +56,10 @@ pub(super) fn issue_with_evidence(
         value,
         name,
         detail,
-        operator_action(category),
+        category.operator_action(),
+        &category,
         evidence,
     ));
-}
-
-fn operator_action(category_value: u64) -> &'static str {
-    match category_value {
-        category::ABI => {
-            "stop this monitor and rebuild/reinstall it against the pinned LinuxCNC 2.9.10 interface"
-        }
-        category::TRANSPORT => {
-            "restore the LinuxCNC status-channel connection and confirm fresh valid status before resuming"
-        }
-        category::UNKNOWN_CODE => {
-            "retain the raw domain/value, do not guess its meaning, and verify the running LinuxCNC source/version"
-        }
-        category::HARD_LIMIT => {
-            "inspect the named joint/axis and use only the configured limit recovery path after the physical cause is clear"
-        }
-        category::SOFT_LIMIT => {
-            "inspect the named axis position and commanded path, then correct the program or coordinate state"
-        }
-        category::INPUT_TIMEOUT => {
-            "inspect the named input and its configured timeout source before retrying"
-        }
-        category::INTERPRETER => {
-            "inspect the named interpreter result and correct the loaded program at its reported context"
-        }
-        category::IO_FAULT | category::JOINT_FAULT | category::SPINDLE_ORIENT => {
-            "inspect the named source and retained LinuxCNC state, clear the physical/controller cause, then reset"
-        }
-        category::INVALID_VALUE => {
-            "inspect the named source and correct it to one value from its documented domain"
-        }
-        category::STATUS_MESSAGE => {
-            "read the exact LinuxCNC status message and correct its named source before continuing"
-        }
-        _ => {
-            "inspect the named LinuxCNC source, raw value, and cause; clear the underlying condition before continuing"
-        }
-    }
 }
 
 pub(super) fn unknown_code(

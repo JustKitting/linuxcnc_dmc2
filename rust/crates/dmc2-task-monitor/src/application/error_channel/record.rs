@@ -1,5 +1,6 @@
 use std::fmt;
 
+use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 use dmc2_linuxcnc_interface::{error_message_contract_by_type, ErrorMessageContract};
 
 use super::native::{RawErrorSnapshot, ERROR_MESSAGE_ABI_VERSION, ERROR_OBJECT_CAPACITY};
@@ -13,6 +14,43 @@ const BASE_SIZE_SIZE: usize = 8;
 pub(in crate::application) enum ErrorSeverity {
     Error,
     Info,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum LinuxCncMessageKind {
+    NmlError,
+    NmlText,
+    NmlDisplay,
+    OperatorError,
+    OperatorText,
+    OperatorDisplay,
+    Unknown(i32),
+}
+
+impl LinuxCncMessageKind {
+    const fn from_message_type(message_type: i32) -> Self {
+        match message_type {
+            1 => Self::NmlError,
+            2 => Self::NmlText,
+            3 => Self::NmlDisplay,
+            11 => Self::OperatorError,
+            12 => Self::OperatorText,
+            13 => Self::OperatorDisplay,
+            raw => Self::Unknown(raw),
+        }
+    }
+}
+
+impl RecoveryClassified for LinuxCncMessageKind {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::NmlError | Self::OperatorError => RecoveryClass::AbortTask,
+            Self::NmlText | Self::NmlDisplay | Self::OperatorText | Self::OperatorDisplay => {
+                RecoveryClass::RecheckSource
+            }
+            Self::Unknown(_) => RecoveryClass::RelaunchApplication,
+        }
+    }
 }
 
 impl ErrorSeverity {
@@ -176,6 +214,10 @@ impl ErrorMessageRecord {
     pub(in crate::application) fn known(&self) -> bool {
         self.contract.is_some()
     }
+
+    pub(in crate::application) fn recovery_class(&self) -> RecoveryClass {
+        LinuxCncMessageKind::from_message_type(self.message_type).recovery_class()
+    }
 }
 
 fn claim(
@@ -289,6 +331,22 @@ impl fmt::Display for DecodeError {
             Self::MemberWidth(member) => {
                 write!(formatter, "error-message member width is invalid: {member}")
             }
+        }
+    }
+}
+
+impl RecoveryClassified for DecodeError {
+    fn recovery_class(&self) -> RecoveryClass {
+        match self {
+            Self::AbiVersion(_)
+            | Self::StructSize(_)
+            | Self::ObjectSize(_)
+            | Self::DirtyObjectTail
+            | Self::MessageType { .. }
+            | Self::DeclaredSize { .. }
+            | Self::ContractLayout(_)
+            | Self::MemberRange(_)
+            | Self::MemberWidth(_) => RecoveryClass::RelaunchApplication,
         }
     }
 }
