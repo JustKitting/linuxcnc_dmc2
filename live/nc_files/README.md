@@ -3,6 +3,13 @@
 LinuxCNC G-code files can be stored here. No machine program is installed or
 started automatically by the live configuration.
 
+Any existing regular LinuxCNC machine-code file can be selected through
+AXIS **File → Open** or passed to `dmc2ctl inspect-file`, `load-file`, or
+`execute-file` without adding a catalog row or changing code. A file may carry
+the exact typed DMC2 v1 header; a headerless file receives the conservative
+machine-on, interpreter-idle, and all-homed contract. The complete grammar and
+failure behavior are defined in `docs/script-contract.md`.
+
 `dmc2_spindle_test.ngc` is the reusable clockwise spindle-test operation. It
 does not contain a fixed test speed: call it from LinuxCNC MDI or another
 program as `o<dmc2_spindle_test> call [RPM]`. The requested RPM must be within

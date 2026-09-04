@@ -32,7 +32,9 @@ offline reference controllers are not part of this repository.
   project scratch files.
 - `vendor/`: the clean, commit-locked official LinuxCNC 2.9.10 checkout.
 
-The runtime data flow is documented in `docs/architecture.md`.
+The runtime data flow is documented in `docs/architecture.md`. The universal
+machine-code loader and its exact versioned file contract are documented in
+`docs/script-contract.md`.
 
 ## Accepted provisional machine profile
 

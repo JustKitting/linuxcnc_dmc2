@@ -66,6 +66,8 @@ pub const FILES: &[File] = &[
     project_file!("python/dmc2_axis/recovery_contract.py"),
     project_file!("python/dmc2_axis/recovery_ui.py"),
     project_file!("python/dmc2_axis/run_guard.py"),
+    project_file!("python/dmc2_axis/script_contract.py"),
+    project_file!("python/dmc2_axis/script_loader.py"),
     project_file!("python/dmc2_axis/spindle_feedback.py"),
     project_file!("python/dmc2_axis/ui_fault.py"),
     project_file!("var/log/linuxcnc/README.md"),

@@ -27,6 +27,17 @@ LinuxCNC session launch
   -> dmc2-process-supervisor (direct owner for configurable long-lived processes)
   -> unchanged milltask / io / halui / axis / DMC2 userspace adapters
   -> var/log/linuxcnc/process-lifecycle.tsv
+
+AXIS File Open / programmatic file path
+  -> dmc2ctl Rust script-contract parser (read-only inspection)
+  -> versioned typed contract + content revision
+  -> stock AXIS load or dmc2ctl native load
+  -> LinuxCNC returned loaded-file identity
+
+Explicit AXIS Run / dmc2ctl execute-file
+  -> active script prerequisites + exact loaded-file check
+  -> LinuxCNC program-run consumer
+  -> existing task-monitor error/recovery path
 ```
 
 LinuxCNC is the only Mesa owner. No Python process is in the live motion,
@@ -50,6 +61,10 @@ control machine state from that journal; it validates and displays records.
 - `rust/crates/dmc2-task-monitor`: native status and sole error-queue NML
   lifecycles, source-backed total classification, transition diagnostics,
   durable error journaling, and coherent status HAL publication.
+- `rust/crates/dmc2ctl`: typed control operations for an already-running
+  LinuxCNC session plus the authoritative arbitrary-file script-contract
+  parser and acknowledged load/run path. The exact file format is
+  `docs/script-contract.md`.
 - `rust/crates/dmc2-process-supervisor`: passive, data-catalogued lifecycle
   ownership for the LinuxCNC session and configurable long-lived processes.
   It retains exact child ownership, compact process identity, kernel `wait4`
@@ -77,9 +92,11 @@ control machine state from that journal; it validates and displays records.
 - `rust/crates/dmc2-hal-sys`: generated LinuxCNC HAL FFI declarations plus
   source-pinned return-code, lifecycle, and signal-link semantics.
 - `config`: reviewed machine constants consumed by compiled production code.
-- `python/dmc2_axis`: presentation-only AXIS integration required by AXIS. Its modules own
-  notification handling, pendant-mode visibility, and the special AXIS entry
-  point as separate responsibilities.
+- `python/dmc2_axis`: presentation-only AXIS integration required by AXIS. Its
+  modules own notification handling, pendant-mode visibility, strict decoding
+  of Rust script-inspection output, stock File Open/Run routing, and the
+  special AXIS entry point as separate responsibilities. It does not parse the
+  script header or implement a second LinuxCNC command protocol.
 - `live`: the single accepted hardware profile and its NC programs.
 - `archive/local`: untracked one-off experiments retained only for traceability.
 - `artifacts/captures`: untracked raw hardware captures.

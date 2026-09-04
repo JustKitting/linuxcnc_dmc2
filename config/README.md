@@ -15,7 +15,10 @@ bounded completion and stop deadlines from the accepted live profile.
 `operations.tsv` defines reusable operator actions and their compiled
 execution contracts. Adding or selecting a stored G-code operation is a data
 change, not a Rust code change. The standard `dmc2ctl execute <operation-id>`
-path loads and runs the exact cataloged program. `processes.tsv` defines every
+path loads and runs the exact cataloged program. A one-off or externally
+generated machine-code file does not require an `operations.tsv` row: the
+versioned header and headerless fallback in `docs/script-contract.md` define
+the universal file-loader contract. `processes.tsv` defines every
 tracked LinuxCNC process's
 exact program, launch site, ownership topology, criticality, backtrace policy,
 INI-argument placement, core-dump capture policy, and the collision-checked

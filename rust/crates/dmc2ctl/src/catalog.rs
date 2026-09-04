@@ -29,7 +29,7 @@ pub enum Prerequisite {
 }
 
 impl Prerequisite {
-    fn parse(value: &str) -> Option<Self> {
+    pub(crate) fn parse(value: &str) -> Option<Self> {
         match value {
             "desktop-session" => Some(Self::DesktopSession),
             "running-session" => Some(Self::RunningSession),

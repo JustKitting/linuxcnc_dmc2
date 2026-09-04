@@ -126,6 +126,11 @@ if _recovery_bootstrap_ready:
         _AxisUiFaultKind.AXIS_NOTIFICATION_POLICY_INSTALL_FAILED,
     )
     _install_extension(
+        ".script_loader",
+        "install_axis_script_loader",
+        _AxisUiFaultKind.SCRIPT_LOADER_INSTALL_FAILED,
+    )
+    _install_extension(
         ".run_guard",
         "install_axis_run_guard",
         _AxisUiFaultKind.AXIS_RUN_GUARD_INSTALL_FAILED,

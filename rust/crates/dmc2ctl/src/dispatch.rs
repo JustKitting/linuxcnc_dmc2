@@ -6,6 +6,7 @@ use std::time::Duration;
 
 use crate::catalog::{Catalog, Operation, OperationKind, Prerequisite};
 use crate::native::{ControlBackend, MachineState, NativeError, Receipt, Status, TaskMode};
+use crate::script::ScriptContract;
 use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 const STATUS_POLL_PERIOD: Duration = Duration::from_millis(20);
@@ -30,11 +31,9 @@ pub fn execute_operation(
         OperationKind::Control => execute_control(operation, backend, physical_estop_pressed)
             .map(ExecutionOutcome::Control),
         OperationKind::Program => {
-            let status = backend.status()?;
-            check_prerequisites(operation, &status, None)?;
-            let (path, load) = load_program(catalog, operation, backend)?;
-            let run = run_program(catalog, operation, backend)?;
-            Ok(ExecutionOutcome::Program { path, load, run })
+            require_program_driver(operation)?;
+            let path = program_path(catalog, operation)?;
+            execute_program_path(&operation.id, &path, &operation.prerequisites, backend)
         }
         OperationKind::Ui | OperationKind::Internal => {
             Err(DispatchError::UnsupportedExecutionKind {
@@ -43,6 +42,18 @@ pub fn execute_operation(
             })
         }
     }
+}
+
+pub fn execute_script(
+    script: &ScriptContract,
+    backend: &mut impl ControlBackend,
+) -> Result<ExecutionOutcome, DispatchError> {
+    execute_program_path(
+        &script_identity(script.path()),
+        script.path(),
+        script.prerequisites(),
+        backend,
+    )
 }
 
 pub fn execute_control(
@@ -104,23 +115,40 @@ pub fn load_program(
     require_kind(operation, OperationKind::Program)?;
     require_program_driver(operation)?;
     let path = program_path(catalog, operation)?;
+    load_program_path(&operation.id, &path, backend)
+}
+
+pub fn load_script(
+    script: &ScriptContract,
+    backend: &mut impl ControlBackend,
+) -> Result<(PathBuf, Receipt), DispatchError> {
+    load_program_path(&script_identity(script.path()), script.path(), backend)
+}
+
+fn load_program_path(
+    identity: &str,
+    path: &Path,
+    backend: &mut impl ControlBackend,
+) -> Result<(PathBuf, Receipt), DispatchError> {
     let status = backend.status()?;
     if !status.interpreter_idle() {
         return Err(DispatchError::LoadWhileInterpreterActive {
+            identity: identity.to_owned(),
+            path: path.to_path_buf(),
             interpreter_state: status.interpreter_state,
         });
     }
 
     backend.program_close()?;
-    let receipt = backend.program_open(&path)?;
+    let receipt = backend.program_open(path)?;
     let observed = backend.status()?;
-    if !same_file(&path, &observed.loaded_file) {
+    if !same_file(path, &observed.loaded_file) {
         return Err(DispatchError::LoadedFileMismatch {
-            expected: path,
+            expected: path.to_path_buf(),
             observed: observed.loaded_file,
         });
     }
-    Ok((path, receipt))
+    Ok((path.to_path_buf(), receipt))
 }
 
 pub fn run_program(
@@ -131,18 +159,44 @@ pub fn run_program(
     require_kind(operation, OperationKind::Program)?;
     require_program_driver(operation)?;
     let path = program_path(catalog, operation)?;
+    run_program_path(&operation.id, &path, &operation.prerequisites, backend)
+}
+
+fn execute_program_path(
+    identity: &str,
+    path: &Path,
+    prerequisites: &[Prerequisite],
+    backend: &mut impl ControlBackend,
+) -> Result<ExecutionOutcome, DispatchError> {
     let status = backend.status()?;
-    if !same_file(&path, &status.loaded_file) {
+    check_prerequisite_values(identity, prerequisites, &status, None)?;
+    let (path, load) = load_program_path(identity, path, backend)?;
+    let run = run_program_path(identity, &path, prerequisites, backend)?;
+    Ok(ExecutionOutcome::Program { path, load, run })
+}
+
+fn run_program_path(
+    identity: &str,
+    path: &Path,
+    prerequisites: &[Prerequisite],
+    backend: &mut impl ControlBackend,
+) -> Result<Receipt, DispatchError> {
+    let status = backend.status()?;
+    if !same_file(path, &status.loaded_file) {
         return Err(DispatchError::RunRequiresExactLoadedProgram {
-            requested: path,
+            requested: path.to_path_buf(),
             loaded: status.loaded_file,
         });
     }
-    check_prerequisites(operation, &status, None)?;
+    check_prerequisite_values(identity, prerequisites, &status, None)?;
     if status.task_mode != TaskMode::Auto {
         backend.set_auto_mode()?;
     }
     backend.program_run().map_err(Into::into)
+}
+
+fn script_identity(path: &Path) -> String {
+    format!("file:{}", path.display())
 }
 
 fn require_kind(operation: &Operation, expected: OperationKind) -> Result<(), DispatchError> {
@@ -207,7 +261,21 @@ fn check_prerequisites(
     status: &Status,
     physical_estop_pressed: Option<bool>,
 ) -> Result<(), DispatchError> {
-    for prerequisite in &operation.prerequisites {
+    check_prerequisite_values(
+        &operation.id,
+        &operation.prerequisites,
+        status,
+        physical_estop_pressed,
+    )
+}
+
+fn check_prerequisite_values(
+    identity: &str,
+    prerequisites: &[Prerequisite],
+    status: &Status,
+    physical_estop_pressed: Option<bool>,
+) -> Result<(), DispatchError> {
+    for prerequisite in prerequisites {
         let satisfied = match prerequisite {
             // This backend operates an already-running LinuxCNC session. UI
             // launch operations are rejected by `require_kind` before this
@@ -224,7 +292,7 @@ fn check_prerequisites(
         };
         if !satisfied {
             return Err(DispatchError::Prerequisite {
-                id: operation.id.clone(),
+                id: identity.to_owned(),
                 prerequisite: *prerequisite,
                 machine_state: status.machine_state,
                 task_mode: status.task_mode,
@@ -276,6 +344,8 @@ pub enum DispatchError {
         project_root: PathBuf,
     },
     LoadWhileInterpreterActive {
+        identity: String,
+        path: PathBuf,
         interpreter_state: i32,
     },
     LoadedFileMismatch {
@@ -354,9 +424,14 @@ impl fmt::Display for DispatchError {
                 path.display(),
                 project_root.display()
             ),
-            Self::LoadWhileInterpreterActive { interpreter_state } => write!(
+            Self::LoadWhileInterpreterActive {
+                identity,
+                path,
+                interpreter_state,
+            } => write!(
                 formatter,
-                "PROGRAM_LOAD_BLOCKED: interpreter_state={interpreter_state}; abort or wait for idle"
+                "PROGRAM_LOAD_BLOCKED: operation={identity} file={} interpreter_state={interpreter_state}; action: use the visible Abort control or wait for the current task to become idle, then retry",
+                path.display()
             ),
             Self::LoadedFileMismatch { expected, observed } => write!(
                 formatter,

@@ -13,7 +13,10 @@ The machine project uses four compiled interfaces:
   `dmc2ctl execute <operation-id>` is the standard path: a program operation
   is loaded from its cataloged path, acknowledged, and run in one invocation.
   The lower-level `load` and `run` commands remain available for explicit
-  operator-controlled staging.
+  operator-controlled staging. Arbitrary regular machine-code files use the
+  same compiled boundary through `inspect-file PATH`, `load-file PATH`, and
+  `execute-file PATH`; their exact v1 contract is documented in
+  `docs/script-contract.md`.
 
 `scripts/build_native.sh` builds the complete release with warnings denied and
 stages the userspace binaries under `native/bin` and the reviewed LinuxCNC

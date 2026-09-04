@@ -147,6 +147,13 @@ macro_rules! define_recovery_contracts {
                 }
             }
 
+            pub fn from_slug(slug: &str) -> Option<Self> {
+                match slug {
+                    $($class_slug => Some(Self::$class),)+
+                    _ => None,
+                }
+            }
+
             pub const fn name(self) -> &'static str {
                 match self {
                     $(Self::$class => $class_name,)+

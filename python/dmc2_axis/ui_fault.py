@@ -56,6 +56,11 @@ class AxisUiFaultKind(Enum):
         RecoveryClassCode.RELAUNCH_APPLICATION,
         "correct the named run-control cause before running a program; recovery controls install independently",
     )
+    SCRIPT_LOADER_INSTALL_FAILED = AxisUiFaultContract(
+        "SCRIPT_LOADER_INSTALL_FAILED",
+        RecoveryClassCode.RELAUNCH_APPLICATION,
+        "correct the named script-loader cause and relaunch DMC2 LinuxCNC; Abort, Clear Fault, and Pendant Mode remain independent",
+    )
     BASE_RECOVERY_CONTROL_REFRESH_FAILED = AxisUiFaultContract(
         "BASE_RECOVERY_CONTROL_REFRESH_FAILED",
         RecoveryClassCode.RECHECK_SOURCE,
@@ -110,6 +115,36 @@ class AxisUiFaultKind(Enum):
         "PROGRAM_RUN_STATUS_UNAVAILABLE",
         RecoveryClassCode.RECHECK_SOURCE,
         "wait for a valid LinuxCNC status observation, then use the visible Pendant Mode control",
+    )
+    SCRIPT_CONTRACT_INSPECTION_FAILED = AxisUiFaultContract(
+        "SCRIPT_CONTRACT_INSPECTION_FAILED",
+        RecoveryClassCode.RECHECK_SOURCE,
+        "correct or choose the machine-code file through the visible AXIS File Open control; Pendant Mode remains available",
+    )
+    SCRIPT_LOAD_SUBMISSION_FAILED = AxisUiFaultContract(
+        "SCRIPT_LOAD_SUBMISSION_FAILED",
+        RecoveryClassCode.ABORT_TASK,
+        "use the visible Abort and Clear Fault controls, correct or choose the file through AXIS File Open, then return to Pendant Mode",
+    )
+    PROGRAM_RUN_REQUIRES_EXACT_LOADED_FILE = AxisUiFaultContract(
+        "PROGRAM_RUN_REQUIRES_EXACT_LOADED_FILE",
+        RecoveryClassCode.RECHECK_SOURCE,
+        "load the intended file through the visible AXIS File Open control before retrying Run; Pendant Mode remains available",
+    )
+    PROGRAM_RUN_REQUIRES_MACHINE_READY = AxisUiFaultContract(
+        "PROGRAM_RUN_REQUIRES_MACHINE_READY",
+        RecoveryClassCode.RESTORE_MACHINE,
+        "use the visible E-stop Reset and Machine On controls required by this script, then return to Pendant Mode or retry Run",
+    )
+    PROGRAM_RUN_REQUIRES_IDLE_INTERPRETER = AxisUiFaultContract(
+        "PROGRAM_RUN_REQUIRES_IDLE_INTERPRETER",
+        RecoveryClassCode.ABORT_TASK,
+        "use the visible Abort and Clear Fault controls or wait for the active program to finish, then return to Pendant Mode or retry Run",
+    )
+    PROGRAM_RUN_GUARD_EVALUATION_FAILED = AxisUiFaultContract(
+        "PROGRAM_RUN_GUARD_EVALUATION_FAILED",
+        RecoveryClassCode.RELAUNCH_APPLICATION,
+        "use the visible recovery controls, correct the named contract-evaluation cause, and relaunch DMC2 LinuxCNC before retrying Run",
     )
     PROGRAM_RUN_REQUIRES_HOMED_POSITION = AxisUiFaultContract(
         "PROGRAM_RUN_REQUIRES_HOMED_POSITION",

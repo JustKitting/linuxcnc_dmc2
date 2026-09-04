@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::catalog::default_catalog_path;
 use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
-pub const USAGE: &str = "Usage: dmc2ctl [--catalog PATH] [--nml-file PATH] <list|describe ID|status|execute ID|load ID|run ID>";
+pub const USAGE: &str = "Usage: dmc2ctl [--catalog PATH] [--nml-file PATH] <list|describe ID|status|execute ID|load ID|run ID|inspect-file PATH|load-file PATH|execute-file PATH>";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Action {
@@ -16,6 +16,9 @@ pub enum Action {
     Execute(String),
     Load(String),
     Run(String),
+    InspectFile(PathBuf),
+    LoadFile(PathBuf),
+    ExecuteFile(PathBuf),
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -74,6 +77,9 @@ fn parse(
         "execute" => Action::Execute(single_id(command, remaining)?),
         "load" => Action::Load(single_id(command, remaining)?),
         "run" => Action::Run(single_id(command, remaining)?),
+        "inspect-file" => Action::InspectFile(single_path(command, remaining)?),
+        "load-file" => Action::LoadFile(single_path(command, remaining)?),
+        "execute-file" => Action::ExecuteFile(single_path(command, remaining)?),
         "list" | "status" => return Err(CliError::UnexpectedArguments(command.to_owned())),
         _ => return Err(CliError::UnknownCommand(command.to_owned())),
     };
@@ -101,6 +107,13 @@ fn single_id(command: &str, remaining: &[OsString]) -> Result<String, CliError> 
         .map_err(CliError::NonUtf8Id)
 }
 
+fn single_path(command: &str, remaining: &[OsString]) -> Result<PathBuf, CliError> {
+    if remaining.len() != 1 {
+        return Err(CliError::ExpectedOnePath(command.to_owned()));
+    }
+    Ok(PathBuf::from(remaining[0].clone()))
+}
+
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum CliError {
     MissingCommand,
@@ -110,6 +123,7 @@ pub enum CliError {
     UnknownCommand(String),
     UnexpectedArguments(String),
     ExpectedOneId(String),
+    ExpectedOnePath(String),
 }
 
 impl fmt::Display for CliError {
@@ -124,6 +138,9 @@ impl fmt::Display for CliError {
                 write!(formatter, "{value} does not accept arguments")
             }
             Self::ExpectedOneId(value) => write!(formatter, "{value} requires exactly one ID"),
+            Self::ExpectedOnePath(value) => {
+                write!(formatter, "{value} requires exactly one file path")
+            }
         }
     }
 }
@@ -137,7 +154,8 @@ impl RecoveryClassified for CliError {
             | Self::NonUtf8Id(_)
             | Self::UnknownCommand(_)
             | Self::UnexpectedArguments(_)
-            | Self::ExpectedOneId(_) => RecoveryClass::RelaunchApplication,
+            | Self::ExpectedOneId(_)
+            | Self::ExpectedOnePath(_) => RecoveryClass::RelaunchApplication,
         }
     }
 }

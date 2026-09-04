@@ -3,8 +3,11 @@ mod cli;
 mod dispatch;
 mod hal;
 mod native;
+mod script;
 
 use std::fmt;
+use std::fmt::Write as _;
+use std::os::unix::ffi::OsStrExt;
 
 use dmc2_diagnostics::{RecoveryClass, RecoveryClassified, RecoveryDisplay};
 
@@ -13,13 +16,16 @@ use cli::{Action, CliError};
 use dispatch::{DispatchError, ExecutionOutcome};
 use hal::HalError;
 use native::{ControlBackend, NativeError, Session, Status};
+use script::{ScriptContract, ScriptError, INSPECTION_FORMAT};
 
 fn main() {
     match run() {
         Ok(()) => {}
         Err(error) => {
             eprintln!("dmc2ctl: {}", RecoveryDisplay(&error));
-            eprintln!("{}", cli::USAGE);
+            if matches!(error, ApplicationError::Cli(_)) {
+                eprintln!("{}", cli::USAGE);
+            }
             std::process::exit(1);
         }
     }
@@ -30,15 +36,20 @@ fn run() -> Result<(), ApplicationError> {
         println!("{}", cli::USAGE);
         return Ok(());
     };
-    let catalog = Catalog::open(arguments.catalog)?;
+    let catalog_path = arguments.catalog;
+    let nml_file = arguments.nml_file;
     match arguments.action {
-        Action::List => print_operations(&catalog),
-        Action::Describe(id) => print_operation(catalog.operation(&id)?),
+        Action::List => print_operations(&Catalog::open(catalog_path)?),
+        Action::Describe(id) => {
+            let catalog = Catalog::open(catalog_path)?;
+            print_operation(catalog.operation(&id)?);
+        }
         Action::Status => {
-            let mut session = Session::open(&arguments.nml_file)?;
+            let mut session = Session::open(&nml_file)?;
             print_status(&session.status()?);
         }
         Action::Execute(id) => {
+            let catalog = Catalog::open(catalog_path)?;
             let operation = catalog.operation(&id)?;
             let physical_estop_pressed = if operation
                 .prerequisites
@@ -49,18 +60,19 @@ fn run() -> Result<(), ApplicationError> {
             } else {
                 None
             };
-            let mut session = Session::open(&arguments.nml_file)?;
+            let mut session = Session::open(&nml_file)?;
             let outcome = dispatch::execute_operation(
                 &catalog,
                 operation,
                 &mut session,
                 physical_estop_pressed,
             )?;
-            print_execution(operation, &outcome);
+            print_execution(&operation.id, &outcome);
         }
         Action::Load(id) => {
+            let catalog = Catalog::open(catalog_path)?;
             let operation = catalog.operation(&id)?;
-            let mut session = Session::open(&arguments.nml_file)?;
+            let mut session = Session::open(&nml_file)?;
             let (path, receipt) = dispatch::load_program(&catalog, operation, &mut session)?;
             println!(
                 "operation={} action=load file={} command_serial={} echo_serial={} rcs_status={}",
@@ -72,8 +84,9 @@ fn run() -> Result<(), ApplicationError> {
             );
         }
         Action::Run(id) => {
+            let catalog = Catalog::open(catalog_path)?;
             let operation = catalog.operation(&id)?;
-            let mut session = Session::open(&arguments.nml_file)?;
+            let mut session = Session::open(&nml_file)?;
             let receipt = dispatch::run_program(&catalog, operation, &mut session)?;
             println!(
                 "operation={} action=run command_serial={} echo_serial={} rcs_status={}",
@@ -82,6 +95,30 @@ fn run() -> Result<(), ApplicationError> {
                 receipt.echo_serial_number,
                 receipt.rcs_status
             );
+        }
+        Action::InspectFile(path) => {
+            let script = ScriptContract::open(&path)?;
+            print_script_contract(&script);
+        }
+        Action::LoadFile(path) => {
+            let script = ScriptContract::open(&path)?;
+            let mut session = Session::open(&nml_file)?;
+            let (loaded, receipt) = dispatch::load_script(&script, &mut session)?;
+            println!(
+                "operation=file:{} action=load-file file={} contract_source={} command_serial={} echo_serial={} rcs_status={}",
+                loaded.display(),
+                loaded.display(),
+                script.source().name(),
+                receipt.command_serial_number,
+                receipt.echo_serial_number,
+                receipt.rcs_status
+            );
+        }
+        Action::ExecuteFile(path) => {
+            let script = ScriptContract::open(&path)?;
+            let mut session = Session::open(&nml_file)?;
+            let outcome = dispatch::execute_script(&script, &mut session)?;
+            print_execution(&format!("file:{}", script.path().display()), &outcome);
         }
     }
     Ok(())
@@ -151,18 +188,18 @@ fn print_status(status: &Status) {
     println!("loaded_file={}", status.loaded_file.display());
 }
 
-fn print_execution(operation: &Operation, outcome: &ExecutionOutcome) {
+fn print_execution(identity: &str, outcome: &ExecutionOutcome) {
     match outcome {
         ExecutionOutcome::Control(receipt) => println!(
             "operation={} action=execute command_serial={} echo_serial={} rcs_status={}",
-            operation.id,
+            identity,
             receipt.command_serial_number,
             receipt.echo_serial_number,
             receipt.rcs_status
         ),
         ExecutionOutcome::Program { path, load, run } => println!(
             "operation={} action=execute-program file={} load_command_serial={} load_echo_serial={} load_rcs_status={} run_command_serial={} run_echo_serial={} run_rcs_status={}",
-            operation.id,
+            identity,
             path.display(),
             load.command_serial_number,
             load.echo_serial_number,
@@ -174,6 +211,42 @@ fn print_execution(operation: &Operation, outcome: &ExecutionOutcome) {
     }
 }
 
+fn print_script_contract(script: &ScriptContract) {
+    println!("format={INSPECTION_FORMAT}");
+    println!("path_hex={}", hex(script.path().as_os_str().as_bytes()));
+    println!("content_bytes={}", script.revision().bytes());
+    println!("content_fnv1a64={:016x}", script.revision().fnv1a64());
+    println!("contract_source={}", script.source().name());
+    println!(
+        "effects={}",
+        script
+            .effects()
+            .iter()
+            .map(|effect| effect.name())
+            .collect::<Vec<_>>()
+            .join(";")
+    );
+    println!(
+        "prerequisites={}",
+        script
+            .prerequisites()
+            .iter()
+            .map(|prerequisite| prerequisite.name())
+            .collect::<Vec<_>>()
+            .join(";")
+    );
+    println!("recovery_class={}", script.recovery().name());
+    println!("recovery_slug={}", script.recovery().hal_slug());
+}
+
+fn hex(bytes: &[u8]) -> String {
+    let mut encoded = String::with_capacity(bytes.len() * 2);
+    for byte in bytes {
+        write!(&mut encoded, "{byte:02x}").expect("writing to String cannot fail");
+    }
+    encoded
+}
+
 #[derive(Debug)]
 enum ApplicationError {
     Cli(CliError),
@@ -181,6 +254,7 @@ enum ApplicationError {
     Native(NativeError),
     Dispatch(DispatchError),
     Hal(HalError),
+    Script(ScriptError),
 }
 
 impl From<CliError> for ApplicationError {
@@ -213,6 +287,12 @@ impl From<HalError> for ApplicationError {
     }
 }
 
+impl From<ScriptError> for ApplicationError {
+    fn from(value: ScriptError) -> Self {
+        Self::Script(value)
+    }
+}
+
 impl fmt::Display for ApplicationError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
@@ -221,6 +301,7 @@ impl fmt::Display for ApplicationError {
             Self::Native(error) => error.fmt(formatter),
             Self::Dispatch(error) => error.fmt(formatter),
             Self::Hal(error) => error.fmt(formatter),
+            Self::Script(error) => error.fmt(formatter),
         }
     }
 }
@@ -233,6 +314,7 @@ impl RecoveryClassified for ApplicationError {
             Self::Native(error) => error.recovery_class(),
             Self::Dispatch(error) => error.recovery_class(),
             Self::Hal(error) => error.recovery_class(),
+            Self::Script(error) => error.recovery_class(),
         }
     }
 }
