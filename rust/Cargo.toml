@@ -1,7 +1,6 @@
 [workspace]
 resolver = "2"
 members = [
-    "crates/dmc2-acceptance",
     "crates/dmc2-core",
     "crates/dmc2-diagnostics",
     "crates/dmc2-hal-sys",

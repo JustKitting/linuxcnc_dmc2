@@ -1,8 +1,7 @@
 # Production pendant and LinuxCNC task-state inputs.
 #
-# This file is sourced by both the live machine and the real LinuxCNC motion
-# acceptance machine.  Keeping one wiring contract prevents a test from
-# passing through an adapter that the deployed machine does not use.
+# This file is sourced by the live machine and is the only deployed pendant
+# input-routing contract.
 
 net dmc2-pendant-connected dmc2-pendant.connected => dmc2-pendant-control.connected
 net dmc2-pendant-snapshot-generation dmc2-pendant.snapshot-generation => dmc2-pendant-control.snapshot-generation dmc2-task-monitor.ser-fd-generation-in

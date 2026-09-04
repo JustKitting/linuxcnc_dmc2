@@ -1,7 +1,7 @@
 # Production LinuxCNC 2.9.10 motion-consumer contract.
 #
-# The real acceptance machine sources this exact file and observes
-# joint.N.motor-pos-cmd.  It cannot supply or overwrite that result.
+# The live machine sources this exact file. LinuxCNC-owned acknowledgement and
+# position feedback remain separate evidence from DMC2 producer output.
 
 # Realtime acknowledgement comes from LinuxCNC motion itself, never from a
 # local publisher or a test adapter.

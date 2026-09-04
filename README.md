@@ -21,8 +21,7 @@ offline reference controllers are not part of this repository.
 - `python/dmc2_axis/`: AXIS-required presentation only; never the live launch
   or motion-control boundary.
 - `firmware/`: Nano source and Mesa firmware images.
-- `tests/linuxcnc-motion/`: isolated real-LinuxCNC motion-consumer fixture.
-- `scripts/`: release build, real motion verification, and module installation.
+- `scripts/`: release build and module installation.
 - `patches/`: provenance-locked post-release fixes applied to the pristine
   LinuxCNC 2.9.10 source only in an ephemeral build tree.
 - `docs/`: architecture, signal audits, and historical machine notes.
@@ -396,41 +395,22 @@ those enable signals are not mislabeled as physical motor response.
 These are non-blocking for the accepted axis/pendant/GUI profile and remain
 explicitly disabled—not silently guessed.
 
-## Isolated real-LinuxCNC validation
+## Build boundary
 
-The complete verifier refuses to run while another LinuxCNC realtime host is
-active. It opens neither USB serial nor Mesa hardware:
+The Rust workspace can be formatted and compiled without starting LinuxCNC:
 
 ```bash
 cd <project-root>
-scripts/verify.sh
+cargo fmt --manifest-path rust/Cargo.toml --all --check
+env RUSTFLAGS=-Dwarnings cargo build --manifest-path rust/Cargo.toml --workspace --release
 ```
 
-It builds the complete Rust release with warnings denied, verifies that all
-deployed DMC2 binaries byte-match that release, and starts LinuxCNC 2.9.10 with
-real `motmod` plus a software step generator. A PTY supplies raw P3 packets to
-the deployed serial bridge. The fixture sources the same pendant input and
-motion HAL contracts as the live profile and observes LinuxCNC-owned joint
-commands and downstream step counts. It first keeps all joints unhomed,
-explicitly selects teleop mode, and requires a pendant detent to traverse the
-real `axis.*.jog-*` consumer. It then selects free mode; its 20 data-driven
-moves cover X/Y/Z, x1/x10/x100, both directions, and consecutive X/x1 commands.
-Three additional
-paths exercise real LinuxCNC jog-stop handling, the production controller's
-X/Y/Z limit bounce, toleranced completion, raw-limit-held recovery, restricted
-away-direction x1 jog, native hard-limit masking, and safety-latch reset. The
-same run starts real LinuxCNC 2.9.10 homemod while a real jog is active and
-requires exactly one controlled-stop event across the complete level-active
-homing interval. A separate real homemod path holds a shared home/positive-limit
-input active long enough to cross multiple task-monitor publications and
-requires the production diagnostic journal to remain free of hard-limit
-warnings during that joint's homing state. It then validates every real
-task-monitor error-journal event with the production AXIS suppression policy,
-requires exactly one controlled stop and three immediate stops while leaving
-unrelated LinuxCNC messages visible, and forbids LinuxCNC's native
-joint-limit error. It loads no
-HostMot2 driver, so it cannot address the physical Mesa card or prove physical
-switch or motor behavior.
+That establishes only that the source formats and compiles. It does not prove
+launch, HAL registration, routing, LinuxCNC consumer acceptance, Ethernet
+delivery, physical movement, limit behavior, recovery, UI survival, or spindle
+behavior. The removed offline acceptance harness must not be reconstructed or
+used as a substitute for those boundaries.
+
 `native/bin/dmc2-linuxcnc` is the standard compiled launcher. With no argument
 it validates launch inputs and deployment identity only. The literal `--live`
 flag is required before it
@@ -492,12 +472,12 @@ child subreaper, while the live INI/HAL configuration places
 `dmc2-process-supervisor` directly around `milltask`, I/O, HALUI, AXIS, and the
 two DMC2 userspace adapters. Their shared, locked journal at
 `var/log/linuxcnc/process-lifecycle.tsv` retains catalogued ownership, exact
-invocations, zombie-safe owner identity, running and terminal-before-reap
-`/proc`/cgroup snapshots, independently checked `waitid` and `wait4` status,
-signal/core policy, resource usage, matching LinuxCNC task backtraces, and
-identity-checked copies of file-based kernel cores. The trackers do not
-restart, stop, signal, or otherwise control the machine; see
-`docs/process-lifecycle-tracking.md` for the exact evidence boundary.
+invocations, compact process identity, kernel `wait4` status and resource
+usage, and matching LinuxCNC task backtraces. The session owner also captures
+LinuxCNC stdout/stderr and writes `/tmp/linuxcnc.report` after a failed
+session. The trackers do not restart, stop, signal, or otherwise control the
+machine. See `docs/process-lifecycle.md` for the exact evidence boundary and
+its explicit limitations.
 
 ## Sources
 

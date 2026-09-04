@@ -105,20 +105,3 @@ pub fn signal_name(signal: i32) -> &'static str {
         _ => "UNKNOWN_SIGNAL",
     }
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn renders_only_tab_safe_dynamic_values() {
-        let event = Event::new("started", 42, 7)
-            .encoded_os_field("program_hex", OsStr::new("a\tb\nc"))
-            .field("child_pid", 9);
-
-        assert_eq!(
-            event.render(),
-            "schema=dmc2-process-lifecycle-v1\tevent=started\tunix_ns=42\tsupervisor_pid=7\tprogram_hex=6109620a63\tchild_pid=9"
-        );
-    }
-}

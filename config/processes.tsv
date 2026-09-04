@@ -1,15 +1,11 @@
-DMC2_PROCESS_CATALOG	4
-role	program	launch_site	ownership	criticality	backtrace	argument_placement	core_dump_policy	owner_comm	live_snapshot_period_ms	caught_signal_evidence
-linuxcnc-session	/usr/bin/linuxcnc	compiled-launcher	session-root	controller-critical	none	none	enable-to-hard-limit	dmc2-session	1000	none
-linuxcncsvr	/usr/bin/linuxcncsvr	linuxcnc-hardcoded-server	self-daemonizing-descendant	controller-critical	none	linuxcnc-appends-ini	enable-to-hard-limit	none	1000	none
-rtapi-app	/usr/bin/rtapi_app	halcmd-hardcoded-loadrt	persistent-master	controller-critical	none	none	enable-to-hard-limit	none	1000	none
-iocontrol	/usr/bin/io	ini-emcio	direct-child	controller-critical	none	linuxcnc-appends-ini	enable-to-hard-limit	dmc2-io-owner	1000	libc-signal-int-term-v1
-halui	/usr/bin/halui	ini-halui	direct-child	controller-critical	none	linuxcnc-appends-ini	enable-to-hard-limit	dmc2-hal-owner	1000	libc-signal-int-term-v1
-serial-bridge	../native/bin/dmc2-serial-bridge	pendant-hal	direct-child	controller-critical	none	none	enable-to-hard-limit	dmc2-ser-owner	1000	none
-task-monitor	../native/bin/dmc2-task-monitor	pendant-hal	direct-child	controller-critical	none	none	enable-to-hard-limit	dmc2-mon-owner	1000	none
-milltask	/usr/bin/milltask	ini-task	direct-child	controller-critical	linuxcnc-task	linuxcnc-appends-ini	enable-to-hard-limit	dmc2-task-owner	1000	libc-signal-int-term-v1
-axis	/usr/bin/axis	ini-display	direct-child	operator-interface	none	linuxcnc-prepends-ini	enable-to-hard-limit	dmc2-axis-owner	1000	none
-lifecycle-test	/bin/sh	compiled-verification	direct-child	verification-only	none	none	enable-to-hard-limit	dmc2-test-owner	10	none
-task-backtrace-test	/bin/sh	compiled-verification	direct-child	verification-only	linuxcnc-task	none	enable-to-hard-limit	dmc2-bt-owner	10	none
-signal-evidence-test	./dmc2-signal-fixture	compiled-verification	direct-child	verification-only	none	none	enable-to-hard-limit	dmc2-sig-owner	10	libc-signal-int-term-v1
-session-lifecycle-test	/bin/sh	compiled-verification	session-root	verification-only	none	none	enable-to-hard-limit	dmc2-test-sess	10	none
+DMC2_PROCESS_CATALOG	2
+role	program	launch_site	ownership	criticality	backtrace	argument_placement	core_dump_policy	owner_comm
+linuxcnc-session	/usr/bin/linuxcnc	compiled-launcher	session-root	controller-critical	none	none	enable-to-hard-limit	dmc2-session
+linuxcncsvr	/usr/bin/linuxcncsvr	linuxcnc-hardcoded-server	self-daemonizing-descendant	controller-critical	none	linuxcnc-appends-ini	enable-to-hard-limit	none
+rtapi-app	/usr/bin/rtapi_app	halcmd-hardcoded-loadrt	persistent-master	controller-critical	none	none	enable-to-hard-limit	none
+iocontrol	/usr/bin/io	ini-emcio	direct-child	controller-critical	none	linuxcnc-appends-ini	enable-to-hard-limit	dmc2-io-owner
+halui	/usr/bin/halui	ini-halui	direct-child	controller-critical	none	linuxcnc-appends-ini	enable-to-hard-limit	dmc2-hal-owner
+serial-bridge	../native/bin/dmc2-serial-bridge	pendant-hal	direct-child	controller-critical	none	none	enable-to-hard-limit	dmc2-ser-owner
+task-monitor	../native/bin/dmc2-task-monitor	pendant-hal	direct-child	controller-critical	none	none	enable-to-hard-limit	dmc2-mon-owner
+milltask	/usr/bin/milltask	ini-task	direct-child	controller-critical	linuxcnc-task	linuxcnc-appends-ini	enable-to-hard-limit	dmc2-task-owner
+axis	/usr/bin/axis	ini-display	direct-child	operator-interface	none	linuxcnc-prepends-ini	enable-to-hard-limit	dmc2-axis-owner

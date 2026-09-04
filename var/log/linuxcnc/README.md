@@ -12,17 +12,11 @@ Runtime payloads remain ignored by Git.
 - `process-lifecycle.tsv` is the locked, checksummed, append-only lifecycle
   stream shared by `dmc2-process-supervisor` and
   `dmc2-session-supervisor`. It records catalogued roles and ownership,
-  tracker/child/parent identity, exact invocation bytes, `/proc` process
-  snapshots before and after execution, terminal cgroup counters and
-  membership, monotonic lifetime, independently checked `waitid` and `wait4`
-  status, exit code or terminating signal, core-dump policy/status, and
-  resource usage.
+  tracker/child identity, exact invocation bytes, compact `/proc` identity,
+  monotonic lifetime, kernel `wait4` status, exit code or terminating signal,
+  configured core limit, and resource usage.
 - `process-backtrace-<pid>-<time>.txt` is a durable copy of a matching
   `/tmp/backtrace.<pid>` created by LinuxCNC's own `SIGSEGV`/`SIGFPE` handler.
-- `process-core-<pid>-<time>.core` is an identity-checked, synchronized copy
-  of a file-based kernel core retained before the owning tracker reaps that
-  child. The lifecycle record states explicitly when policy, naming, absence,
-  rejection, or an I/O failure prevents a copy.
 
 This tracking is passive. It never restarts, stops, enables, disables, homes,
 jogs, or otherwise changes the machine. LinuxCNC 2.9.10 catches `SIGINT` and
@@ -33,4 +27,4 @@ header is preserved separately. If the supervisor and `milltask` are killed
 simultaneously, the already-synchronized start record remains but no user-space
 process can guarantee a final record after its own termination. The outer
 session subreaper records direct-owner deaths and adopted descendants while it
-remains alive. See `docs/process-lifecycle-tracking.md` for exact boundaries.
+remains alive. See `docs/process-lifecycle.md` for exact boundaries.

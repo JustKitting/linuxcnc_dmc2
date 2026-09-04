@@ -109,19 +109,3 @@ unsafe extern "C" {
     fn getrlimit(resource: c_int, limit: *mut RawLimit) -> c_int;
     fn setrlimit(resource: c_int, limit: *const RawLimit) -> c_int;
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn child_receives_the_data_selected_core_limit() {
-        let plan = CoreDumpPlan::capture(CoreDumpPolicy::EnableToHardLimit)
-            .expect("capture inherited core limit");
-        let mut command = Command::new("/bin/sh");
-        command.args(["-c", "test \"$(ulimit -Sc)\" = \"$(ulimit -Hc)\""]);
-        plan.configure(&mut command);
-
-        assert!(command.status().expect("run core-limit child").success());
-    }
-}

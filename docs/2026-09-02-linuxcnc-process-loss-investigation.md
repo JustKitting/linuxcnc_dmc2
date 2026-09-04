@@ -1,5 +1,12 @@
 # LinuxCNC process-loss investigation — 2026-09-02
 
+This is a historical incident record. Its later "Tracking correction" section
+describes a superseded, overbuilt implementation containing rolling snapshots,
+fault-injection fixtures, a signal interposer, and kernel-core copying. Those
+features have been removed. The current, deliberately smaller ownership and
+evidence boundary is `docs/process-lifecycle.md`; nothing below should be read
+as a description of the current build.
+
 ## What was observed
 
 The affected live session eventually retained its outer LinuxCNC shell, AXIS,
@@ -98,7 +105,7 @@ could otherwise generate an invalid soft communication error. The overlay
 includes that exact change as fault-path hardening. It is not evidence for the
 historical `milltask` exit or `rtapi_app` SIGSEGV.
 
-## Tracking correction
+## Superseded tracking design (historical)
 
 Future launches use two independent ownership layers:
 

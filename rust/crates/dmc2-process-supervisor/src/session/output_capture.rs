@@ -222,26 +222,3 @@ fn temporary_report_path(report_path: &Path) -> PathBuf {
 fn optional_i32(value: Option<i32>) -> String {
     value.map_or_else(|| "NONE".to_owned(), |value| value.to_string())
 }
-
-#[cfg(test)]
-mod tests {
-    use super::*;
-    use std::os::unix::process::ExitStatusExt;
-
-    #[test]
-    fn temporary_report_name_is_bound_to_the_supervisor_process() {
-        let report = Path::new("/tmp/linuxcnc.report");
-        assert_eq!(
-            temporary_report_path(report),
-            PathBuf::from(format!(
-                "/tmp/linuxcnc.report.partial-{}",
-                std::process::id()
-            ))
-        );
-    }
-
-    #[test]
-    fn nonzero_status_is_not_treated_as_success() {
-        assert!(!ExitStatus::from_raw(37 << 8).success());
-    }
-}

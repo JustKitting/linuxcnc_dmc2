@@ -52,23 +52,14 @@ control machine state from that journal; it validates and displays records.
   durable error journaling, and coherent status HAL publication.
 - `rust/crates/dmc2-process-supervisor`: passive, data-catalogued lifecycle
   ownership for the LinuxCNC session and configurable long-lived processes.
-  It retains zombie-safe process and parent identity, pre-reap `/proc` and
-  cgroup evidence, independently checked `waitid`/`wait4` status, resource
-  usage, configured crash-dump limits, matching LinuxCNC task backtraces, and
-  identity-checked durable kernel-core copies for core-generating deaths. A
-  narrowly scoped native interposer records the `siginfo_t` for caught
-  SIGINT/SIGTERM deliveries to the catalogued LinuxCNC C consumers before
-  those consumers convert the signal into a zero exit. That nonblocking record
-  is explicitly best-effort. The session owner tees LinuxCNC stdout and stderr
-  into the service journal and separate files; a nonzero session exit produces
-  an automatic `/tmp/linuxcnc.report` containing the exact captured streams,
-  command, exit status, and signal. If non-reaping `waitid` fails, the direct owner
-  retains the child and degrades to nonblocking `wait4` until a real status is
-  reaped instead of abandoning the process.
-  It never restarts LinuxCNC, changes machine state, or sends a signal to a
-  tracked process.
-  See `docs/process-lifecycle-tracking.md` for the exact evidence boundary and
-  the caught-signal limitations imposed by LinuxCNC 2.9.10.
+  It retains exact child ownership, compact process identity, kernel `wait4`
+  status and resource usage, configured core limits, and matching LinuxCNC
+  task backtraces. The session owner tees LinuxCNC stdout and stderr into the
+  service journal and separate files; a nonzero session exit produces an
+  automatic `/tmp/linuxcnc.report` containing the captured streams, command,
+  and status. It never restarts LinuxCNC, changes machine state, or sends a
+  signal to a tracked process. See `docs/process-lifecycle.md` for the exact
+  evidence boundary and limitations.
 - `rust/crates/dmc2-linuxcnc-interface`: generated, version-locked values and
   layouts consumed by the task monitor, including every public header, enum,
   integer macro, status object, and error-message object in the pinned source
@@ -90,8 +81,6 @@ control machine state from that journal; it validates and displays records.
   notification handling, pendant-mode visibility, and the special AXIS entry
   point as separate responsibilities.
 - `live`: the single accepted hardware profile and its NC programs.
-- `tests/linuxcnc-motion`: the isolated real-LinuxCNC motion-consumer
-  acceptance fixture.
 - `archive/local`: untracked one-off experiments retained only for traceability.
 - `artifacts/captures`: untracked raw hardware captures.
 - `var/log` and `var/tmp`: runtime diagnostics and disposable project files.
@@ -120,38 +109,19 @@ control machine state from that journal; it validates and displays records.
 9. Every configurable long-lived process has a direct status-owning parent,
    and the launcher-level child subreaper retains statuses for orphaned
    `linuxcncsvr`, `rtapi_app`, and owner descendants.
-   Bidirectional source checks reject both an unowned live userspace launch and
-   a production direct-child catalog entry that is absent from the live profile.
-   Every process-specific caught-signal mechanism is selected in that same
-   catalog; absence of the initialization and handler-registration handshake
-   remains explicit terminal evidence rather than being treated as proof that
-   no signal occurred.
+   The catalog defines ownership and identity; it does not claim that a
+   zero-exit child received no caught signal.
 10. A LinuxCNC driver overlay must name an exact release commit and upstream
     commits, pass its recorded SHA-256 check, compile against the installed
     version, retain the installed module's export set, and deploy in the same
     rollback transaction as the custom realtime modules.
 
-## Verification boundary
+## Build and evidence boundary
 
-`scripts/verify.sh` formats and compiles the Rust workspace, then launches an
-isolated LinuxCNC 2.9.10 instance with real `motmod`, the deployed serial and
-task-monitor binaries, the deployed realtime controller, and a software step
-generator. It sends production P3 packets through all X/Y/Z, x1/x10/x100, and
-both-direction combinations and requires the selected LinuxCNC joint command
-and downstream step count to move within the manual-jog tolerance while the
-other axes remain still. The fixture sources the same pendant input and motion
-contracts as the live profile. It also drives modeled raw and latched X/Y/Z
-limit inputs through three complete production-controller stop and automatic
-bounce paths while deliberately retaining the raw input. It requires an
-operator-commanded x1 move on the attributed axis in the away direction,
-verifies the native LinuxCNC hard-limit input remains masked throughout that
-recovery, then clears the modeled raw input and requires latch reset and return
-to ready. Finally, it passes the resulting real LinuxCNC error-channel records
-through the production AXIS journal reader and rejects native joint-limit
-errors.
-
-That acceptance loads no HostMot2 or Mesa driver and therefore cannot prove
-Ethernet delivery, physical step-pin output, drive response, motor movement,
-physical limit wiring or switch response, or spindle behavior. Those boundaries
-require a separately ordered live hardware observation. A successful build or
-isolated acceptance must never be reported as proof of physical movement.
+Formatting and compiling the Rust workspace establish only source and compiler
+acceptance. The project contains no offline motion-acceptance harness. A build
+does not prove launch, HAL registration, routing, LinuxCNC motion-consumer
+acceptance, Ethernet delivery, physical step-pin output, drive response, motor
+movement, limit behavior, recovery, UI survival, or spindle behavior. Each
+boundary requires its own evidence, and hardware observation requires an exact,
+explicitly authorized action.
