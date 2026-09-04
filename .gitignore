@@ -19,6 +19,8 @@ linuxcnc.report
 !/var/log/linuxcnc/README.md
 /var/tmp/*
 !/var/tmp/README.md
+/var/state/*
+!/var/state/README.md
 
 # Hardware captures and old experiments are retained locally, not committed.
 /artifacts/captures/*

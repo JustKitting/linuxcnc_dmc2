@@ -2,6 +2,7 @@ use std::ffi::OsString;
 use std::path::PathBuf;
 
 use crate::error::Error;
+use crate::hal_validation;
 use crate::integrity::{
     validate_deployments, validate_embedded_inputs, validate_userspace_deployments,
 };
@@ -23,6 +24,7 @@ pub struct ValidatedTools {
 
 pub fn validate(platform: &dyn Platform, layout: &Layout) -> Result<ValidatedTools, Error> {
     validate_embedded_inputs(platform, layout)?;
+    hal_validation::validate(platform, layout)?;
     validate_deployments(platform, layout)?;
     validate_tools(platform)
 }
@@ -32,6 +34,7 @@ pub fn validate_live_inputs(
     layout: &Layout,
 ) -> Result<ValidatedTools, Error> {
     validate_embedded_inputs(platform, layout)?;
+    hal_validation::validate(platform, layout)?;
     validate_userspace_deployments(platform, layout)?;
     validate_tools(platform)
 }

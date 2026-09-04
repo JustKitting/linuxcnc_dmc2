@@ -1,0 +1,11 @@
+%
+(DMC2 PROBE-OFFSET Y ALIGNMENT FOR CURRENT 9.23 MM TOOL)
+(Raw same-tool contact delta: +14.752500 mm.)
+(Calibration-tool radius and current-tool radius are both 4.615000 mm,)
+(so -4.615000 +4.615000 cancels. No X, Z, probe-power, or spindle command.)
+
+G21 G91 G94
+G1 Y14.752500 F6.00
+G90
+M2
+%

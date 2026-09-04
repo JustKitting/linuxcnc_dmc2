@@ -1,5 +1,6 @@
 o<dmc2_abort> sub
-    (Clear the reserved LinuxCNC probe-power request on every program abort.)
+    (Clear probe power and restore IN0 selection on every program abort.)
     M65 P0
+    M65 P1
 o<dmc2_abort> endsub
 M2

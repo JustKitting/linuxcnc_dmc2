@@ -2,7 +2,7 @@
 # Loaded only by dmc2.ini. Do not source from halrun.
 
 loadrt [KINS]KINEMATICS
-loadrt [EMCMOT]EMCMOT base_period_nsec=[EMCMOT]BASE_PERIOD servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS num_spindles=[TRAJ]SPINDLES num_dio=5
+loadrt [EMCMOT]EMCMOT base_period_nsec=[EMCMOT]BASE_PERIOD servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS num_spindles=[TRAJ]SPINDLES num_dio=6
 
 loadrt hostmot2
 loadrt hm2_eth board_ip=[DMC2]MESA_IP config="num_encoders=0 num_stepgens=3 num_pwmgens=0 num_3pwmgens=0 num_inmuxs=1 num_pktuarts=1"
@@ -12,9 +12,9 @@ loadrt dmc2_rt
 
 loadrt flipflop names=dmc2-safety-limit-x,dmc2-safety-limit-y,dmc2-safety-limit-z,dmc2-display-limit-x,dmc2-display-limit-y,dmc2-display-limit-z,dmc2-display-puck,dmc2-display-probe
 loadrt watchdog num_inputs=1
-loadrt and2 names=dmc2-controller-watchdog-and,dmc2-own-toward-block-m0,dmc2-own-toward-block-m1,dmc2-own-toward-block-m2,dmc2-command-blocked-m0,dmc2-command-blocked-m1,dmc2-command-blocked-m2,dmc2-hard-limit-x-enabled,dmc2-hard-limit-y-enabled,dmc2-hard-limit-z-enabled,dmc2-probe-power-gate
-loadrt or2 names=dmc2-other-limit-block-m0,dmc2-other-limit-block-m1,dmc2-other-limit-block-m2,dmc2-blocked-m0,dmc2-blocked-m1,dmc2-blocked-m2,dmc2-jog-stop-01,dmc2-jog-stop-all,dmc2-jog-stop-immediate-all,dmc2-limit-recovery-owned,dmc2-probe-power-source-or,dmc2-contact-test-detected-or,dmc2-contact-test-reset-or
-loadrt not names=dmc2-pendant-jog-inactive
+loadrt and2 names=dmc2-controller-watchdog-and,dmc2-own-toward-block-m0,dmc2-own-toward-block-m1,dmc2-own-toward-block-m2,dmc2-command-blocked-m0,dmc2-command-blocked-m1,dmc2-command-blocked-m2,dmc2-hard-limit-x-enabled,dmc2-hard-limit-y-enabled,dmc2-hard-limit-z-enabled,dmc2-probe-power-gate,dmc2-probe-select-in0,dmc2-probe-select-in1
+loadrt or2 names=dmc2-other-limit-block-m0,dmc2-other-limit-block-m1,dmc2-other-limit-block-m2,dmc2-blocked-m0,dmc2-blocked-m1,dmc2-blocked-m2,dmc2-jog-stop-01,dmc2-jog-stop-all,dmc2-jog-stop-immediate-all,dmc2-limit-recovery-owned,dmc2-probe-power-source-or,dmc2-contact-test-detected-or,dmc2-contact-test-reset-or,dmc2-selected-probe-or
+loadrt not names=dmc2-pendant-jog-inactive,dmc2-probe-select-in0-enable
 loadrt mux2 names=dmc2-x-feedback-loss-guard,dmc2-y-feedback-loss-guard,dmc2-z-feedback-loss-guard
 loadrt estop_latch
 loadrt timedelay names=dmc2-servo-startup-delay
@@ -91,6 +91,10 @@ addf dmc2-hard-limit-z-enabled servo-thread
 addf dmc2-x-feedback-loss-guard servo-thread
 addf dmc2-y-feedback-loss-guard servo-thread
 addf dmc2-z-feedback-loss-guard servo-thread
+addf dmc2-probe-select-in0-enable servo-thread
+addf dmc2-probe-select-in0 servo-thread
+addf dmc2-probe-select-in1 servo-thread
+addf dmc2-selected-probe-or servo-thread
 
 addf motion-command-handler servo-thread
 addf motion-controller servo-thread

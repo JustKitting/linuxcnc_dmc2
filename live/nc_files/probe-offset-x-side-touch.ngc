@@ -20,11 +20,22 @@ o<dmc2_x_probe_initial_power_off> if [#5399 LT 0]
     M2
 o<dmc2_x_probe_initial_power_off> endif
 
+(Select the physical DMC2 side probe on IN1 and verify the selector.)
+M64 P1
+M66 P5 L3 Q1.0
+o<dmc2_x_probe_side_selected> if [#5399 LT 0]
+    M65 P1
+    (DEBUG,DMC2 X PROBE REFUSED: IN1 side-probe selector did not report selected)
+    G90
+    M2
+o<dmc2_x_probe_side_selected> endif
+
 (Enable OUT5 only while this LinuxCNC program is running.)
 M64 P0
 M66 P1 L3 Q1.0
 o<dmc2_x_probe_power_on> if [#5399 LT 0]
     M65 P0
+    M65 P1
     (DEBUG,DMC2 X PROBE REFUSED: OUT5 gate did not report on)
     G90
     M2
@@ -33,33 +44,58 @@ o<dmc2_x_probe_power_on> endif
 (The selected contact input must be open before movement.)
 o<dmc2_x_probe_initial_open> if [#<_hal[motion.probe-input]> NE 0]
     M65 P0
+    M65 P1
     (DEBUG,DMC2 X PROBE REFUSED: selected contact input is already active)
     G90
     M2
 o<dmc2_x_probe_initial_open> endif
 
 (Open the durable capture before motion. LinuxCNC writes the accepted probe)
-(point, and the file is closed before any backoff can begin.)
+(point in the current work coordinate frame. The file is closed before)
+(any release or backoff motion can begin.)
 (PROBEOPEN /home/kit/linuxcnc_dmc2/var/log/linuxcnc/probe-offset-x-capture.txt)
 
 (Exactly -X, maximum 40.00 mm, at 6.00 mm/min = 0.10 mm/s.)
 G38.2 X[-#<maximum_travel_mm>] F#<approach_feed_mm_min>
-#<probe_contact_machine_x> = #5061
+#<probe_contact_work_x> = #5061
+#<probe_contact_machine_x> = [#5061 + #5021 - #5420]
 (PROBECLOSE)
-(DEBUG,DMC2 X PROBE CONTACT: X = #<probe_contact_machine_x> mm)
+(DEBUG,DMC2 X PROBE CONTACT: work X = #<probe_contact_work_x> mm, machine X = #<probe_contact_machine_x> mm)
 
-(Exactly +X 1.00 mm at 6.00 mm/min = 0.10 mm/s.)
-G1 X#<backoff_distance_mm> F#<backoff_feed_mm_min>
-#<backoff_machine_x> = #<_abs_x>
+(Release contact as a probe move so contact bounce cannot fault an ordinary)
+(motion command. G38.5 is non-faulting and moves no farther than 1.00 mm.)
+G38.5 X#<backoff_distance_mm> F#<backoff_feed_mm_min>
+#<probe_release_seen> = #5070
 
-(Remove contact-test power after the requested backoff.)
+(Remove contact-test power before any remaining ordinary backoff motion.)
 M65 P0
 M66 P1 L4 Q1.0
 o<dmc2_x_probe_final_power_off> if [#5399 LT 0]
-    (DEBUG,DMC2 X PROBE WARNING: OUT5 gate did not report off after backoff)
+    M65 P1
+    (DEBUG,DMC2 X PROBE FAILED: OUT5 gate did not report off after contact release)
+    G90
+    M2
 o<dmc2_x_probe_final_power_off> endif
+M65 P1
+M66 P5 L4 Q1.0
+o<dmc2_x_probe_side_deselected> if [#5399 LT 0]
+    (DEBUG,DMC2 X PROBE FAILED: IN1 selector did not return to IN0)
+    G90
+    M2
+o<dmc2_x_probe_side_deselected> endif
 
+(Require a real contact-release transition before ordinary motion.)
+o<dmc2_x_probe_release_confirmed> if [#<probe_release_seen> EQ 0]
+    (DEBUG,DMC2 X PROBE FAILED: contact did not release within +1.00 mm)
+    G90
+    M2
+o<dmc2_x_probe_release_confirmed> endif
+
+(Finish at exactly contact work X + 1.00 mm, still at 0.10 mm/s.)
 G90
+#<backoff_target_work_x> = [#<probe_contact_work_x> + #<backoff_distance_mm>]
+G1 X#<backoff_target_work_x> F#<backoff_feed_mm_min>
+#<backoff_machine_x> = #<_abs_x>
 (DEBUG,DMC2 X PROBE BACKOFF COMPLETE: machine X = #<backoff_machine_x> mm)
 M2
 %

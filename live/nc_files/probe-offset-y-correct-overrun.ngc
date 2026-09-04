@@ -1,0 +1,10 @@
+%
+(DMC2 Y ALIGNMENT OVER-RUN CORRECTION)
+(Exactly -Y 0.240000 mm at 0.10 mm/s.)
+(No X, Z, probe-power, or spindle command.)
+
+G21 G91 G94
+G1 Y-0.240000 F6.00
+G90
+M2
+%

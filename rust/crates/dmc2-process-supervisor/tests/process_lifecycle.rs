@@ -854,6 +854,55 @@ fn session_subreaper_records_the_root_and_an_adopted_descendant() {
 }
 
 #[test]
+fn session_failure_report_retains_and_forwards_exact_process_output() {
+    let directory = TestDirectory::new();
+    let journal = directory.journal();
+    let report = directory.0.join("linuxcnc.report");
+    fs::write(&report, b"STALE REPORT MUST NOT SURVIVE\n").expect("seed stale report");
+
+    let output = Command::new(env!("CARGO_BIN_EXE_dmc2-session-supervisor"))
+        .arg("--role")
+        .arg("session-lifecycle-test")
+        .arg("--journal")
+        .arg(&journal)
+        .arg("--failure-report")
+        .arg(&report)
+        .arg("--")
+        .arg("/bin/sh")
+        .arg("-c")
+        .arg("printf 'HAL FILE ERROR: broken.hal:27 duplicate pin\\n' >&2; printf 'startup phase: HAL\\n'; exit 37")
+        .output()
+        .expect("run failure-report session");
+
+    assert_eq!(output.status.code(), Some(37));
+    assert_eq!(
+        String::from_utf8_lossy(&output.stdout),
+        "startup phase: HAL\n"
+    );
+    let forwarded_stderr = String::from_utf8_lossy(&output.stderr);
+    assert!(forwarded_stderr.contains("HAL FILE ERROR: broken.hal:27 duplicate pin"));
+    assert!(forwarded_stderr.contains("full report:"));
+
+    let report_text = fs::read_to_string(&report).expect("read automatic failure report");
+    assert!(report_text.contains("identity: LINUXCNC_SESSION_EXITED_NONZERO"));
+    assert!(report_text.contains("exit-code: 37"));
+    assert!(report_text.contains("HAL FILE ERROR: broken.hal:27 duplicate pin"));
+    assert!(report_text.contains("startup phase: HAL"));
+    assert!(!report_text.contains("STALE REPORT MUST NOT SURVIVE"));
+
+    let records = fs::read_to_string(&journal).expect("read report lifecycle journal");
+    let terminal = find_record(&records, "session-supervisor-terminated", |_| true);
+    assert_eq!(
+        journal_field(terminal, "failure_report_written"),
+        Some("true")
+    );
+    assert_ne!(
+        journal_field(terminal, "failure_report_path_hex"),
+        Some("NONE")
+    );
+}
+
+#[test]
 fn session_subreaper_retains_a_rolling_snapshot_for_an_adopted_descendant() {
     use std::os::unix::ffi::OsStrExt;
 

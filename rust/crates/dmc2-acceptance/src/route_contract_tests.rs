@@ -1,4 +1,9 @@
 const MACHINE_HAL: &str = include_str!("../../../../live/machine.hal");
+const MESA_STATUS_HAL: &str = include_str!("../../../../live/hal/mesa_status_sources.hal");
+const LIVE_INI: &str = include_str!("../../../../live/dmc2.ini");
+const OPERATIONS: &str = include_str!("../../../../config/operations.tsv");
+const SIDE_PROBE_X: &str = include_str!("../../../../live/nc_files/probe-offset-x-side-touch.ngc");
+const ABORT_HANDLER: &str = include_str!("../../../../live/nc_files/dmc2_abort.ngc");
 const SPINDLE_TEST: &str = include_str!("../../../../live/nc_files/dmc2_spindle_test.ngc");
 const HARDWOOD_ROUTE: &str = include_str!("../../../../live/nc_files/log-top-25mm-hardwood.ngc");
 
@@ -6,7 +11,11 @@ fn executable_lines(program: &str) -> Vec<&str> {
     program
         .lines()
         .map(str::trim)
-        .filter(|line| !line.is_empty() && !line.starts_with('(') && *line != "%")
+        .filter(|line| {
+            !line.is_empty()
+                && (!line.starts_with('(') || line.starts_with("(PROBE"))
+                && *line != "%"
+        })
         .collect()
 }
 
@@ -19,10 +28,89 @@ fn line_position(lines: &[&str], exact: &str) -> usize {
 
 #[test]
 fn live_hal_exposes_feedback_validated_clockwise_state_to_m66_p4() {
-    assert!(MACHINE_HAL.contains("num_dio=5"));
+    assert!(MACHINE_HAL.contains("num_dio=6"));
     assert!(MACHINE_HAL.contains(
         "net dmc2-spindle-clockwise-running h100-spindle.forward-running => motion.digital-in-04"
     ));
+}
+
+#[test]
+fn x_side_probe_selects_in1_before_motion_and_restores_in0_after_backoff() {
+    assert!(LIVE_INI.contains("NO_FORCE_HOMING = 1"));
+    assert!(MACHINE_HAL.contains("dmc2-probe-select-in0"));
+    assert!(MACHINE_HAL.contains("dmc2-probe-select-in1"));
+    assert!(MACHINE_HAL.contains("dmc2-selected-probe-or"));
+    assert!(MESA_STATUS_HAL.contains("net dmc2-probe-live   => dmc2-probe-select-in1.in0"));
+    assert!(MESA_STATUS_HAL
+        .contains("net dmc2-selected-probe-live dmc2-selected-probe-or.out => motion.probe-input"));
+    assert!(MESA_STATUS_HAL.contains(
+        "net dmc2-side-probe-selected motion.digital-out-01 => dmc2-probe-select-in0-enable.in dmc2-probe-select-in1.in1 motion.digital-in-05"
+    ));
+
+    let lines = executable_lines(SIDE_PROBE_X);
+    let select = line_position(&lines, "M64 P1");
+    let select_ack = line_position(&lines, "M66 P5 L3 Q1.0");
+    let power = line_position(&lines, "M64 P0");
+    let probe = line_position(
+        &lines,
+        "G38.2 X[-#<maximum_travel_mm>] F#<approach_feed_mm_min>",
+    );
+    let capture = line_position(&lines, "#<probe_contact_work_x> = #5061");
+    let machine_conversion = line_position(
+        &lines,
+        "#<probe_contact_machine_x> = [#5061 + #5021 - #5420]",
+    );
+    let close = line_position(&lines, "(PROBECLOSE)");
+    let release = line_position(
+        &lines,
+        "G38.5 X#<backoff_distance_mm> F#<backoff_feed_mm_min>",
+    );
+    let power_off = lines
+        .iter()
+        .enumerate()
+        .skip(release + 1)
+        .find_map(|(index, line)| (*line == "M65 P0").then_some(index))
+        .expect("probe power must turn off after contact release");
+    let backoff_target = line_position(
+        &lines,
+        "#<backoff_target_work_x> = [#<probe_contact_work_x> + #<backoff_distance_mm>]",
+    );
+    let backoff = line_position(
+        &lines,
+        "G1 X#<backoff_target_work_x> F#<backoff_feed_mm_min>",
+    );
+    let final_deselect = lines
+        .iter()
+        .rposition(|line| *line == "M65 P1")
+        .expect("side-probe program must restore IN0");
+
+    assert!(select < select_ack);
+    assert!(select_ack < power);
+    assert!(power < probe);
+    assert!(probe < capture);
+    assert!(capture < machine_conversion);
+    assert!(machine_conversion < close);
+    assert!(close < release);
+    assert!(release < power_off);
+    assert!(power_off < final_deselect);
+    assert!(final_deselect < backoff_target);
+    assert!(backoff_target < backoff);
+    assert!(SIDE_PROBE_X.contains("#<maximum_travel_mm> = 40.00"));
+    assert!(SIDE_PROBE_X.contains("#<approach_feed_mm_min> = 6.00"));
+    assert!(SIDE_PROBE_X.contains("#<backoff_distance_mm> = 1.00"));
+    assert!(SIDE_PROBE_X.contains("#<backoff_feed_mm_min> = 6.00"));
+    assert!(ABORT_HANDLER.contains("M65 P0"));
+    assert!(ABORT_HANDLER.contains("M65 P1"));
+
+    let operation = OPERATIONS
+        .lines()
+        .find(|line| line.starts_with("program.probe-offset-x-side-touch\t"))
+        .expect("side-probe operation must be cataloged");
+    assert!(!operation
+        .split('\t')
+        .last()
+        .unwrap_or_default()
+        .contains("all-homed"));
 }
 
 #[test]

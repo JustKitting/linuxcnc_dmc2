@@ -7,9 +7,10 @@ use crate::error::Error;
 use crate::layout::Layout;
 use crate::owner;
 use crate::platform::{CommandSpec, Platform};
-use crate::validation::{self, require_executable, require_success};
+use crate::validation::{self, require_executable};
 
 pub const PERSISTENT_UNIT: &str = "dmc2-linuxcnc";
+pub const FAILURE_REPORT_PATH: &str = "/tmp/linuxcnc.report";
 pub const REALTIME_ENVIRONMENT_NAME: &str = "LINUXCNC_FORCE_REALTIME";
 pub const REALTIME_ENVIRONMENT_VALUE: &str = "1";
 pub const PYTHON_BYTECODE_ENVIRONMENT_NAME: &str = "PYTHONDONTWRITEBYTECODE";
@@ -65,7 +66,22 @@ pub fn execute(platform: &dyn Platform, plan: Plan, output: &mut dyn Write) -> R
         }
         Action::Persistent(command) => {
             let completed = validation::run(platform, &command)?;
-            require_success(&command, &completed)?;
+            if completed.status != Some(0) {
+                let (failure_report, failure_report_read_error) =
+                    match platform.read_file(std::path::Path::new(FAILURE_REPORT_PATH)) {
+                        Ok(report) => (report, None),
+                        Err(error) => (Vec::new(), Some(error.to_string())),
+                    };
+                return Err(Error::LinuxCncSessionFailed {
+                    program: command.program,
+                    status: completed.status,
+                    stdout: completed.stdout,
+                    stderr: completed.stderr,
+                    failure_report_path: FAILURE_REPORT_PATH.into(),
+                    failure_report,
+                    failure_report_read_error,
+                });
+            }
             if !completed.stderr.is_empty() {
                 return Err(Error::ProcessFailed {
                     program: command.program.clone(),
@@ -84,11 +100,8 @@ pub fn execute(platform: &dyn Platform, plan: Plan, output: &mut dyn Write) -> R
             }
             writeln!(
                 output,
-                concat!(
-                    "PERSISTENT LIVE UNIT STARTED: {}.service; inspect with ",
-                    "'journalctl --user-unit {} -f'"
-                ),
-                PERSISTENT_UNIT, PERSISTENT_UNIT
+                "PERSISTENT LIVE SESSION EXITED CLEANLY: {}.service",
+                PERSISTENT_UNIT
             )
             .map_err(|error| Error::os("write launcher output", "/dev/stdout".into(), error))?;
             Ok(0)
@@ -125,6 +138,8 @@ fn supervised_linuxcnc_command(layout: &Layout, linuxcnc: std::path::PathBuf) ->
             .join("var/log/linuxcnc/process-lifecycle.tsv")
             .into_os_string(),
     );
+    command.arguments.push(OsString::from("--failure-report"));
+    command.arguments.push(OsString::from(FAILURE_REPORT_PATH));
     command.arguments.push(OsString::from("--"));
     command.arguments.push(linuxcnc.into_os_string());
     command.arguments.push(OsString::from("-r"));
@@ -158,6 +173,8 @@ fn persistent_command_with_systemd(
         "--user",
         "--quiet",
         "--unit=dmc2-linuxcnc",
+        "--wait",
+        "--service-type=exec",
         "--setenv=LINUXCNC_FORCE_REALTIME=1",
         "--setenv=PYTHONDONTWRITEBYTECODE=1",
         "--collect",
@@ -194,6 +211,8 @@ mod tests {
             "linuxcnc-session",
             "--journal",
             "/project/var/log/linuxcnc/process-lifecycle.tsv",
+            "--failure-report",
+            "/tmp/linuxcnc.report",
             "--",
             "/usr/bin/linuxcnc",
             "-r",
@@ -246,5 +265,9 @@ mod tests {
         assert!(command
             .arguments
             .contains(&OsString::from("--property=Restart=no")));
+        assert!(command.arguments.contains(&OsString::from("--wait")));
+        assert!(command
+            .arguments
+            .contains(&OsString::from("--service-type=exec")));
     }
 }

@@ -59,7 +59,10 @@ control machine state from that journal; it validates and displays records.
   narrowly scoped native interposer records the `siginfo_t` for caught
   SIGINT/SIGTERM deliveries to the catalogued LinuxCNC C consumers before
   those consumers convert the signal into a zero exit. That nonblocking record
-  is explicitly best-effort. If non-reaping `waitid` fails, the direct owner
+  is explicitly best-effort. The session owner tees LinuxCNC stdout and stderr
+  into the service journal and separate files; a nonzero session exit produces
+  an automatic `/tmp/linuxcnc.report` containing the exact captured streams,
+  command, exit status, and signal. If non-reaping `waitid` fails, the direct owner
   retains the child and degrades to nonblocking `wait4` until a real status is
   reaped instead of abandoning the process.
   It never restarts LinuxCNC, changes machine state, or sends a signal to a
@@ -72,7 +75,9 @@ control machine state from that journal; it validates and displays records.
   contract.
 - `rust/crates/dmc2-launcher`: the standard compiled live-launch boundary;
   byte-exact profile/deployment checks, process-owner exclusion, persistent
-  service creation, and direct LinuxCNC process replacement.
+  service creation, direct LinuxCNC process replacement, source-located HAL
+  pin/signal conflict detection, and propagation of the persistent service's
+  real terminal status and automatic failure report.
 - `config/linuxcnc-driver-overlays.tsv` and `patches/linuxcnc-2.9.10`: the
   exact base version, upstream provenance, patch digest, build entry point,
   and deployment identity for reviewed post-release driver hardening. The

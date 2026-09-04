@@ -23,10 +23,12 @@ use crate::wait::{self, AnyReap, AnyWait, TerminalObservation, WaitEvidence};
 use crate::wait_degradation::WaitDegradation;
 
 mod error;
+mod output_capture;
 mod reap;
 mod terminal;
 
 pub use error::SessionError;
+use output_capture::PreparedCapture;
 use reap::reap_retained_session_child;
 use terminal::{
     child_terminal_observed_event, child_terminal_reaped_fallback_event, child_terminated_event,
@@ -141,7 +143,18 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
     let mut command = Command::new(&invocation.program);
     command.args(&invocation.arguments);
     core_dump_plan.configure(&mut command);
-    let linuxcnc = match command.spawn() {
+    let prepared_capture = invocation
+        .failure_report
+        .as_deref()
+        .map(|report| {
+            PreparedCapture::prepare(report, journal.path(), invocation.role.name(), &mut command)
+        })
+        .transpose()
+        .map_err(|source| SessionError::OutputCapture {
+            operation: "prepare",
+            source,
+        })?;
+    let mut linuxcnc = match command.spawn() {
         Ok(child) => child,
         Err(source) => {
             let event = session_event("session-spawn-failed", unix_ns_or_zero(), supervisor_pid)
@@ -165,6 +178,13 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
             };
         }
     };
+    let output_capture = prepared_capture
+        .map(|capture| capture.start(&mut linuxcnc))
+        .transpose()
+        .map_err(|source| SessionError::OutputCapture {
+            operation: "start",
+            source,
+        })?;
     let linuxcnc_pid = linuxcnc.id();
     let observed_at = Instant::now();
     let observed_at_wall = SystemTime::now();
@@ -503,6 +523,21 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
                 append_after_spawn(&mut journal, &event, &mut retained_journal_errors);
                 return Err(SessionError::LinuxCncStatusMissing { linuxcnc_pid });
             };
+            let failure_report = output_capture
+                .map(|capture| {
+                    capture.finish(
+                        status,
+                        &invocation.program,
+                        &invocation.arguments,
+                        session_started_ns,
+                    )
+                })
+                .transpose()
+                .map_err(|source| SessionError::OutputCapture {
+                    operation: "finish",
+                    source,
+                })?
+                .flatten();
             let event = session_event(
                 "session-supervisor-terminated",
                 unix_ns_or_zero(),
@@ -512,7 +547,12 @@ fn supervise(invocation: Invocation) -> Result<u8, SessionError> {
             .field("linuxcnc_raw_wait_status", status.into_raw())
             .field("linuxcnc_exit_code", optional_i32(status.code()))
             .field("linuxcnc_signal", optional_i32(status.signal()))
+            .field("failure_report_written", failure_report.is_some())
             .field("remaining_children", children.len());
+            let event = match failure_report {
+                Some(path) => event.encoded_path_field("failure_report_path_hex", &path),
+                None => event.field("failure_report_path_hex", "NONE"),
+            };
             let event = match &wait_degradation {
                 Some(degradation) => degradation.summary_event_fields(event),
                 None => event.field("terminal_observation_degraded", false),

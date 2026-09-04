@@ -13,8 +13,11 @@
 #   Mesa 7I95T manual, PDF pages 16-21 (printed pages 13-18),
 #   https://www.mesanet.com/pdf/parallel/7i95tman.pdf
 #
-# IN0 is the accepted puck contact and now feeds LinuxCNC's realtime probe
-# input plus digital input 0 for the explicitly no-motion contact test.
+# IN0 is the normal puck/tool contact; IN1 is the mounted side-probe contact.
+# LinuxCNC digital output 1 selects IN1 only for an explicitly authored side-
+# probe program. The selector's observed state is returned on digital input 5;
+# inputs 2 through 4 remain reserved for existing spindle feedback.
+# IN0 remains selected at every other time and is also digital input 0.
 # OUT5 can be controlled by LinuxCNC digital output 0 through the separate
 # program-running gate or by the finite panel connectivity-test window in
 # machine.hal. The panel test watches both IN0 and IN1 and contains no probing
@@ -27,7 +30,13 @@ net dmc2-limit-y-live <= hm2_7i95.0.inmux.00.raw-input-09
 net dmc2-limit-z-live <= hm2_7i95.0.inmux.00.raw-input-10
 net dmc2-puck-live    <= hm2_7i95.0.inmux.00.raw-input-00
 net dmc2-probe-live   <= hm2_7i95.0.inmux.00.raw-input-01
-net dmc2-puck-live    => motion.probe-input motion.digital-in-00
+net dmc2-puck-live    => dmc2-probe-select-in0.in0 motion.digital-in-00
+net dmc2-probe-live   => dmc2-probe-select-in1.in0
+net dmc2-side-probe-selected motion.digital-out-01 => dmc2-probe-select-in0-enable.in dmc2-probe-select-in1.in1 motion.digital-in-05
+net dmc2-probe-select-in0-enabled dmc2-probe-select-in0-enable.out => dmc2-probe-select-in0.in1
+net dmc2-selected-probe-in0 dmc2-probe-select-in0.out => dmc2-selected-probe-or.in0
+net dmc2-selected-probe-in1 dmc2-probe-select-in1.out => dmc2-selected-probe-or.in1
+net dmc2-selected-probe-live dmc2-selected-probe-or.out => motion.probe-input
 
 # M64/M65 P0 owns the program request.  The realtime AND gate prevents that
 # request from reaching the final OR unless LinuxCNC reports a running

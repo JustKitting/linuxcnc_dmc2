@@ -53,6 +53,10 @@ pub enum SessionError {
         spawn: io::Error,
         journal: JournalError,
     },
+    OutputCapture {
+        operation: &'static str,
+        source: io::Error,
+    },
     LinuxCncStatusMissing {
         linuxcnc_pid: u32,
     },
@@ -157,6 +161,10 @@ impl fmt::Display for SessionError {
                 "could not spawn role {} program {program:?}: {spawn}; the spawn-failure lifecycle record also failed: {journal}",
                 role.name()
             ),
+            Self::OutputCapture { operation, source } => write!(
+                formatter,
+                "LinuxCNC session output capture could not {operation}: {source}"
+            ),
             Self::LinuxCncStatusMissing { linuxcnc_pid } => write!(
                 formatter,
                 "no children remain but LinuxCNC PID {linuxcnc_pid} had no captured wait status"
@@ -216,6 +224,7 @@ fn first_source(error: &SessionError) -> Option<&(dyn std::error::Error + 'stati
         | SessionError::VerifySubreaper(error)
         | SessionError::CoreDumpLimit { source: error, .. }
         | SessionError::OwnerIdentity { source: error, .. }
+        | SessionError::OutputCapture { source: error, .. }
         | SessionError::Spawn { source: error, .. }
         | SessionError::SpawnAndJournal { spawn: error, .. } => Some(error),
         SessionError::UnsupportedOwnership { .. }

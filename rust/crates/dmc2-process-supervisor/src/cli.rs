@@ -9,6 +9,7 @@ use crate::catalog::{self, ArgumentPlacement, ProcessRole};
 pub struct Invocation {
     pub role: ProcessRole,
     pub journal: PathBuf,
+    pub failure_report: Option<PathBuf>,
     pub program: OsString,
     pub arguments: Vec<OsString>,
 }
@@ -57,6 +58,23 @@ impl Invocation {
         }
         index += 1;
 
+        let failure_report = if arguments
+            .get(index)
+            .is_some_and(|value| value == "--failure-report")
+        {
+            index += 1;
+            let path = arguments
+                .get(index)
+                .ok_or(CliError::MissingFailureReportPath)?;
+            if path.is_empty() {
+                return Err(CliError::EmptyFailureReportPath);
+            }
+            index += 1;
+            Some(PathBuf::from(path))
+        } else {
+            None
+        };
+
         require_literal(arguments.get(index), "--")?;
         index += 1;
         let program = arguments.get(index).ok_or(CliError::MissingProgram)?;
@@ -77,6 +95,7 @@ impl Invocation {
         Ok(Self {
             role,
             journal: PathBuf::from(journal),
+            failure_report,
             program: program.clone(),
             arguments: child_arguments,
         })
@@ -116,6 +135,8 @@ pub enum CliError {
     },
     MissingJournalPath,
     EmptyJournalPath,
+    MissingFailureReportPath,
+    EmptyFailureReportPath,
     MissingProgram,
     EmptyProgram,
     ProgramMismatch {
@@ -167,6 +188,8 @@ impl fmt::Display for CliError {
             ),
             Self::MissingJournalPath => write!(formatter, "missing lifecycle-journal path"),
             Self::EmptyJournalPath => write!(formatter, "lifecycle-journal path is empty"),
+            Self::MissingFailureReportPath => write!(formatter, "missing failure-report path"),
+            Self::EmptyFailureReportPath => write!(formatter, "failure-report path is empty"),
             Self::MissingProgram => write!(formatter, "missing supervised program"),
             Self::EmptyProgram => write!(formatter, "supervised program is empty"),
             Self::ProgramMismatch {
@@ -185,7 +208,7 @@ impl fmt::Display for CliError {
 impl std::error::Error for CliError {}
 
 fn usage() -> &'static str {
-    "usage: [-ini PATH] --role ROLE --journal PATH -- PROGRAM [ARG ...]"
+    "usage: [-ini PATH] --role ROLE --journal PATH [--failure-report PATH] -- PROGRAM [ARG ...]"
 }
 
 #[cfg(test)]

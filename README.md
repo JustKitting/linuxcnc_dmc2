@@ -132,9 +132,10 @@ durations, with the existing two-second floor retained.
   repeated samples cannot grow an event queue. Axis changes and direction
   reversals stop first and retain at most one replaceable pending request.
 - Pendant jogging is accepted when LinuxCNC is on, idle, and in manual mode.
-  Before all three axes are homed it uses LinuxCNC joint-jog mode; after all
-  three axes are homed it uses Cartesian/teleop mode. Unhomed coordinates stay
-  explicitly marked unknown in the status panel.
+  It follows LinuxCNC's actual selected trajectory mode: Cartesian/teleop mode
+  drives `axis.*.jog-*`, while free/joint mode drives `joint.*.jog-*`. Homing
+  state never selects the consumer path; it only determines whether the
+  displayed machine coordinates are known or unknown.
 
 Startup is automatic and fail-closed. The controller first waits for proof
 that the servo thread and `hm2.write` have run for 100 ms. It then clears a
@@ -200,13 +201,13 @@ faults the same E-stop chain if the userspace controller freezes.
 
 ## AXIS status panel
 
-The toolbar's pendant icon is enabled only after the controller reports that
-the startup gate, LinuxCNC state, Nano link, and limits are ready. Selecting it
-first requests Pendant Mode; the PyVCP panel appears only after the controller
-returns its post-arm `control-ready` acknowledgement. The request is removed
-and the panel is hidden only when the controller itself becomes unavailable.
-During an expected limit collision, automatic backoff, or attributed manual
-release, the control session remains available and the panel stays open while
+The toolbar's pendant icon remains operator-accessible whenever AXIS is
+running. Selecting it immediately requests Pendant Mode and opens the PyVCP
+panel; it never waits for controller readiness and does not silently remove the
+request or hide the panel when readiness drops. The `control-ready` indicator
+separately reports whether the selected LinuxCNC mode, startup gate, Nano link,
+and limits currently permit a detent. During an expected limit collision,
+automatic backoff, or attributed manual release, the panel stays open while
 `control-ready` temporarily drops; it returns automatically after the raw
 switch clears and the bounce resets the latch.
 Bounce completion requires the latch-reset output to remain high for 10 ms,
@@ -259,7 +260,9 @@ The operator-facing connectivity test is the **CONTACT CONNECTIVITY - NO
 MOTION** row in the LinuxCNC panel. It works while the machine is unhomed and
 does not request homing, axis motion, or spindle motion. The spindle must
 already be stopped. IN0 is the puck contact; IN1 is the DMC2 side-probe
-contact. IN0 also drives `motion.probe-input` and `motion.digital-in-00`.
+contact. IN0 drives `motion.digital-in-00` and is the default source for
+`motion.probe-input`. An explicitly authored side-probe program selects IN1
+through the realtime bit selector; digital input 5 returns that selector state.
 
 Each contact is tested in a separate run. First separate the grounded clip or
 clipped tool from both contact surfaces and press **CLEAR SEEN**. Press **START
@@ -278,15 +281,18 @@ contact inputs connect only to the realtime one-shot/output gate and display
 latches, never to a joint, axis, homing pin, or motion command.
 
 `live/nc_files/puck-contact-no-motion-test.ngc` remains as a deeper
-interpreter-path verification using LinuxCNC `M64`, `M65`, and `M66`. Because
-the live profile intentionally keeps `[TRAJ] NO_FORCE_HOMING = 0`, LinuxCNC
-will not start that Auto program while unhomed. It is not the basic unhomed
-connectivity-test entry point.
+interpreter-path verification using LinuxCNC `M64`, `M65`, and `M66`. The live
+profile allows interpreter motion before homing so explicitly cataloged
+relative contact calibration can operate without inventing an absolute
+position. Absolute-position and cutting operations retain their `all-homed`
+catalog prerequisite, and AXIS's stock Run controls remain guarded while any
+joint is unhomed. The panel test remains the basic no-motion connectivity-test
+entry point.
 
-The separate `dmc2_abort.ngc` handler issues `M65 P0` after any LinuxCNC
-program abort. This prevents an interrupted test request from becoming active
-again when a later program starts. A stopped realtime writer is still covered
-by the Mesa watchdog.
+The separate `dmc2_abort.ngc` handler issues `M65 P0` and `M65 P1` after any
+LinuxCNC program abort. This removes probe power and restores IN0 as the
+default probe source before a later program starts. A stopped realtime writer
+is still covered by the Mesa watchdog.
 
 This test does not use the 19.40 mm measurement, alter coordinates, populate
 the tool table, or perform `G38` motion. It validates only the real electrical
@@ -371,9 +377,10 @@ those enable signals are not mislabeled as physical motor response.
 
 ## Deliberately disabled or deferred
 
-- IN0 is connected to `motion.probe-input`; implemented probing motion is
-  limited to the two explicitly approved Z-only tests above.
-- IN1 remains status-only and is not connected to `motion.probe-input`.
+- IN0 is the default `motion.probe-input`. The cataloged X side-touch routine
+  selects IN1, verifies the selector feedback, performs only its bounded
+  relative X probe and backoff, then restores IN0. This source routing has not
+  yet been physically exercised.
 - OUT5 can be requested by LinuxCNC digital output 0 while a program is
   running, or by the unhomed panel test's non-retriggerable 300-second maximum
   window. The panel source clears immediately on IN0 contact or **STOP TEST**;
@@ -404,8 +411,11 @@ deployed DMC2 binaries byte-match that release, and starts LinuxCNC 2.9.10 with
 real `motmod` plus a software step generator. A PTY supplies raw P3 packets to
 the deployed serial bridge. The fixture sources the same pendant input and
 motion HAL contracts as the live profile and observes LinuxCNC-owned joint
-commands and downstream step counts. Its 20 data-driven moves cover X/Y/Z,
-x1/x10/x100, both directions, and consecutive X/x1 commands. Three additional
+commands and downstream step counts. It first keeps all joints unhomed,
+explicitly selects teleop mode, and requires a pendant detent to traverse the
+real `axis.*.jog-*` consumer. It then selects free mode; its 20 data-driven
+moves cover X/Y/Z, x1/x10/x100, both directions, and consecutive X/x1 commands.
+Three additional
 paths exercise real LinuxCNC jog-stop handling, the production controller's
 X/Y/Z limit bounce, toleranced completion, raw-limit-held recovery, restricted
 away-direction x1 jog, native hard-limit masking, and safety-latch reset. The
@@ -461,7 +471,14 @@ native/bin/dmc2-linuxcnc --live --persistent
 ```
 
 This creates the transient `dmc2-linuxcnc.service` unit with no automatic
-restart. Its log is available with `journalctl --user-unit dmc2-linuxcnc`, and
+restart. The launcher waits for the service's real terminal status instead of
+claiming success when systemd merely accepts the start request. A failed
+session automatically writes `/tmp/linuxcnc.report`, preserves separate raw
+stdout/stderr captures under `var/log/linuxcnc/`, forwards the original output
+to the service journal, and returns the actual failure to the launcher. Live
+launch validation also rejects a HAL pin assigned to two different signals and
+names the pin, both signals, and both source locations before hardware is
+opened. The service log is available with `journalctl --user-unit dmc2-linuxcnc`, and
 `systemctl --user stop dmc2-linuxcnc.service` stops the complete LinuxCNC
 process group. The launcher explicitly passes `LINUXCNC_FORCE_REALTIME=1` to
 the transient service. This is required on this Pi's PREEMPT_RT kernel because

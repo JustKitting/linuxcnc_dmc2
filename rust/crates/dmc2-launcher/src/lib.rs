@@ -2,6 +2,7 @@ mod cli;
 mod deployment;
 mod embedded;
 mod error;
+mod hal_validation;
 mod integrity;
 mod launch;
 mod layout;
