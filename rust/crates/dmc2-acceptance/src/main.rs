@@ -14,7 +14,7 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use failure::{Failure, FailureCode, Result};
-use linuxcnc::{hal_bool, hal_f64, hal_i32, hal_u32};
+use linuxcnc::{hal_bool, hal_f64, hal_i32, hal_u32, ManualJogMode};
 use pendant::{AxisSelection, MultiplierSelection};
 
 const CONTROLLER_READY_TIMEOUT: Duration = Duration::from_secs(12);
@@ -57,6 +57,8 @@ const SCENARIOS: &[Scenario] = &[
 
 const LIMIT_BOUNCE_AXES: &[AxisSelection] = &[AxisSelection::X, AxisSelection::Y, AxisSelection::Z];
 const HOMING_CANCEL_EVENTS: usize = 1;
+const UNHOMED_TELEOP_SCENARIO: Scenario =
+    Scenario::new(AxisSelection::X, MultiplierSelection::X1, 1);
 
 fn main() {
     if let Err(error) = run() {
@@ -79,7 +81,7 @@ fn run() -> Result<()> {
     let pendant = pendant::PendantStream::start(terminal.take_master()?);
     let mut linuxcnc = linuxcnc::LinuxCncSession::start(&ini_path, run_directory.path(), rsh_port)?;
     linuxcnc.wait_until_ready()?;
-    linuxcnc.configure_manual_joint_mode()?;
+    linuxcnc.configure_manual_mode(ManualJogMode::AxisTeleop)?;
 
     linuxcnc::wait_for_bool("dmc2-pendant.connected", true, CONTROLLER_READY_TIMEOUT)?;
     linuxcnc::wait_for_bool(
@@ -89,6 +91,19 @@ fn run() -> Result<()> {
     )?;
     linuxcnc::wait_for_bool("motion.motion-enabled", true, CONTROLLER_READY_TIMEOUT)?;
     linuxcnc::wait_for_bool(
+        "dmc2-task-monitor.teleop-mode",
+        true,
+        CONTROLLER_READY_TIMEOUT,
+    )?;
+    linuxcnc::wait_for_bool("motion.teleop-mode", true, CONTROLLER_READY_TIMEOUT)?;
+    for joint in 0..3 {
+        linuxcnc::wait_for_bool(
+            &format!("dmc2-task-monitor.joint-{joint}-homed"),
+            false,
+            CONTROLLER_READY_TIMEOUT,
+        )?;
+    }
+    linuxcnc::wait_for_bool(
         "dmc2-pendant-control.control-ready",
         true,
         CONTROLLER_READY_TIMEOUT,
@@ -97,10 +112,24 @@ fn run() -> Result<()> {
     execute_canonical_estop_recovery(&pendant)?;
 
     let start = MotionEvidence::read()?;
-    let mut finish = start;
+    prepare_selection(&pendant, UNHOMED_TELEOP_SCENARIO)?;
+    let mut finish = execute_scenario(&pendant, 0, UNHOMED_TELEOP_SCENARIO, start)?;
+
+    linuxcnc.select_manual_jog_mode(ManualJogMode::JointFree)?;
+    linuxcnc::wait_for_bool(
+        "dmc2-task-monitor.joint-mode",
+        true,
+        CONTROLLER_READY_TIMEOUT,
+    )?;
+    linuxcnc::wait_for_bool("motion.teleop-mode", false, CONTROLLER_READY_TIMEOUT)?;
+    linuxcnc::wait_for_bool(
+        "dmc2-pendant-control.control-ready",
+        true,
+        CONTROLLER_READY_TIMEOUT,
+    )?;
     for (index, scenario) in SCENARIOS.iter().copied().enumerate() {
         prepare_selection(&pendant, scenario)?;
-        finish = execute_scenario(&pendant, index, scenario, finish)?;
+        finish = execute_scenario(&pendant, index + 1, scenario, finish)?;
     }
     finish = execute_homing_cancel(&mut linuxcnc, &pendant)?;
     execute_shared_home_limit_diagnostic(&mut linuxcnc)?;
@@ -129,7 +158,7 @@ fn run() -> Result<()> {
 
     run_directory.mark_success();
     println!(
-        "dmc2-motion-acceptance: PASS: 1 canonical pendant E-stop trip/recovery, {} pendant moves, {} real LinuxCNC homing cancel, 1 shared home/limit diagnostic path, and {} real LinuxCNC limit-stop/bounce/latch-reset paths covered production P3 -> dmc2_rt -> LinuxCNC 2.9.10 motmod -> software-stepgen across X/Y/Z, x1/x10/x100, both directions, and repeated X/x1 input; command_mm={:?}->{:?}; stepgen_counts={:?}->{:?}",
+        "dmc2-motion-acceptance: PASS: 1 canonical pendant E-stop trip/recovery, 1 explicitly unhomed teleop/axis pendant move, {} joint/free pendant moves, {} real LinuxCNC homing cancel, 1 shared home/limit diagnostic path, and {} real LinuxCNC limit-stop/bounce/latch-reset paths covered production P3 -> dmc2_rt -> LinuxCNC 2.9.10 motmod -> software-stepgen across X/Y/Z, x1/x10/x100, both directions, and repeated X/x1 input; command_mm={:?}->{:?}; stepgen_counts={:?}->{:?}",
         SCENARIOS.len(),
         HOMING_CANCEL_EVENTS,
         LIMIT_BOUNCE_AXES.len(),

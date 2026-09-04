@@ -12,6 +12,21 @@ const STARTUP_TIMEOUT: Duration = Duration::from_secs(20);
 const COMMAND_TIMEOUT: Duration = Duration::from_secs(4);
 const SHUTDOWN_TIMEOUT: Duration = Duration::from_secs(12);
 
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum ManualJogMode {
+    AxisTeleop,
+    JointFree,
+}
+
+impl ManualJogMode {
+    const fn teleop_command(self) -> &'static str {
+        match self {
+            Self::AxisTeleop => "set teleop_enable on",
+            Self::JointFree => "set teleop_enable off",
+        }
+    }
+}
+
 pub(crate) fn reserve_loopback_port() -> Result<u16> {
     let listener = TcpListener::bind(("127.0.0.1", 0)).map_err(|error| {
         Failure::io(
@@ -112,7 +127,7 @@ impl LinuxCncSession {
         }
     }
 
-    pub(crate) fn configure_manual_joint_mode(&mut self) -> Result<()> {
+    pub(crate) fn configure_manual_mode(&mut self, mode: ManualJogMode) -> Result<()> {
         let rsh = self.rsh.as_mut().ok_or_else(|| {
             Failure::new(
                 FailureCode::LinuxCncProtocol,
@@ -126,7 +141,19 @@ impl LinuxCncSession {
         rsh.command("set estop off")?;
         rsh.command("set machine on")?;
         rsh.command("set mode manual")?;
-        rsh.command("set teleop_enable off")?;
+        rsh.command(mode.teleop_command())?;
+        Ok(())
+    }
+
+    pub(crate) fn select_manual_jog_mode(&mut self, mode: ManualJogMode) -> Result<()> {
+        let rsh = self.rsh.as_mut().ok_or_else(|| {
+            Failure::new(
+                FailureCode::LinuxCncProtocol,
+                "linuxcncrsh connection was not established",
+            )
+        })?;
+        rsh.command("set mode manual")?;
+        rsh.command(mode.teleop_command())?;
         Ok(())
     }
 

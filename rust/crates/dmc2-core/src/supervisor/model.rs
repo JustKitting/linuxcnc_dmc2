@@ -2,6 +2,19 @@ use super::{FaultCode, FaultRecord, Phase};
 use crate::pendant::PendantSample;
 use crate::Axis;
 
+/// The native LinuxCNC wheel-jog consumer selected by LinuxCNC's current
+/// trajectory mode.
+///
+/// This is deliberately independent of homing state. LinuxCNC 2.9.10's
+/// motion controller accepts axis wheel-jog counts in teleop mode and joint
+/// wheel-jog counts in free mode; the homed bits describe position validity,
+/// not which of those two consumers is active.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum JogPath {
+    AxisTeleop,
+    JointFree,
+}
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct LinkSnapshot {
     pub connected: bool,
@@ -32,18 +45,20 @@ impl MachineSnapshot {
         self.homing[0] || self.homing[1] || self.homing[2]
     }
 
-    pub const fn ready_for_pendant_jog(&self) -> bool {
-        let jog_mode_ready = if self.all_homed() {
-            self.teleop_mode
-        } else {
-            self.joint_mode
-        };
-        self.machine_on
-            && !self.estopped
-            && self.manual_mode
-            && jog_mode_ready
-            && self.interp_idle
-            && !self.any_homing()
+    pub const fn ready_jog_path(&self) -> Option<JogPath> {
+        if !self.machine_on
+            || self.estopped
+            || !self.manual_mode
+            || !self.interp_idle
+            || self.any_homing()
+        {
+            return None;
+        }
+        match (self.joint_mode, self.teleop_mode) {
+            (false, true) => Some(JogPath::AxisTeleop),
+            (true, false) => Some(JogPath::JointFree),
+            _ => None,
+        }
     }
 }
 
@@ -65,19 +80,17 @@ pub struct MotionSnapshot {
 }
 
 impl MotionSnapshot {
-    pub const fn ready_for_path(&self, joint_jog: bool) -> bool {
-        if joint_jog {
-            self.enabled && !self.teleop_mode && !self.coord_mode
-        } else {
-            self.enabled && self.teleop_mode && !self.coord_mode
+    pub const fn ready_for_path(&self, path: JogPath) -> bool {
+        match path {
+            JogPath::AxisTeleop => self.enabled && self.teleop_mode && !self.coord_mode,
+            JogPath::JointFree => self.enabled && !self.teleop_mode && !self.coord_mode,
         }
     }
 
-    pub const fn wheel_active(&self, axis: Axis, joint_jog: bool) -> bool {
-        if joint_jog {
-            self.joint_wheel_jog_active[axis.index()]
-        } else {
-            self.axis_wheel_jog_active[axis.index()]
+    pub const fn wheel_active(&self, axis: Axis, path: JogPath) -> bool {
+        match path {
+            JogPath::AxisTeleop => self.axis_wheel_jog_active[axis.index()],
+            JogPath::JointFree => self.joint_wheel_jog_active[axis.index()],
         }
     }
 
@@ -87,11 +100,12 @@ impl MotionSnapshot {
     /// planner completion flag.  `axis.L.wheel-jog-active` is cleared by
     /// LinuxCNC only after that axis teleop planner becomes inactive.  Joint
     /// free motion additionally publishes a per-joint in-position bit.
-    pub const fn path_settled(&self, axis: Axis, joint_jog: bool) -> bool {
-        if joint_jog {
-            !self.joint_wheel_jog_active[axis.index()] && self.joint_in_position[axis.index()]
-        } else {
-            !self.axis_wheel_jog_active[axis.index()]
+    pub const fn path_settled(&self, axis: Axis, path: JogPath) -> bool {
+        match path {
+            JogPath::AxisTeleop => !self.axis_wheel_jog_active[axis.index()],
+            JogPath::JointFree => {
+                !self.joint_wheel_jog_active[axis.index()] && self.joint_in_position[axis.index()]
+            }
         }
     }
 
@@ -109,7 +123,7 @@ impl MotionSnapshot {
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct JogCommand {
     pub axis: Axis,
-    pub joint_jog: bool,
+    pub path: JogPath,
     pub signed_delta_pulses: f64,
     /// Rate at which finite position targets are issued to LinuxCNC motion.
     /// LinuxCNC's configured planner limits remain the physical speed ceiling.
@@ -159,4 +173,83 @@ pub struct SupervisorInputs {
     pub motion_command_ready: bool,
     /// Rising edge from LinuxCNC's canonical E-stop reset request.
     pub linuxcnc_estop_reset_rising: bool,
+}
+
+impl SupervisorInputs {
+    /// Return one coherent, currently accepted LinuxCNC wheel-jog path.
+    ///
+    /// The task-status trajectory mode selects the consumer. Realtime motion
+    /// state must independently acknowledge that same mode before the path is
+    /// made available to the pendant controller.
+    pub const fn ready_jog_path(&self) -> Option<JogPath> {
+        match self.machine.ready_jog_path() {
+            Some(path) if self.motion.ready_for_path(path) => Some(path),
+            _ => None,
+        }
+    }
+
+    pub const fn path_ready(&self, path: JogPath) -> bool {
+        matches!(
+            (self.ready_jog_path(), path),
+            (Some(JogPath::AxisTeleop), JogPath::AxisTeleop)
+                | (Some(JogPath::JointFree), JogPath::JointFree)
+        )
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn teleop_inputs(homed: [bool; 3]) -> SupervisorInputs {
+        SupervisorInputs {
+            link: LinkSnapshot {
+                connected: true,
+                serial_fault: false,
+                quadrature_fault: false,
+                estop_pressed: false,
+            },
+            packet: None,
+            machine: MachineSnapshot {
+                machine_on: true,
+                estopped: false,
+                manual_mode: true,
+                joint_mode: false,
+                teleop_mode: true,
+                interp_idle: true,
+                homed,
+                homing: [false; 3],
+                axis_stopped: [true; 3],
+            },
+            motion: MotionSnapshot {
+                enabled: true,
+                teleop_mode: true,
+                coord_mode: false,
+                in_position: true,
+                jog_active: false,
+                axis_wheel_jog_active: [false; 3],
+                joint_wheel_jog_active: [false; 3],
+                joint_in_position: [true; 3],
+            },
+            counts_by_motor: [0; 3],
+            position_feedback_by_motor: [0.0; 3],
+            raw_limits: [false; 3],
+            safety_limits: [false; 3],
+            pendant_mode_enabled: true,
+            motion_command_ready: true,
+            linuxcnc_estop_reset_rising: false,
+        }
+    }
+
+    #[test]
+    fn homed_bits_do_not_select_the_linuxcnc_jog_consumer() {
+        assert_eq!(
+            teleop_inputs([false; 3]).ready_jog_path(),
+            Some(JogPath::AxisTeleop)
+        );
+        assert_eq!(
+            teleop_inputs([true; 3]).ready_jog_path(),
+            Some(JogPath::AxisTeleop)
+        );
+    }
 }

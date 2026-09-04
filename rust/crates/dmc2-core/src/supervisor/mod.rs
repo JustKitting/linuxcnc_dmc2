@@ -17,6 +17,6 @@ pub use controller::{
 };
 pub use fault::{FaultCode, FaultEvidence, FaultRecord};
 pub use model::{
-    CommandEvent, JogCommand, LinkSnapshot, MachineSnapshot, MotionSnapshot, SupervisorInputs,
-    SupervisorOutputs,
+    CommandEvent, JogCommand, JogPath, LinkSnapshot, MachineSnapshot, MotionSnapshot,
+    SupervisorInputs, SupervisorOutputs,
 };

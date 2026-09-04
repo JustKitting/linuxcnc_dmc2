@@ -118,8 +118,7 @@ impl LinuxCncPendantSupervisor {
         self.control_available = self.external_enable
             && self.startup_reset_complete
             && self.recovery_power_phase.is_none()
-            && inputs.machine.ready_for_pendant_jog()
-            && inputs.motion.ready_for_path(!inputs.machine.all_homed())
+            && inputs.ready_jog_path().is_some()
             && (self.phase.bounce() || (!any(inputs.raw_limits) && !any(inputs.safety_limits)));
 
         if self.pendant_mode_enabled {

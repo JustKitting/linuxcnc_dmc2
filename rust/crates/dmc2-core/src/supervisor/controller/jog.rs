@@ -36,14 +36,13 @@ impl LinuxCncPendantSupervisor {
     }
 
     fn start_jog(&mut self, intent: JogIntent, inputs: &SupervisorInputs) {
-        if !inputs.machine.ready_for_pendant_jog()
-            || any(inputs.raw_limits)
-            || any(inputs.safety_limits)
-        {
+        if any(inputs.raw_limits) || any(inputs.safety_limits) {
             return;
         }
-        let joint_jog = !inputs.machine.all_homed();
-        if !inputs.motion.ready_for_path(joint_jog) {
+        let Some(path) = inputs.machine.ready_jog_path() else {
+            return;
+        };
+        if !inputs.motion.ready_for_path(path) {
             self.fail(FaultCode::MotionPathUnavailable);
             return;
         }
@@ -63,7 +62,7 @@ impl LinuxCncPendantSupervisor {
         };
         let command = JogCommand {
             axis: intent.axis,
-            joint_jog,
+            path,
             signed_delta_pulses: intent.delta_pulses as f64,
             target_rate_mm_per_minute: intent.target_rate_mm_per_minute,
         };
@@ -74,7 +73,7 @@ impl LinuxCncPendantSupervisor {
         let start_count = inputs.counts_by_motor[intent.motor];
         self.active = Some(ActiveJog {
             intent,
-            joint_jog,
+            path,
             start_count,
             start_position_pulses,
             target_count: start_count.wrapping_add(intent.delta_pulses),
@@ -99,12 +98,9 @@ impl LinuxCncPendantSupervisor {
         let same_motion = self.phase == Phase::Idle
             && active.intent.motor == intent.motor
             && active.intent.axis == intent.axis
-            && active.joint_jog == !inputs.machine.all_homed()
+            && inputs.path_ready(active.path)
             && active.toward_positive_limit() == (intent.delta_pulses > 0);
-        if same_motion
-            && inputs.motion.ready_for_path(active.joint_jog)
-            && inputs.motion_command_ready
-        {
+        if same_motion && inputs.motion_command_ready {
             let current_count = inputs.counts_by_motor[intent.motor];
             let replacement_target = current_count.wrapping_add(intent.delta_pulses);
             let extension = replacement_target.wrapping_sub(active.target_count);
@@ -118,7 +114,7 @@ impl LinuxCncPendantSupervisor {
             if (extension > 0) == (intent.delta_pulses > 0) {
                 let command = JogCommand {
                     axis: intent.axis,
-                    joint_jog: active.joint_jog,
+                    path: active.path,
                     signed_delta_pulses: extension as f64,
                     target_rate_mm_per_minute: intent.target_rate_mm_per_minute,
                 };
@@ -157,7 +153,7 @@ impl LinuxCncPendantSupervisor {
         self.bounce_start_count = None;
     }
 
-    pub(super) fn start_bounce_move(&mut self, inputs: &SupervisorInputs) {
+    pub(super) fn start_bounce_move(&mut self, inputs: &SupervisorInputs, path: JogPath) {
         let Some(motor) = self.collision_motor else {
             self.fail(FaultCode::BounceLostLimitAttribution);
             return;
@@ -166,11 +162,7 @@ impl LinuxCncPendantSupervisor {
             self.fail(FaultCode::BounceLostLimitAttribution);
             return;
         }
-        let Some(active) = self.active else {
-            self.fail(FaultCode::BounceLostLimitAttribution);
-            return;
-        };
-        if !inputs.motion.ready_for_path(active.joint_jog) {
+        if !inputs.path_ready(path) {
             self.fail(FaultCode::MotionPathUnavailable);
             return;
         }
@@ -200,7 +192,7 @@ impl LinuxCncPendantSupervisor {
         let distance_pulses = BOUNCE_PULSES as f64 - 0.5 + fractional_phase;
         let command = JogCommand {
             axis: axis_by_motor(motor),
-            joint_jog: active.joint_jog,
+            path,
             signed_delta_pulses: -distance_pulses,
             target_rate_mm_per_minute: BOUNCE_SPEED_MM_PER_MINUTE,
         };
@@ -208,19 +200,33 @@ impl LinuxCncPendantSupervisor {
             return;
         }
         self.bounce_start_count = Some(start_count);
+        let intent = JogIntent {
+            axis: axis_by_motor(motor),
+            motor,
+            delta_pulses: -BOUNCE_PULSES,
+            target_rate_mm_per_minute: BOUNCE_SPEED_MM_PER_MINUTE,
+        };
         if let Some(value) = self.active.as_mut() {
-            value.intent = JogIntent {
-                axis: axis_by_motor(motor),
-                motor,
-                delta_pulses: -BOUNCE_PULSES,
-                target_rate_mm_per_minute: BOUNCE_SPEED_MM_PER_MINUTE,
-            };
+            value.intent = intent;
+            value.path = path;
             value.restart_observation(
                 start_count,
                 position_pulses,
                 start_count.wrapping_sub(BOUNCE_PULSES),
                 position_pulses - distance_pulses,
             );
+        } else {
+            self.active = Some(ActiveJog {
+                intent,
+                path,
+                start_count,
+                start_position_pulses: position_pulses,
+                target_count: start_count.wrapping_sub(BOUNCE_PULSES),
+                target_position_pulses: position_pulses - distance_pulses,
+                command_elapsed_ns: 0,
+                consumer_active_seen: false,
+                feedback_progress_seen: false,
+            });
         }
         self.transition(Phase::Bouncing);
     }
@@ -245,11 +251,10 @@ impl LinuxCncPendantSupervisor {
             self.fail(FaultCode::BounceLostLimitAttribution);
             return;
         }
-        if !inputs.machine.ready_for_pendant_jog() {
+        let Some(path) = inputs.machine.ready_jog_path() else {
             return;
-        }
-        let joint_jog = !inputs.machine.all_homed();
-        if !inputs.motion.ready_for_path(joint_jog) {
+        };
+        if !inputs.motion.ready_for_path(path) {
             self.fail(FaultCode::MotionPathUnavailable);
             return;
         }
@@ -269,7 +274,7 @@ impl LinuxCncPendantSupervisor {
         };
         let command = JogCommand {
             axis: intent.axis,
-            joint_jog,
+            path,
             signed_delta_pulses: intent.delta_pulses as f64,
             target_rate_mm_per_minute: intent.target_rate_mm_per_minute,
         };
@@ -279,7 +284,7 @@ impl LinuxCncPendantSupervisor {
         let start_count = inputs.counts_by_motor[motor];
         self.active = Some(ActiveJog {
             intent,
-            joint_jog,
+            path,
             start_count,
             start_position_pulses,
             target_count: start_count.wrapping_add(intent.delta_pulses),
@@ -417,14 +422,12 @@ impl LinuxCncPendantSupervisor {
                     return;
                 }
                 if !inputs.motion.all_jogs_stopped()
-                    || !inputs
-                        .motion
-                        .path_settled(active.intent.axis, active.joint_jog)
+                    || !inputs.motion.path_settled(active.intent.axis, active.path)
                 {
                     return;
                 }
                 match self.phase {
-                    Phase::StoppingBounce => self.start_bounce_move(inputs),
+                    Phase::StoppingBounce => self.start_bounce_move(inputs, active.path),
                     Phase::StoppingReplace => {
                         self.active = None;
                         self.transition(Phase::Idle);
@@ -447,7 +450,7 @@ impl LinuxCncPendantSupervisor {
                 }
             }
             Phase::Bouncing | Phase::BounceReleaseJog => {
-                if !inputs.motion.ready_for_path(active.joint_jog) {
+                if !inputs.path_ready(active.path) {
                     self.fail(FaultCode::MotionPathUnavailable);
                     return;
                 }
@@ -457,10 +460,7 @@ impl LinuxCncPendantSupervisor {
                     }
                     return;
                 }
-                if !inputs
-                    .motion
-                    .path_settled(active.intent.axis, active.joint_jog)
-                {
+                if !inputs.motion.path_settled(active.intent.axis, active.path) {
                     return;
                 }
                 self.finish_bounce(inputs);
@@ -471,7 +471,7 @@ impl LinuxCncPendantSupervisor {
                 }
             }
             Phase::Idle => {
-                if !inputs.motion.ready_for_path(active.joint_jog) {
+                if !inputs.path_ready(active.path) {
                     self.fail(FaultCode::MotionPathUnavailable);
                     return;
                 }
@@ -495,10 +495,7 @@ impl LinuxCncPendantSupervisor {
                     }
                     return;
                 }
-                if !inputs
-                    .motion
-                    .path_settled(active.intent.axis, active.joint_jog)
-                {
+                if !inputs.motion.path_settled(active.intent.axis, active.path) {
                     if active.command_elapsed_ns >= JOG_TIMEOUT_NS {
                         self.fail(FaultCode::JogTimedOut);
                     }

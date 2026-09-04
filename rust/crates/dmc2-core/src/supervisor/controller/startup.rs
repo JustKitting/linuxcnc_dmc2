@@ -1,6 +1,5 @@
 use super::super::SupervisorInputs;
 use super::*;
-use crate::BOUNCE_PULSES;
 
 impl LinuxCncPendantSupervisor {
     fn begin_startup_power(&mut self) {
@@ -53,27 +52,9 @@ impl LinuxCncPendantSupervisor {
         }
     }
 
-    fn begin_startup_bounce(&mut self, motor: usize, inputs: &SupervisorInputs) {
+    fn begin_startup_bounce(&mut self, motor: usize) {
         self.clear_state_requests();
-        let axis = axis_by_motor(motor);
-        let start_count = inputs.counts_by_motor[motor];
-        self.active = Some(ActiveJog {
-            intent: JogIntent {
-                axis,
-                motor,
-                delta_pulses: -BOUNCE_PULSES,
-                target_rate_mm_per_minute: BOUNCE_SPEED_MM_PER_MINUTE,
-            },
-            joint_jog: !inputs.machine.all_homed(),
-            start_count,
-            start_position_pulses: inputs.position_feedback_by_motor[motor] * PULSES_PER_MM as f64,
-            target_count: start_count.wrapping_sub(BOUNCE_PULSES),
-            target_position_pulses: inputs.position_feedback_by_motor[motor] * PULSES_PER_MM as f64
-                - BOUNCE_PULSES as f64,
-            command_elapsed_ns: 0,
-            consumer_active_seen: false,
-            feedback_progress_seen: false,
-        });
+        self.active = None;
         self.pending = None;
         self.collision_motor = Some(motor);
         self.bounce_start_count = None;
@@ -105,7 +86,7 @@ impl LinuxCncPendantSupervisor {
             self.fail(FaultCode::StartupLimitDuringHoming);
             return;
         }
-        self.begin_startup_bounce(raw_motor.unwrap_or(0), inputs);
+        self.begin_startup_bounce(raw_motor.unwrap_or(0));
     }
 
     pub(super) fn advance_startup_bounce(&mut self, inputs: &SupervisorInputs) {
@@ -147,11 +128,11 @@ impl LinuxCncPendantSupervisor {
             Phase::StartupWaitOn => self.machine_on_request = false,
             _ => {}
         }
-        if !inputs.machine.ready_for_pendant_jog() {
+        let Some(path) = inputs.ready_jog_path() else {
             return;
-        }
+        };
         self.clear_state_requests();
         self.startup_reset_complete = true;
-        self.start_bounce_move(inputs);
+        self.start_bounce_move(inputs, path);
     }
 }

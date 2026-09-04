@@ -5,7 +5,7 @@ mod startup;
 mod update;
 
 use super::{
-    CommandEvent, FaultCode, FaultRecord, JogCommand, SupervisorInputs, SupervisorOutputs,
+    CommandEvent, FaultCode, FaultRecord, JogCommand, JogPath, SupervisorInputs, SupervisorOutputs,
 };
 #[cfg(test)]
 use super::{LinkSnapshot, MachineSnapshot};
@@ -168,7 +168,7 @@ impl Phase {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ActiveJog {
     intent: JogIntent,
-    joint_jog: bool,
+    path: JogPath,
     start_count: i32,
     start_position_pulses: f64,
     target_count: i32,
@@ -185,7 +185,7 @@ impl ActiveJog {
 
     fn observe_motion(&mut self, period_ns: u64, inputs: &SupervisorInputs) {
         self.command_elapsed_ns = self.command_elapsed_ns.saturating_add(period_ns);
-        if inputs.motion.wheel_active(self.intent.axis, self.joint_jog) {
+        if inputs.motion.wheel_active(self.intent.axis, self.path) {
             self.consumer_active_seen = true;
         }
         let motor = self.intent.motor;

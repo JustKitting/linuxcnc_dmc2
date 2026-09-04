@@ -5,7 +5,7 @@
 //! edges: HALUI is a userspace/NML boundary and cannot acknowledge a command
 //! on the realtime schedule.
 
-use crate::supervisor::{CommandEvent, JogCommand};
+use crate::supervisor::{CommandEvent, JogCommand, JogPath};
 use dmc2_diagnostics::diagnostic_catalog;
 
 diagnostic_catalog! {
@@ -125,7 +125,7 @@ pub struct NativeMotionCommandChannel {
 #[derive(Clone, Copy, Debug, PartialEq)]
 struct ScheduledIncrement {
     axis: usize,
-    joint_jog: bool,
+    path: JogPath,
     direction: i32,
     remaining_pulses: f64,
     pulses_per_mm: f64,
@@ -240,7 +240,7 @@ impl NativeMotionCommandChannel {
 
         self.active = Some(ScheduledIncrement {
             axis: command.axis.index(),
-            joint_jog: command.joint_jog,
+            path: command.path,
             direction,
             remaining_pulses: command.signed_delta_pulses.abs(),
             pulses_per_mm,
@@ -262,20 +262,22 @@ impl NativeMotionCommandChannel {
         }
         let chunk = active.remaining_pulses.min(budget);
         let scale = chunk / active.pulses_per_mm;
-        let counts = if active.joint_jog {
-            &mut self.outputs.joint_jog_counts[active.axis]
-        } else {
-            &mut self.outputs.axis_jog_counts[active.axis]
+        let counts = match active.path {
+            JogPath::AxisTeleop => &mut self.outputs.axis_jog_counts[active.axis],
+            JogPath::JointFree => &mut self.outputs.joint_jog_counts[active.axis],
         };
         *counts = counts
             .checked_add(active.direction)
             .ok_or(MotionCommandError::CountRangeExceeded)?;
-        if active.joint_jog {
-            self.outputs.joint_jog_scale[active.axis] = scale;
-            self.outputs.joint_jog_enable[active.axis] = true;
-        } else {
-            self.outputs.axis_jog_scale[active.axis] = scale;
-            self.outputs.axis_jog_enable[active.axis] = true;
+        match active.path {
+            JogPath::AxisTeleop => {
+                self.outputs.axis_jog_scale[active.axis] = scale;
+                self.outputs.axis_jog_enable[active.axis] = true;
+            }
+            JogPath::JointFree => {
+                self.outputs.joint_jog_scale[active.axis] = scale;
+                self.outputs.joint_jog_enable[active.axis] = true;
+            }
         }
         self.outputs.phase = MotionCommandPhase::JogCount;
 
