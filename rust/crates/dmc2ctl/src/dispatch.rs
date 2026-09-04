@@ -10,6 +10,41 @@ use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 const STATUS_POLL_PERIOD: Duration = Duration::from_millis(20);
 
+#[derive(Debug)]
+pub enum ExecutionOutcome {
+    Control(Receipt),
+    Program {
+        path: PathBuf,
+        load: Receipt,
+        run: Receipt,
+    },
+}
+
+pub fn execute_operation(
+    catalog: &Catalog,
+    operation: &Operation,
+    backend: &mut impl ControlBackend,
+    physical_estop_pressed: Option<bool>,
+) -> Result<ExecutionOutcome, DispatchError> {
+    match operation.kind {
+        OperationKind::Control => execute_control(operation, backend, physical_estop_pressed)
+            .map(ExecutionOutcome::Control),
+        OperationKind::Program => {
+            let status = backend.status()?;
+            check_prerequisites(operation, &status, None)?;
+            let (path, load) = load_program(catalog, operation, backend)?;
+            let run = run_program(catalog, operation, backend)?;
+            Ok(ExecutionOutcome::Program { path, load, run })
+        }
+        OperationKind::Ui | OperationKind::Internal => {
+            Err(DispatchError::UnsupportedExecutionKind {
+                id: operation.id.clone(),
+                kind: operation.kind,
+            })
+        }
+    }
+}
+
 pub fn execute_control(
     operation: &Operation,
     backend: &mut impl ControlBackend,
@@ -211,6 +246,10 @@ pub enum DispatchError {
         expected: OperationKind,
         observed: OperationKind,
     },
+    UnsupportedExecutionKind {
+        id: String,
+        kind: OperationKind,
+    },
     UnsupportedDriver {
         id: String,
         driver: String,
@@ -274,6 +313,11 @@ impl fmt::Display for DispatchError {
                 "operation {id} has kind {}; expected {}",
                 observed.name(),
                 expected.name()
+            ),
+            Self::UnsupportedExecutionKind { id, kind } => write!(
+                formatter,
+                "operation {id} has kind {}; execute accepts only control or program operations",
+                kind.name()
             ),
             Self::UnsupportedDriver { id, driver, target } => write!(
                 formatter,
@@ -347,6 +391,7 @@ impl RecoveryClassified for DispatchError {
             Self::Native(error) => error.recovery_class(),
             Self::Prerequisite { prerequisite, .. } => prerequisite.recovery_class(),
             Self::WrongKind { .. }
+            | Self::UnsupportedExecutionKind { .. }
             | Self::UnsupportedDriver { .. }
             | Self::ProgramPath { .. }
             | Self::ProgramOutsideProject { .. } => RecoveryClass::RelaunchApplication,
@@ -491,5 +536,31 @@ mod tests {
             backend.actions,
             [ObservedAction::SetAuto, ObservedAction::Run]
         );
+    }
+
+    #[test]
+    fn execute_program_dispatches_one_cataloged_load_and_run_sequence() {
+        let catalog = Catalog::open(default_catalog_path()).expect("catalog should parse");
+        let operation = catalog
+            .operation("program.puck-contact-no-motion")
+            .expect("program should exist");
+        let mut backend = FakeBackend {
+            status: ready_status(),
+            actions: Vec::new(),
+        };
+
+        let outcome = execute_operation(&catalog, operation, &mut backend, None)
+            .expect("cataloged program should dispatch");
+
+        assert!(matches!(outcome, ExecutionOutcome::Program { .. }));
+        assert!(matches!(
+            backend.actions.as_slice(),
+            [
+                ObservedAction::Close,
+                ObservedAction::Open(_),
+                ObservedAction::SetAuto,
+                ObservedAction::Run
+            ]
+        ));
     }
 }

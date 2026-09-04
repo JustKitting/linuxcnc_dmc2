@@ -10,9 +10,9 @@ use dmc2_diagnostics::{RecoveryClass, RecoveryClassified, RecoveryDisplay};
 
 use catalog::{Catalog, CatalogError, Operation, OperationKind, Prerequisite};
 use cli::{Action, CliError};
-use dispatch::DispatchError;
+use dispatch::{DispatchError, ExecutionOutcome};
 use hal::HalError;
-use native::{ControlBackend, NativeError, Receipt, Session, Status};
+use native::{ControlBackend, NativeError, Session, Status};
 
 fn main() {
     match run() {
@@ -50,9 +50,13 @@ fn run() -> Result<(), ApplicationError> {
                 None
             };
             let mut session = Session::open(&arguments.nml_file)?;
-            let receipt =
-                dispatch::execute_control(operation, &mut session, physical_estop_pressed)?;
-            print_receipt(operation, &receipt);
+            let outcome = dispatch::execute_operation(
+                &catalog,
+                operation,
+                &mut session,
+                physical_estop_pressed,
+            )?;
+            print_execution(operation, &outcome);
         }
         Action::Load(id) => {
             let operation = catalog.operation(&id)?;
@@ -147,11 +151,27 @@ fn print_status(status: &Status) {
     println!("loaded_file={}", status.loaded_file.display());
 }
 
-fn print_receipt(operation: &Operation, receipt: &Receipt) {
-    println!(
-        "operation={} action=execute command_serial={} echo_serial={} rcs_status={}",
-        operation.id, receipt.command_serial_number, receipt.echo_serial_number, receipt.rcs_status
-    );
+fn print_execution(operation: &Operation, outcome: &ExecutionOutcome) {
+    match outcome {
+        ExecutionOutcome::Control(receipt) => println!(
+            "operation={} action=execute command_serial={} echo_serial={} rcs_status={}",
+            operation.id,
+            receipt.command_serial_number,
+            receipt.echo_serial_number,
+            receipt.rcs_status
+        ),
+        ExecutionOutcome::Program { path, load, run } => println!(
+            "operation={} action=execute-program file={} load_command_serial={} load_echo_serial={} load_rcs_status={} run_command_serial={} run_echo_serial={} run_rcs_status={}",
+            operation.id,
+            path.display(),
+            load.command_serial_number,
+            load.echo_serial_number,
+            load.rcs_status,
+            run.command_serial_number,
+            run.echo_serial_number,
+            run.rcs_status
+        ),
+    }
 }
 
 #[derive(Debug)]

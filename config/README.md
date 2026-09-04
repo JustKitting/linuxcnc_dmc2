@@ -13,7 +13,10 @@ build reads those planner limits directly from `live/dmc2.ini` and derives
 bounded completion and stop deadlines from the accepted live profile.
 
 `operations.tsv` defines reusable operator actions and their compiled
-execution contracts. `processes.tsv` defines every tracked LinuxCNC process's
+execution contracts. Adding or selecting a stored G-code operation is a data
+change, not a Rust code change. The standard `dmc2ctl execute <operation-id>`
+path loads and runs the exact cataloged program. `processes.tsv` defines every
+tracked LinuxCNC process's
 exact program, launch site, ownership topology, criticality, backtrace policy,
 INI-argument placement, core-dump capture policy, and the collision-checked
 kernel process name used to identify an owner even after it has become a

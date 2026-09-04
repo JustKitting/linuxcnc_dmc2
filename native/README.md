@@ -9,8 +9,11 @@ The machine project uses four compiled interfaces:
 - `dmc2_rt.so`: the no-`std` servo-thread supervisor, limit/bounce policy, and
   native realtime axis/joint wheel-jog command and acknowledgement transport.
 - `dmc2ctl`: the typed command-line client for the already-running LinuxCNC
-  NML session. Its operations come from `config/operations.tsv`; program load
-  and program run are deliberately separate commands.
+  NML session. Its operations come from `config/operations.tsv`.
+  `dmc2ctl execute <operation-id>` is the standard path: a program operation
+  is loaded from its cataloged path, acknowledged, and run in one invocation.
+  The lower-level `load` and `run` commands remain available for explicit
+  operator-controlled staging.
 
 `scripts/build_native.sh` builds the complete release with warnings denied and
 stages the userspace binaries under `native/bin` and the reviewed LinuxCNC
