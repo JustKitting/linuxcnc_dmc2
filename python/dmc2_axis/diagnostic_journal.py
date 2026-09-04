@@ -108,17 +108,17 @@ class DiagnosticEvent:
         )
 
     def notification_text(self) -> str:
+        """Render the operator view; retained evidence stays in the journal/log."""
+        recovery_controls = " -> ".join(
+            operation.label for operation in self.recovery.operations
+        )
         return (
-            f"{self.identity}\n"
+            f"{self.identity} [{self.recovery.identity}]\n"
             f"Cause: {self.cause}\n"
             f"Action: {self.operator_action}\n"
-            f"Recovery class: {self.recovery.identity}\n"
-            f"Recovery transition: {self.recovery.transition_identity}\n"
+            f"Recovery: {recovery_controls}\n"
             f"Clear condition: {self.recovery.clear_transition}\n"
-            f"UI path: {self.recovery.ui_path}\n"
-            f"Evidence: {self.evidence}\n"
-            f"Source: {self.source} "
-            f"(domain={self.domain}, raw={self.raw_value})"
+            f"Details: {self.source} ({self.domain}, raw={self.raw_value})"
         )
 
 

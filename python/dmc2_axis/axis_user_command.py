@@ -15,8 +15,7 @@ _BOOTSTRAP_RECOVERY_TEXT = (
     "Recovery transition: APPLICATION_RELAUNCHED\n"
     "Clear condition: correct the named AXIS integration source and launch a "
     "matching DMC2 LinuxCNC session\n"
-    "UI path: DMC2 LinuxCNC [Applications] -> Clear Fault "
-    "[.toolbar.dmc2_clear_fault] -> Pendant Mode [.toolbar.dmc2_pendant_mode]"
+    "Recovery controls: DMC2 LinuxCNC -> Clear Fault -> Pendant Mode"
 )
 
 

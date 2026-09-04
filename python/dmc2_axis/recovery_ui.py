@@ -23,8 +23,7 @@ EMERGENCY_RELAUNCH_RECOVERY_TEXT = (
     "Recovery transition: APPLICATION_RELAUNCHED\n"
     "Clear condition: correct the named installation/runtime cause and launch "
     "a matched DMC2 LinuxCNC session\n"
-    "UI path: DMC2 LinuxCNC [Applications] -> Clear Fault "
-    "[.toolbar.dmc2_clear_fault] -> Pendant Mode [.toolbar.dmc2_pendant_mode]"
+    "Recovery controls: DMC2 LinuxCNC -> Clear Fault -> Pendant Mode"
 )
 
 
@@ -267,24 +266,24 @@ def _validate_widget_command(
 def recovery_fallback_text(code: RecoveryClassCode) -> str:
     contract = recovery_contract(code)
     ui_path = " -> ".join(
-        f"{RECOVERY_OPERATION_CONTRACTS[operation].label} "
-        f"[{RECOVERY_OPERATION_CONTRACTS[operation].ui_target}]"
+        RECOVERY_OPERATION_CONTRACTS[operation].label
         for operation in contract.operations
     )
     return (
         f"Recovery class: {contract.identity}\n"
         f"Recovery transition: {contract.transition_identity}\n"
         f"Clear condition: {contract.clear_transition}\n"
-        f"UI path: {ui_path}"
+        f"Recovery controls: {ui_path}"
     )
 
 
 def recovery_route_text(route: RecoveryRoute) -> str:
+    controls = " -> ".join(operation.label for operation in route.operations)
     return (
         f"Recovery class: {route.identity}\n"
         f"Recovery transition: {route.transition_identity}\n"
         f"Clear condition: {route.clear_transition}\n"
-        f"UI path: {route.ui_path}"
+        f"Recovery controls: {controls}"
     )
 
 
@@ -358,10 +357,17 @@ def _render_recovery_ui_error(
 
 
 def _log_recovery_ui_fault(fault: AxisUiFault) -> None:
+    contract = fault.kind.contract.recovery
+    operation_ids = " -> ".join(
+        operation.value for operation in contract.operations
+    )
     print(
         "DMC2_RECOVERY_UI_ERROR "
         f"identity={fault.identity!r} cause={fault.cause!r} "
-        f"action={fault.action!r} recovery_class={fault.recovery_code.name!r}",
+        f"action={fault.action!r} recovery_class={fault.recovery_code.name!r} "
+        f"recovery_transition={contract.transition_identity!r} "
+        f"clear_condition={contract.clear_transition!r} "
+        f"ui_path={operation_ids!r}",
         flush=True,
     )
 

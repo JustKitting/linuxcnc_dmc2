@@ -100,10 +100,6 @@ def install_axis_ui_policy(
     error_reader_error_notice = RecoveryUiNotice(namespace)
     unexpected_poll_error_notice = RecoveryUiNotice(namespace)
     reschedule_error_notice = RecoveryUiNotice(namespace)
-    notification_layout_notice = RecoveryUiNotice(
-        namespace,
-        notification_add=original_add,
-    )
     diagnostic_clear_error_notice = RecoveryUiNotice(
         namespace,
         notification_add=original_add,
@@ -113,36 +109,20 @@ def install_axis_ui_policy(
         notification_add=original_add,
     )
 
-    def add_without_covering_status_panel(icon_name, message):
+    def add_with_delivery_status(icon_name, message):
+        """Retain AXIS's stock non-control-covering placement and report failure."""
         try:
             original_add(icon_name, message)
         except Exception as error:
-            if not notification_layout_notice.is_visible():
-                notification_layout_notice.present_fallback(
-                    fault=AxisUiFault(
-                        AxisUiFaultKind.NOTIFICATION_DELIVERY_FAILED,
-                        error,
-                    )
-                )
-            return False
-        try:
-            notifications.place_configure(
-                relx=0,
-                rely=1,
-                x=20,
-                y=-20,
-                anchor="sw",
+            present_recovery_ui_error(
+                namespace,
+                fault=AxisUiFault(
+                    AxisUiFaultKind.NOTIFICATION_DELIVERY_FAILED,
+                    error,
+                ),
+                notification_add=original_add,
             )
-        except Exception as error:
-            if not notification_layout_notice.is_visible():
-                notification_layout_notice.present(
-                    fault=AxisUiFault(
-                        AxisUiFaultKind.NOTIFICATION_DELIVERY_FAILED,
-                        error,
-                    )
-                )
-        else:
-            notification_layout_notice.clear()
+            return False
         return True
 
     def filtered_error_task():
@@ -513,7 +493,7 @@ def install_axis_ui_policy(
                 )
             )
 
-    notifications.add = add_without_covering_status_panel
+    notifications.add = add_with_delivery_status
     live_plotter.error_task = filtered_error_task
     live_plotter._dmc2_diagnostic_reader = diagnostic_reader
     live_plotter._dmc2_active_diagnostic_widgets = active_diagnostic_widgets
