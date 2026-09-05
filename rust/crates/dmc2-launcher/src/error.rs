@@ -125,7 +125,7 @@ impl Error {
                 "assign the named HAL pin to exactly one signal, then rebuild and validate before launching"
             }
             Self::DeploymentMismatch { .. } => {
-                "for a /usr/lib/linuxcnc/modules target, use the standard live launch to synchronize it transactionally; otherwise rebuild and restage the named project-local binary"
+                "for a /usr/lib target, close the previous LinuxCNC session through its UI and use DMC2 LinuxCNC in Applications to retry synchronization of the staged artifact; otherwise rebuild and restage the named project-local binary"
             }
             Self::ExecutableUnavailable(_) => {
                 "restore the named executable from the pinned LinuxCNC system installation"

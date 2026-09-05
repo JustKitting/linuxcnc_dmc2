@@ -1,16 +1,16 @@
 use std::ffi::OsString;
 
 use crate::error::Error;
-use crate::integrity::{realtime_deployments_current, validate_realtime_deployments};
+use crate::integrity::{system_deployments_current, validate_system_deployments};
 use crate::layout::Layout;
 use crate::platform::{CommandSpec, Platform};
 use crate::validation::{require_executable, require_success, run};
 
-pub fn synchronize_realtime_modules(
+pub fn synchronize_system_artifacts(
     platform: &dyn Platform,
     layout: &Layout,
 ) -> Result<bool, Error> {
-    if realtime_deployments_current(platform, layout)? {
+    if system_deployments_current(platform, layout)? {
         return Ok(false);
     }
 
@@ -31,6 +31,6 @@ pub fn synchronize_realtime_modules(
             stderr: output.stderr,
         });
     }
-    validate_realtime_deployments(platform, layout)?;
+    validate_system_deployments(platform, layout)?;
     Ok(true)
 }

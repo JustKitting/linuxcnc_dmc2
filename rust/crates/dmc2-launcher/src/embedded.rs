@@ -53,6 +53,7 @@ pub const FILES: &[File] = &[
     project_file!("scripts/install_native_module.sh"),
     project_file!("scripts/build_linuxcnc_driver_overlays.sh"),
     project_file!("patches/linuxcnc-2.9.10/hm2-eth-buffer-safety.patch"),
+    project_file!("patches/linuxcnc-2.9.10/tooldata-standalone-isolation.patch"),
     project_file!("python/dmc2_axis/__init__.py"),
     project_file!("python/dmc2_axis/axis_user_command.py"),
     project_file!("python/dmc2_axis/base_controls.py"),

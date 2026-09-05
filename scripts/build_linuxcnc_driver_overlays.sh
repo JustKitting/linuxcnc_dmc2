@@ -5,8 +5,8 @@ project_dir="$(cd -- "$(dirname -- "${BASH_SOURCE[0]}")/.." && pwd)"
 catalog_path="${project_dir}/config/linuxcnc-driver-overlays.tsv"
 vendor_dir="${project_dir}/vendor/linuxcnc-2.9.10"
 
-expected_signature=$'DMC2_LINUXCNC_DRIVER_OVERLAY_CATALOG\t1'
-expected_columns=$'module\tlinuxcnc_version\tbase_commit\tpatch\tpatch_sha256\tupstream_commits\tupstream_scope\tbuild_directory\tentry_source\tstaged_artifact\tdeployed_artifact\treason'
+expected_signature=$'DMC2_LINUXCNC_DRIVER_OVERLAY_CATALOG\t2'
+expected_columns=$'module\tbuild_kind\tlinuxcnc_version\tbase_commit\tpatch\tpatch_sha256\tupstream_commits\tupstream_scope\tbuild_directory\tentry_source\tstaged_artifact\tdeployed_artifact\treason'
 
 mapfile -t catalog_lines < "${catalog_path}"
 if [[ "${#catalog_lines[@]}" -lt 3 ]]; then
@@ -23,6 +23,7 @@ if [[ "${catalog_lines[1]}" != "${expected_columns}" ]]; then
 fi
 
 declare -a modules=()
+declare -a build_kinds=()
 declare -a patches=()
 declare -a build_directories=()
 declare -a entry_sources=()
@@ -49,11 +50,11 @@ for ((line_index = 2; line_index < ${#catalog_lines[@]}; line_index++)); do
         exit 1
     fi
     IFS=$'\t' read -r \
-        module linuxcnc_version base_commit patch_relative patch_sha256 \
+        module build_kind linuxcnc_version base_commit patch_relative patch_sha256 \
         upstream_commits upstream_scope build_directory entry_source \
         staged_artifact deployed_artifact reason <<< "${line}"
     for required in \
-        module linuxcnc_version base_commit patch_relative patch_sha256 \
+        module build_kind linuxcnc_version base_commit patch_relative patch_sha256 \
         upstream_commits upstream_scope build_directory entry_source \
         staged_artifact deployed_artifact reason; do
         if [[ -z "${!required}" ]]; then
@@ -63,16 +64,30 @@ for ((line_index = 2; line_index < ${#catalog_lines[@]}; line_index++)); do
     done
     require_relative_path "${patch_relative}" "patch path"
     require_relative_path "${build_directory}" "build directory"
-    require_relative_path "${entry_source}" "entry source"
+    IFS=',' read -r -a source_names <<< "${entry_source}"
+    for source_name in "${source_names[@]}"; do
+        require_relative_path "${source_name}" "entry source"
+    done
     require_relative_path "${staged_artifact}" "staged artifact"
-    if [[ "${entry_source}" != "${module}.c" ]]; then
-        echo "module and entry source disagree at catalog line ${line_number}" >&2
-        exit 1
-    fi
-    if [[ "${deployed_artifact}" != "/usr/lib/linuxcnc/modules/${module}.so" ]]; then
-        echo "unsupported deployed artifact at catalog line ${line_number}: ${deployed_artifact}" >&2
-        exit 1
-    fi
+    case "${build_kind}" in
+        realtime-module)
+            if [[ "${entry_source}" != "${module}.c" ||
+                  "${deployed_artifact}" != "/usr/lib/linuxcnc/modules/${module}.so" ]]; then
+                echo "invalid realtime-module contract at catalog line ${line_number}" >&2
+                exit 1
+            fi
+            ;;
+        userspace-library)
+            if [[ "${deployed_artifact}" != "/usr/lib/lib${module}.so.0" ]]; then
+                echo "invalid userspace-library destination at catalog line ${line_number}" >&2
+                exit 1
+            fi
+            ;;
+        *)
+            echo "unknown overlay build kind at catalog line ${line_number}: ${build_kind}" >&2
+            exit 1
+            ;;
+    esac
     if [[ -z "${catalog_linuxcnc_version}" ]]; then
         catalog_linuxcnc_version="${linuxcnc_version}"
         catalog_base_commit="${base_commit}"
@@ -88,6 +103,7 @@ for ((line_index = 2; line_index < ${#catalog_lines[@]}; line_index++)); do
         exit 1
     fi
     modules+=("${module}")
+    build_kinds+=("${build_kind}")
     patches+=("${patch_path}")
     build_directories+=("${build_directory}")
     entry_sources+=("${entry_source}")
@@ -135,32 +151,50 @@ for index in "${!modules[@]}"; do
     module="${modules[index]}"
     build_directory="${source_root}/${build_directories[index]}"
     entry_source="${entry_sources[index]}"
-    (
-        cd -- "${build_directory}"
-        halcompile --compile "${entry_source}"
-    )
-    built_artifact="${build_directory}/${module}.so"
+    deployed_artifact="${deployed_artifacts[index]}"
+    case "${build_kinds[index]}" in
+        realtime-module)
+            (
+                cd -- "${build_directory}"
+                halcompile --compile "${entry_source}"
+            )
+            built_artifact="${build_directory}/${module}.so"
+            ;;
+        userspace-library)
+            IFS=',' read -r -a source_names <<< "${entry_source}"
+            library_sources=()
+            for source_name in "${source_names[@]}"; do
+                library_sources+=("${build_directory}/${source_name}")
+            done
+            built_artifact="${build_directory}/lib${module}.so.0"
+            c++ -std=gnu++11 -O2 -DULAPI -fPIC -shared \
+                -I/usr/include/linuxcnc -I"${build_directory}" \
+                -ffile-prefix-map="${source_root}"=linuxcnc-2.9.10 \
+                -Wl,-soname,"lib${module}.so.0" -Wl,-z,relro,-z,now \
+                -o "${built_artifact}" "${library_sources[@]}" -ldl
+            ;;
+    esac
     if [[ ! -f "${built_artifact}" || -L "${built_artifact}" ]]; then
-        echo "halcompile did not produce a regular ${module}.so" >&2
+        echo "overlay build did not produce a regular artifact: ${built_artifact}" >&2
         exit 1
     fi
     # halcompile deliberately adds debug paths from its random temporary
     # directory. Remove only those non-runtime sections so identical reviewed
     # source produces an identical deployable module and checksum.
     objcopy --strip-debug --remove-section=.note.gnu.build-id "${built_artifact}"
-    if ! nm -D --defined-only "${built_artifact}" |
+    if [[ "${build_kinds[index]}" == "realtime-module" ]] &&
+       ! nm -D --defined-only "${built_artifact}" |
         awk '$3 == "rtapi_app_main" { found = 1 } END { exit !found }'; then
         echo "built ${module}.so does not export rtapi_app_main" >&2
         exit 1
     fi
-    deployed_artifact="${deployed_artifacts[index]}"
     if [[ -f "${deployed_artifact}" && ! -L "${deployed_artifact}" ]]; then
         built_exports="${temporary_root}/${module}.built.exports"
         deployed_exports="${temporary_root}/${module}.deployed.exports"
         nm -D --defined-only "${built_artifact}" | awk '{print $2, $3}' | sort > "${built_exports}"
         nm -D --defined-only "${deployed_artifact}" | awk '{print $2, $3}' | sort > "${deployed_exports}"
         if ! cmp --silent "${built_exports}" "${deployed_exports}"; then
-            echo "built ${module}.so changes the installed module's exported-symbol contract" >&2
+            echo "built ${module} changes the installed artifact's exported-symbol contract" >&2
             exit 1
         fi
     fi

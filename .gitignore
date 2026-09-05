@@ -3,6 +3,7 @@ __pycache__/
 
 /rust/target/
 /native/bin/
+/native/lib/
 /vendor/linuxcnc-2.9.10/
 
 *.o

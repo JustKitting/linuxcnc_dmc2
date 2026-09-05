@@ -37,13 +37,13 @@ pub fn prepare(platform: &dyn Platform, layout: &Layout, mode: Mode) -> Result<P
         Mode::Direct => {
             let tools = validation::validate_live_inputs(platform, layout)?;
             owner::prepare_exclusive_start(platform)?;
-            deployment::synchronize_realtime_modules(platform, layout)?;
+            deployment::synchronize_system_artifacts(platform, layout)?;
             Action::Replace(direct_command(layout, tools.linuxcnc))
         }
         Mode::Persistent => {
             let tools = validation::validate_live_inputs(platform, layout)?;
             owner::prepare_exclusive_start(platform)?;
-            deployment::synchronize_realtime_modules(platform, layout)?;
+            deployment::synchronize_system_artifacts(platform, layout)?;
             Action::Persistent(persistent_command(platform, layout, tools.linuxcnc)?)
         }
     };

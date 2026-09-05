@@ -1,0 +1,110 @@
+LinuxCNC 2.9.10 standalone tool-data isolation
+
+Base: 86cdca76fa2a36274c432caa21952b23c267989a
+Related upstream: 8c8e0484707794c3d0706679653d108e049a505c
+https://github.com/LinuxCNC/linuxcnc/commit/8c8e0484707794c3d0706679653d108e049a505c
+
+Local adaptation: enforce the existing NULL-status standalone contract at the
+library entry point with anonymous private storage. This covers the installed
+unmodified rs274 executable without a new ABI, wrapper, HOME override, or
+private-path reopen race. Shared creator/user cleanup ownership follows the
+upstream correction. The live shared creator and reader initialization stays
+on the existing LinuxCNC path. No machine command or restart is introduced.
+
+diff --git a/src/emc/tooldata/tooldata_mmap.cc b/src/emc/tooldata/tooldata_mmap.cc
+index e3a6df1..1608b2c 100644
+--- a/src/emc/tooldata/tooldata_mmap.cc
++++ b/src/emc/tooldata/tooldata_mmap.cc
+@@ -33,7 +33,10 @@
+ #define TOOL_MMAP_CREATOR_OPEN_FLAGS  O_RDWR | O_CREAT | O_TRUNC
+ #define TOOL_MMAP_USER_OPEN_FLAGS     O_RDWR
+ 
+-static int           creator_fd;
++enum class ToolMapping { Unmapped, Standalone, SharedCreator, SharedUser };
++static ToolMapping   mapping = ToolMapping::Unmapped;
++static int           creator_fd = -1;
++static int           user_fd = -1;
+ static char          filename[LINELEN] = {};
+ static char*         tool_mmap_base = 0;
+ static EMC_TOOL_STAT const *toolstat;
+@@ -131,6 +134,28 @@ int tool_mmap_creator(EMC_TOOL_STAT const * ptr,int random_toolchanger)
+         exit(EXIT_FAILURE);
+     }
+     toolstat = ptr; //note NULL for sai
++    // LinuxCNC 2.9.10's standalone interpreter calls this with NULL before
++    // getopt(), even for --help. It must never open the live $HOME/.tool.mmap.
++    // Enforce isolation here so existing rs274 binaries get private storage
++    // without a wrapper, environment override, or a new public ABI.
++    if (!ptr) {
++        tool_mmap_base = (char*)mmap(nullptr, TOOL_MMAP_SIZE,
++                                    PROT_READ | PROT_WRITE,
++                                    MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
++        if (tool_mmap_base == MAP_FAILED) {
++            tool_mmap_base = nullptr;
++            perror("standalone tool table: private memory allocation failed");
++            fprintf(stderr,"Action: resolve the reported memory allocation failure and retry the standalone parser; the controller tool file was not opened.\n");
++            exit(EXIT_FAILURE);
++        }
++        mapping = ToolMapping::Standalone;
++        tooldata_header_t *hptr = HPTR();
++        hptr->is_random_toolchanger = random_toolchanger;
++        hptr->last_index = 0;
++        inited = 1;
++        tool_mmap_mutex_give();
++        return 0;
++    }
+     creator_fd = open(tool_mmap_fname(),
+                      TOOL_MMAP_CREATOR_OPEN_FLAGS,TOOL_MMAP_MODE);
+     if (creator_fd < 0) {
+@@ -159,6 +184,7 @@ int tool_mmap_creator(EMC_TOOL_STAT const * ptr,int random_toolchanger)
+     hptr->is_random_toolchanger = random_toolchanger;
+     hptr->last_index = 0;
+ 
++    mapping = ToolMapping::SharedCreator;
+     inited = 1;
+     tool_mmap_mutex_give(); return 0;
+ } // tool_mmap_creator();
+@@ -190,6 +216,8 @@ int tool_mmap_user()
+         perror("tool_mmap_user(): mmap fail");
+         exit(EXIT_FAILURE);
+     }
++    user_fd = fd;
++    mapping = ToolMapping::SharedUser;
+     return 0;
+ } //tool_mmap_user()
+ 
+@@ -197,18 +225,28 @@ void tool_mmap_close()
+ {
+     if (!tool_mmap_base) { return; }
+     // flush mmapped file to filesystem
+-    if (msync(tool_mmap_base, TOOL_MMAP_SIZE, MS_SYNC) == -1) {
++    if (mapping != ToolMapping::Standalone &&
++        msync(tool_mmap_base, TOOL_MMAP_SIZE, MS_SYNC) == -1) {
+         perror("tool_mmap_close(): msync fail");
+     }
+     if (munmap(tool_mmap_base, TOOL_MMAP_SIZE) < 0) {
+-        close(creator_fd);
+-        perror("tool_mmap_close(): munmapfail");
+-        exit(EXIT_FAILURE);
++        perror("tool_mmap_close(): munmap fail");
+     }
+-    if( unlink(tool_mmap_fname() )) {
++    // A standalone parser owns anonymous memory, and a shared reader does
++    // not own the controller's file. Only its creator may remove that file.
++    if (mapping == ToolMapping::SharedCreator && unlink(tool_mmap_fname())) {
+         perror("tool_mmap_close(): unlink fail");
+     }
+-    close(creator_fd);
++    if (mapping == ToolMapping::SharedCreator && creator_fd >= 0) {
++        close(creator_fd);
++        creator_fd = -1;
++    }
++    if (mapping == ToolMapping::SharedUser && user_fd >= 0) {
++        close(user_fd);
++        user_fd = -1;
++    }
++    tool_mmap_base = nullptr;
++    mapping = ToolMapping::Unmapped;
+ } //tool_mmap_close()
+ 
+ void tooldata_last_index_set(int idx)  //force last_index

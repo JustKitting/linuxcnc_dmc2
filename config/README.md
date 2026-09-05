@@ -24,8 +24,11 @@ exact program, launch site, ownership topology, criticality, backtrace policy,
 INI-argument placement, core-dump capture policy, and the collision-checked
 kernel process name used to identify an owner even after it has become a
 zombie.
-`linuxcnc-driver-overlays.tsv` pins each local driver hardening patch to the
+`linuxcnc-driver-overlays.tsv` v2 pins each local LinuxCNC hardening patch to the
 exact LinuxCNC release commit, upstream commit provenance, patch hash, build
-entry point, staged artifact, and installed destination. These files are
+kind, source entries, staged artifact, and installed destination. Its closed
+build kinds are `realtime-module` and `userspace-library`. The tool-data library
+entry isolates standalone parsers from the controller's file-backed table.
+These files are
 embedded into the compiled launcher or owner so
 a changed runtime contract requires a rebuild.

@@ -20,10 +20,19 @@ The machine project uses four compiled interfaces:
 
 `scripts/build_native.sh` builds the complete release with warnings denied and
 stages the userspace binaries under `native/bin` and the reviewed LinuxCNC
-2.9.10 `hm2_eth` hardening overlay under `native/modules`. A live launch automatically invokes the
-transactional module synchronizer when any verified realtime module differs
-from LinuxCNC's fixed module directory; no separate operator install step is
-required. The overlay removes an upstream-confirmed `hm2_eth` queued-buffer
+2.9.10 `hm2_eth` hardening overlay under `native/modules`, plus the tool-data
+isolation library under `native/lib`. Standalone `rs274` callers receive
+anonymous private tool storage in `libtooldata`; they do not initialize the
+controller's `$HOME/.tool.mmap`. The installed `/usr/bin/rs274` needs no wrapper
+or environment override. See `docs/2026-09-05-rs274-tooldata-crash.md` for the
+retained crash evidence, upstream provenance, and limits of this change.
+A live launch automatically invokes the
+system-artifact synchronizer when a staged system artifact differs
+from its installed destination; no separate operator install step is
+required. Replacements are staged, checked, and renamed atomically per file
+without creating backup copies. An interrupted installation is retried through
+the same Applications launcher; a new session cannot start until every
+artifact matches. The overlay removes an upstream-confirmed `hm2_eth` queued-buffer
 segfault path, resets a failed-send queue, and prevents a pre-first-write false
 soft error. It does not turn an offline build into a claim of live Ethernet or
 hardware verification. The project contains no offline motion-acceptance

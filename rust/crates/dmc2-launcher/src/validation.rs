@@ -13,7 +13,7 @@ pub const EXPECTED_LINUXCNC_VERSION: &[u8] = b"2.9.10\n";
 
 pub const PASSES: &[&str] = &[
     "all live launch inputs byte-match this compiled launcher",
-    "all realtime modules and userspace binaries byte-match release artifacts",
+    "all realtime modules, system libraries, and userspace binaries byte-match release artifacts",
     "LinuxCNC 2.9.10 is installed",
 ];
 
