@@ -80,6 +80,10 @@ impl LinuxCncPendantSupervisor {
     }
 
     pub(super) fn request_jog(&mut self, intent: JogIntent, inputs: &SupervisorInputs) {
+        if axis_by_motor(intent.motor) != Some(intent.axis) {
+            self.fail(FaultCode::MotionCommandEncodingFailure);
+            return;
+        }
         if self.phase.bounce() {
             return;
         }
@@ -151,6 +155,10 @@ impl LinuxCncPendantSupervisor {
             self.fail(FaultCode::BounceLostLimitAttribution);
             return;
         };
+        let Some(axis) = axis_by_motor(motor) else {
+            self.fail(FaultCode::BounceLostLimitAttribution);
+            return;
+        };
         if inputs.safety_limits != one_hot(motor) {
             self.fail(FaultCode::BounceLostLimitAttribution);
             return;
@@ -181,7 +189,7 @@ impl LinuxCncPendantSupervisor {
         }
         let distance_pulses = BOUNCE_PULSES as f64 - 0.5 + fractional_phase;
         let command = JogCommand {
-            axis: axis_by_motor(motor),
+            axis,
             path,
             signed_delta_pulses: -distance_pulses,
             target_rate_mm_per_minute: BOUNCE_SPEED_MM_PER_MINUTE,
@@ -191,7 +199,7 @@ impl LinuxCncPendantSupervisor {
         }
         self.bounce_start_count = Some(start_count);
         let intent = JogIntent {
-            axis: axis_by_motor(motor),
+            axis,
             motor,
             delta_pulses: -BOUNCE_PULSES,
             target_rate_mm_per_minute: BOUNCE_SPEED_MM_PER_MINUTE,
@@ -226,9 +234,13 @@ impl LinuxCncPendantSupervisor {
             self.fail(FaultCode::BounceLostLimitAttribution);
             return;
         };
+        let Some(axis) = axis_by_motor(motor) else {
+            self.fail(FaultCode::BounceLostLimitAttribution);
+            return;
+        };
         if self.phase != Phase::BounceReleaseWait
             || intent.motor != motor
-            || intent.axis != axis_by_motor(motor)
+            || intent.axis != axis
             || intent.delta_pulses >= 0
         {
             return;
@@ -389,7 +401,7 @@ impl LinuxCncPendantSupervisor {
             return;
         }
 
-        let Some(active) = self.active else {
+        let Some(active) = self.active.as_mut() else {
             if self.phase == Phase::Idle && self.pending.is_some() && inputs.motion_command_ready {
                 if let Some(intent) = self.pending.take() {
                     self.start_jog(intent, inputs);
@@ -397,10 +409,8 @@ impl LinuxCncPendantSupervisor {
             }
             return;
         };
-        if let Some(value) = self.active.as_mut() {
-            value.observe_motion(period_ns, inputs);
-        }
-        let active = self.active.unwrap_or(active);
+        active.observe_motion(period_ns, inputs);
+        let active = *active;
 
         match self.phase {
             Phase::StoppingBounce

@@ -129,9 +129,6 @@ def install_axis_ui_policy(
         nonlocal checked_recovery_contract
         nonlocal recovery_contract_error_identity
         try:
-            run_guard = getattr(live_plotter, "_dmc2_axis_run_guard", None)
-            if run_guard is not None:
-                run_guard.reconcile()
             try:
                 ensure_essential_recovery_controls(namespace)
             except Exception as controls_error:
@@ -143,6 +140,9 @@ def install_axis_ui_policy(
                 )
             else:
                 essential_controls_notice.clear()
+            run_guard = getattr(live_plotter, "_dmc2_axis_run_guard", None)
+            if run_guard is not None:
+                run_guard.reconcile()
             prefetched_diagnostic = None
             diagnostic_poll_failed = False
             try:

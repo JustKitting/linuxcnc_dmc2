@@ -4,7 +4,7 @@ use std::os::unix::fs::OpenOptionsExt;
 use std::path::{Path, PathBuf};
 use std::time::{Duration, SystemTime};
 
-use crate::event::{hex_bytes, signal_name, Event};
+use crate::event::{hex_bytes, signal_name, Event, EventTime};
 
 const FILE_TIMESTAMP_TOLERANCE: Duration = Duration::from_secs(1);
 
@@ -89,9 +89,19 @@ pub fn capture(
     journal_path: &Path,
     child_pid: u32,
     process_not_before: SystemTime,
-    exit_unix_ns: u128,
+    exit_unix_ns: impl Into<EventTime>,
 ) -> BacktraceEvidence {
     let source = PathBuf::from(format!("/tmp/backtrace.{child_pid}"));
+    let exit_unix_ns = match exit_unix_ns.into() {
+        EventTime::Captured(value) => value,
+        error @ EventTime::BeforeUnixEpoch { .. } => {
+            return BacktraceEvidence::CaptureFailed {
+                source,
+                operation: "capture valid exit timestamp",
+                error: io::Error::other(format!("{error}; correct system time and relaunch through Applications")),
+            };
+        }
+    };
     let metadata = match fs::symlink_metadata(&source) {
         Ok(metadata) => metadata,
         Err(error) if error.kind() == io::ErrorKind::NotFound => {
@@ -150,7 +160,13 @@ pub fn capture(
         }
     };
 
-    let parent = journal_path.parent().unwrap_or_else(|| Path::new("."));
+    let Some(parent) = journal_path.parent() else {
+        return BacktraceEvidence::CaptureFailed {
+            source,
+            operation: "resolve configured journal directory",
+            error: io::Error::other(format!("journal path {} has no parent; correct its configured path before relaunching", journal_path.display())),
+        };
+    };
     let durable_copy = parent.join(format!("process-backtrace-{child_pid}-{exit_unix_ns}.txt"));
     if let Err(error) = copy_and_sync(&source, &durable_copy) {
         return BacktraceEvidence::CaptureFailed {
@@ -184,11 +200,14 @@ fn read_header_signal(path: &Path, expected_pid: u32) -> Result<Option<i32>, Hea
             continue;
         }
         found_pid = true;
-        if let Some(signal) = fields
+        if let Some(raw_signal) = fields
             .iter()
             .find_map(|field| field.strip_prefix("signal="))
-            .and_then(|value| value.parse::<i32>().ok())
         {
+            let signal = raw_signal.parse::<i32>().map_err(|error| {
+                HeaderError::Io(io::Error::new(io::ErrorKind::InvalidData,
+                    format!("invalid backtrace signal {raw_signal:?}: {error}; retain the malformed backtrace and correct its writer")))
+            })?;
             reported_signal = Some(signal);
         }
     }
@@ -207,7 +226,10 @@ fn copy_and_sync(source: &Path, destination: &Path) -> io::Result<()> {
     io::copy(&mut source_file, &mut destination_file)?;
     destination_file.flush()?;
     destination_file.sync_all()?;
-    let parent = destination.parent().unwrap_or_else(|| Path::new("."));
+    let parent = destination.parent().ok_or_else(|| {
+        io::Error::new(io::ErrorKind::InvalidInput,
+            format!("backtrace destination {} has no parent directory", destination.display()))
+    })?;
     File::open(parent)?.sync_all()
 }
 

@@ -74,9 +74,12 @@ impl LinuxCncPendantSupervisor {
             }
             return;
         }
-        let raw_motor = single_active(inputs.raw_limits);
+        let Some(raw_motor) = single_active(inputs.raw_limits) else {
+            self.fail(FaultCode::StartupLimitMismatch);
+            return;
+        };
         let safety_motor = single_active(inputs.safety_limits);
-        if raw_motor.is_none() || (safety_motor.is_some() && safety_motor != raw_motor) {
+        if safety_motor.is_some() && safety_motor != Some(raw_motor) {
             self.fail(FaultCode::StartupLimitMismatch);
             return;
         }
@@ -84,7 +87,7 @@ impl LinuxCncPendantSupervisor {
             self.fail(FaultCode::StartupLimitDuringHoming);
             return;
         }
-        self.begin_startup_bounce(raw_motor.unwrap_or(0));
+        self.begin_startup_bounce(raw_motor);
     }
 
     pub(super) fn advance_startup_bounce(&mut self, inputs: &SupervisorInputs) {

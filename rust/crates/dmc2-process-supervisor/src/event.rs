@@ -1,24 +1,60 @@
 use std::ffi::{OsStr, OsString};
+use std::fmt;
 use std::os::unix::ffi::OsStrExt;
 use std::path::Path;
+use std::time::SystemTimeError;
 
 use dmc2_diagnostics::RecoveryClassified;
 
 pub const SCHEMA: &str = "dmc2-process-lifecycle-v1";
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum EventTime {
+    Captured(u128),
+    BeforeUnixEpoch { by_ns: u128 },
+}
+
+impl From<u128> for EventTime {
+    fn from(value: u128) -> Self {
+        Self::Captured(value)
+    }
+}
+
+impl From<Result<u128, SystemTimeError>> for EventTime {
+    fn from(value: Result<u128, SystemTimeError>) -> Self {
+        match value {
+            Ok(value) => Self::Captured(value),
+            Err(error) => Self::BeforeUnixEpoch {
+                by_ns: error.duration().as_nanos(),
+            },
+        }
+    }
+}
+
+impl fmt::Display for EventTime {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Captured(value) => value.fmt(formatter),
+            Self::BeforeUnixEpoch { by_ns } => {
+                write!(formatter, "ERROR_CLOCK_BEFORE_UNIX_EPOCH_BY_{by_ns}_NS")
+            }
+        }
+    }
+}
+
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Event {
     kind: &'static str,
-    unix_ns: u128,
+    unix_ns: EventTime,
     supervisor_pid: u32,
     fields: Vec<(&'static str, String)>,
 }
 
 impl Event {
-    pub fn new(kind: &'static str, unix_ns: u128, supervisor_pid: u32) -> Self {
+    pub fn new(kind: &'static str, unix_ns: impl Into<EventTime>, supervisor_pid: u32) -> Self {
         Self {
             kind,
-            unix_ns,
+            unix_ns: unix_ns.into(),
             supervisor_pid,
             fields: Vec::new(),
         }
@@ -65,6 +101,11 @@ impl Event {
             "schema={SCHEMA}\tevent={}\tunix_ns={}\tsupervisor_pid={}",
             self.kind, self.unix_ns, self.supervisor_pid
         );
+        if let EventTime::BeforeUnixEpoch { by_ns } = self.unix_ns {
+            rendered.push_str(&format!(
+                "\tclock_state=error\tclock_error=system clock precedes the Unix epoch by {by_ns} ns; timestamp unavailable; correct system time and relaunch through Applications"
+            ));
+        }
         for (name, value) in &self.fields {
             rendered.push('\t');
             rendered.push_str(name);
