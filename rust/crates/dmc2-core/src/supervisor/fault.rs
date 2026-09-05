@@ -18,7 +18,7 @@ diagnostic_catalog! {
     "QUADRATURE_FAILURE",
     "quadrature-failure",
     "the pendant wheel decoder reported a quadrature transition error",
-    "inspect the pendant wheel signal and restart only after the decoder is healthy";
+    "restore the wheel signal, release the E-stop and deadman, then use Clear Fault; a fresh packet with an unchanged decoder counter must acknowledge the reset before Pendant Mode can resume";
     PacketTimeout = 4,
     "PACKET_TIMEOUT",
     "packet-timeout",

@@ -1,9 +1,10 @@
-"""Guard stock AXIS Run using the selected script's typed contract."""
+"""Guard stock AXIS Run and Step using the selected script's typed contract."""
 
 from __future__ import annotations
 
 from collections.abc import Mapping
 from dataclasses import dataclass
+from enum import Enum
 
 from .recovery_ui import RecoveryUiNotice
 from .script_contract import (
@@ -14,12 +15,18 @@ from .script_contract import (
 from .ui_fault import AxisUiFault, AxisUiFaultKind
 
 
+class ExecutionRequest(Enum):
+    RUN = "task_run"
+    STEP = "task_step"
+
+
 @dataclass(frozen=True)
 class RunStatus:
     joint_count: int
     homed: tuple[bool, ...]
     interpreter_state: int
     task_state: int
+    task_mode: int
     estop: bool
     enabled: bool
     loaded_file: object
@@ -46,11 +53,11 @@ class AxisRunGuard:
         AxisUiFaultKind.PROGRAM_RUN_GUARD_EVALUATION_FAILED,
     )
 
-    def __init__(self, *, namespace, status, linuxcnc_module, stock_task_run) -> None:
+    def __init__(self, *, namespace, status, linuxcnc_module, stock_commands) -> None:
         self.namespace = namespace
         self.status = status
         self.linuxcnc_module = linuxcnc_module
-        self.stock_task_run = stock_task_run
+        self.stock_commands = stock_commands
         self.error_notices = {
             kind: RecoveryUiNotice(namespace) for kind in self.RECOVERABLE_FAULTS
         }
@@ -86,6 +93,7 @@ class AxisRunGuard:
             homed=tuple(bool(value) for value in self.status.homed[:joint_count]),
             interpreter_state=int(self.status.interp_state),
             task_state=int(self.status.task_state),
+            task_mode=int(self.status.task_mode),
             estop=bool(self.status.estop),
             enabled=bool(self.status.enabled),
             loaded_file=self.status.file,
@@ -107,6 +115,11 @@ class AxisRunGuard:
                 return contract.prerequisites, contract.source.value
             if refresh:
                 return None
+        if refresh:
+            raise RuntimeError(
+                "Script loader is unavailable; Run and Step remain blocked. "
+                "Use the independent recovery controls and relaunch the matching application."
+            )
         return CONSERVATIVE_PREREQUISITES, "conservative-ui-fallback"
 
     def _machine_requirements_satisfied(
@@ -163,7 +176,7 @@ class AxisRunGuard:
         ):
             self._clear(AxisUiFaultKind.PROGRAM_RUN_REQUIRES_HOMED_POSITION)
 
-    def _submit_if_allowed(self, *args):
+    def _submit_if_allowed(self, request: ExecutionRequest, *args):
         try:
             snapshot = self._status_snapshot()
         except Exception as error:
@@ -226,6 +239,12 @@ class AxisRunGuard:
         if (
             ScriptPrerequisite.INTERPRETER_IDLE in prerequisites
             and snapshot.interpreter_state != int(self.linuxcnc_module.INTERP_IDLE)
+            # An active AUTO Step continues the already loaded program. Idle
+            # is a start prerequisite, not a requirement to abandon stepping.
+            and not (
+                request is ExecutionRequest.STEP
+                and snapshot.task_mode == int(self.linuxcnc_module.MODE_AUTO)
+            )
         ):
             print(
                 "DMC2_AXIS_RUN_REQUEST result=blocked reason=interpreter-not-idle "
@@ -263,12 +282,13 @@ class AxisRunGuard:
 
         print(
             "DMC2_AXIS_RUN_REQUEST result=forwarded "
+            f"control={request.value!r} "
             f"contract_source={contract_source!r} "
             f"prerequisites={prerequisite_names!r} file={requested_path!r}",
             flush=True,
         )
         try:
-            result = self.stock_task_run(*args)
+            result = self.stock_commands[request.value](*args)
         except Exception as error:
             self._present(
                 kind=AxisUiFaultKind.PROGRAM_RUN_SUBMISSION_FAILED,
@@ -278,9 +298,9 @@ class AxisRunGuard:
         self._clear(AxisUiFaultKind.PROGRAM_RUN_SUBMISSION_FAILED)
         return result
 
-    def __call__(self, *args):
+    def submit(self, command_name: str, *args):
         try:
-            return self._submit_if_allowed(*args)
+            return self._submit_if_allowed(ExecutionRequest(command_name), *args)
         except Exception as error:
             print(
                 "DMC2_AXIS_RUN_REQUEST result=blocked "
@@ -302,63 +322,26 @@ class AxisRunGuard:
                 )
             return "break"
 
+    def __call__(self, *args):
+        return self.submit(ExecutionRequest.RUN.value, *args)
+
 
 def install_axis_run_guard(namespace: Mapping[str, object]) -> AxisRunGuard:
-    """Put one contract guard in front of every stock AXIS Run control."""
+    """Activate the early closed Run/Step boundary only after dependencies load."""
     live_plotter = namespace["live_plotter"]
     existing = getattr(live_plotter, "_dmc2_axis_run_guard", None)
     if existing is not None:
         return existing
 
-    root_window = namespace["root_window"]
-    commands = namespace["commands"]
-    stock_task_run = commands.task_run
+    if namespace.get("_dmc2_execution_interlock_errors"):
+        raise RuntimeError("Run/Step interlock installation failed; execution remains blocked")
+    if getattr(live_plotter, "_dmc2_axis_script_loader", None) is None:
+        raise RuntimeError("Script loader installation failed; Run and Step remain blocked")
     guard = AxisRunGuard(
         namespace=namespace,
         status=namespace["s"],
         linuxcnc_module=namespace["linuxcnc"],
-        stock_task_run=stock_task_run,
+        stock_commands=namespace["_dmc2_stock_execution"],
     )
-
-    # Run-line and verify resolve commands.task_run at call time. The toolbar
-    # uses Tcl's original command, so both paths are redirected to one guard.
-    tk = root_window.tk
-    stock_tcl_command = "dmc2_stock_task_run"
-    if str(tk.call("info", "commands", stock_tcl_command)):
-        raise RuntimeError(f"AXIS Tcl command already exists: {stock_tcl_command}")
-    if not str(tk.call("info", "commands", "task_run")):
-        raise RuntimeError("AXIS's stock task_run Tcl command is unavailable")
-    callback_command = root_window.register(guard)
-    stock_r_binding = str(tk.call("bind", root_window._w, "r"))
-    renamed = False
-    try:
-        tk.call("rename", "task_run", stock_tcl_command)
-        renamed = True
-        tk.call("interp", "alias", "", "task_run", "", callback_command)
-        commands.task_run = guard
-        # AXIS installs this binding before USER_COMMAND_FILE is read. Route
-        # it through the same guard as every visible Run control.
-        root_window.bind("r", guard)
-    except Exception:
-        commands.task_run = stock_task_run
-        try:
-            tk.call("bind", root_window._w, "r", stock_r_binding)
-        except Exception:
-            pass
-        if renamed:
-            try:
-                if str(tk.call("info", "commands", "task_run")):
-                    tk.call("rename", "task_run", "")
-                tk.call("rename", stock_tcl_command, "task_run")
-            except Exception:
-                pass
-        try:
-            root_window.deletecommand(callback_command)
-        except Exception:
-            pass
-        raise
-
     live_plotter._dmc2_axis_run_guard = guard
-    live_plotter._dmc2_stock_task_run = stock_task_run
-    live_plotter._dmc2_stock_task_run_tcl = stock_tcl_command
     return guard

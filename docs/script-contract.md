@@ -71,7 +71,9 @@ not cause the loader to issue a command.
 - `all-homed`
 
 AXIS observes these requirements immediately before forwarding the operator's
-explicit Run request. `dmc2ctl execute-file PATH` evaluates the same typed
+explicit Run or initial Step request. Continuing Step in an active AUTO
+program retains the other checks but does not require interpreter-idle.
+`dmc2ctl execute-file PATH` evaluates the same typed
 requirements before loading and again before submitting Run. A requirement
 omitted from a header is intentionally not added by the loader. LinuxCNC's own
 interpreter and machine checks remain authoritative.
@@ -117,13 +119,15 @@ unclassified file from silently weakening the normal machine-state checks.
 In AXIS, use the existing **File → Open** dialog or toolbar Open control. The
 integration performs a read-only Rust inspection and then forwards the exact
 canonical file to stock AXIS. It re-inspects that selected path immediately
-before every explicit Run and compares the byte count and deterministic
+before every explicit Run or Step and compares the byte count and deterministic
 64-bit FNV-1a content revision recorded at File Open. If the content changed,
-Run is blocked and the operator is told to use File Open again; AXIS Reload or
+execution is blocked and the operator is told to use File Open again; AXIS Reload or
 an edited file cannot silently reuse stale header metadata. The revision is a
 change-detection token, not a cryptographic authenticity claim. The loader
 never runs, homes, resets, clears, restarts, or moves the machine. The existing
-AXIS Run controls remain the only UI action that requests execution.
+AXIS Run and Step controls remain explicit execution actions. Their blocking
+boundary is installed before optional extensions: an unavailable loader or
+guard leaves execution blocked, with recovery controls installed independently.
 
 The compiled CLI exposes the same path contract:
 
@@ -136,6 +140,13 @@ dmc2ctl execute-file PATH
 `inspect-file` is read-only. `load-file` only loads and confirms the exact file
 reported by LinuxCNC. `execute-file` is the explicit load-and-run command. No
 command is inferred from inspecting or selecting a file.
+
+The Rust inspector parses and hashes one read stream. `load-file` and
+`execute-file` retain that contract and revalidate it before/after loading and
+immediately before Run, including after waiting for AUTO mode. A changed
+revision is rejected with a File Open/review/retry action. These checks detect
+changes at those boundaries; they do not lock another process out of editing
+the file during LinuxCNC execution.
 
 Successful `inspect-file` output is the ASCII protocol
 `DMC2_SCRIPT_CONTRACT_V1`, with exactly these ordered `key=value` fields:
@@ -164,7 +175,7 @@ unknown, duplicated, noncanonical, or internally inconsistent fields.
   available.
 - A stock load-submission exception is presented as a typed load fault with
   visible Abort, Clear Fault, File Open, and Pendant Mode recovery actions.
-- Before Run is forwarded, the path selected by AXIS must match LinuxCNC's
+- Before Run or Step is forwarded, the path selected by AXIS must match LinuxCNC's
   returned loaded-file status. A selection or successful parser result is not
   treated as consumer acceptance.
 - Machine readiness, interpreter-idle state, and homing are checked only when

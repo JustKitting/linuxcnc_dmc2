@@ -54,7 +54,7 @@ class AxisUiFaultKind(Enum):
     AXIS_RUN_GUARD_INSTALL_FAILED = AxisUiFaultContract(
         "AXIS_RUN_GUARD_INSTALL_FAILED",
         RecoveryClassCode.RELAUNCH_APPLICATION,
-        "correct the named run-control cause before running a program; recovery controls install independently",
+        "Run and Step are blocked; correct the named execution-control cause and relaunch from Applications; recovery controls install independently",
     )
     SCRIPT_LOADER_INSTALL_FAILED = AxisUiFaultContract(
         "SCRIPT_LOADER_INSTALL_FAILED",
@@ -129,7 +129,7 @@ class AxisUiFaultKind(Enum):
     PROGRAM_RUN_REQUIRES_EXACT_LOADED_FILE = AxisUiFaultContract(
         "PROGRAM_RUN_REQUIRES_EXACT_LOADED_FILE",
         RecoveryClassCode.RECHECK_SOURCE,
-        "load the intended file through the visible AXIS File Open control before retrying Run; Pendant Mode remains available",
+        "load the intended file through the visible AXIS File Open control before retrying Run or Step; Pendant Mode remains available",
     )
     PROGRAM_RUN_REQUIRES_MACHINE_READY = AxisUiFaultContract(
         "PROGRAM_RUN_REQUIRES_MACHINE_READY",
@@ -149,7 +149,7 @@ class AxisUiFaultKind(Enum):
     PROGRAM_RUN_REQUIRES_HOMED_POSITION = AxisUiFaultContract(
         "PROGRAM_RUN_REQUIRES_HOMED_POSITION",
         RecoveryClassCode.ESTABLISH_POSITION,
-        "use Reset E-stop, Machine On, and Home All; then return to Pendant Mode or retry Run",
+        "use Reset E-stop, Machine On, and Home All; then return to Pendant Mode or retry Run or Step",
     )
     PROGRAM_RUN_SUBMISSION_FAILED = AxisUiFaultContract(
         "PROGRAM_RUN_SUBMISSION_FAILED",

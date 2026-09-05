@@ -84,15 +84,15 @@ RECOVERY_CONTRACTS = (
         RecoveryClassCode.RESTORE_PENDANT,
         "restore-pendant",
         RecoveryTransitionCode.PENDANT_STREAM_RESTORED,
-        "the Nano supplies a fresh coherent stream, Clear Fault is accepted, and both the bridge and controller pendant faults are absent",
+        "with E-stop and deadman released, use Clear Fault; a fresh unchanged-counter packet acknowledges the bounded request and clears both bridge and controller faults without replaying a detent; after a new decoder/transport error or timeout, restore the named cause and explicitly retry Clear Fault",
         (RecoveryOperationCode.CLEAR_FAULT, RecoveryOperationCode.PENDANT_MODE),
     ),
     RecoveryContract(
         RecoveryClassCode.RELEASE_LIMIT,
         "release-limit",
         RecoveryTransitionCode.LIMIT_RELEASED,
-        "after the physical cause is clear, Clear Fault is accepted and the configured startup backoff leaves both raw and safety-limit indications clear",
-        (RecoveryOperationCode.CLEAR_FAULT, RecoveryOperationCode.PENDANT_MODE),
+        "Clear Fault resets only inactive raw-input latches without turning Machine On; for one remaining attributed switch, select Machine On and Pendant Mode and command the existing away-only release until raw and safety indications clear; conflicting active switches must be resolved before retrying Clear Fault",
+        (RecoveryOperationCode.CLEAR_FAULT, RecoveryOperationCode.MACHINE_ON, RecoveryOperationCode.PENDANT_MODE),
     ),
     RecoveryContract(
         RecoveryClassCode.ABORT_TASK,

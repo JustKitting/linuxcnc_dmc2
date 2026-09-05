@@ -23,6 +23,7 @@ pub struct RuntimeInputs {
     pub pendant_connected: bool,
     pub pendant_serial_fault: bool,
     pub pendant_quadrature_fault: bool,
+    pub pendant_fault_reset_ack: u32,
     pub pendant_sample: PendantSample,
     pub machine: MachineSnapshot,
     pub motion: MotionSnapshot,
@@ -39,6 +40,8 @@ pub struct RuntimeInputs {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RuntimeOutputs {
+    /// Nonzero only while one explicit UI reset awaits the bridge's reply.
+    pub pendant_fault_reset_request: u32,
     pub heartbeat: bool,
     pub watchdog_enable: bool,
     pub mesa_watchdog_clear_requested: bool,
@@ -48,6 +51,12 @@ pub struct RuntimeOutputs {
     pub supervisor: SupervisorOutputs,
     pub limit_reset: [bool; 3],
     pub fault_reset_allowed: bool,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
+struct PendingPendantReset {
+    request: u32,
+    elapsed_ns: u64,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -66,6 +75,8 @@ pub struct RuntimeController {
     pendant_quadrature_fault: bool,
     pendant_estop_pressed: bool,
     linuxcnc_estop_reset_request_held: bool,
+    pendant_reset_generation: u32,
+    pending_pendant_reset: Option<PendingPendantReset>,
 }
 
 impl RuntimeController {
@@ -85,6 +96,8 @@ impl RuntimeController {
             pendant_quadrature_fault: false,
             pendant_estop_pressed: true,
             linuxcnc_estop_reset_request_held: false,
+            pendant_reset_generation: 0,
+            pending_pendant_reset: None,
         }
     }
 
@@ -110,13 +123,20 @@ impl RuntimeController {
         );
     }
 
-    fn fault_reset_allowed(&self, inputs: &RuntimeInputs, pendant_valid: bool) -> bool {
-        self.supervisor.fault().is_some()
-            && inputs.servo_thread_ready
+    fn reset_environment_healthy(&self, inputs: &RuntimeInputs, transport_valid: bool) -> bool {
+        inputs.servo_thread_ready
             && !inputs.mesa_watchdog_has_bit
             && !inputs.mesa_io_error
-            && pendant_valid
+            && transport_valid
             && !self.pendant_estop_pressed
+            && !inputs.machine.any_homing()
+    }
+
+    fn fault_reset_allowed(&self, inputs: &RuntimeInputs, transport_valid: bool) -> bool {
+        self.reset_environment_healthy(inputs, transport_valid)
+            && (self.supervisor.fault().is_some() || self.pendant_quadrature_fault)
+            && (!self.pendant_quadrature_fault
+                || (inputs.pendant_coherent && !inputs.pendant_sample.deadman_held))
     }
 
     fn clear_fault_state(&mut self) -> bool {
@@ -153,14 +173,14 @@ impl RuntimeController {
                 && !inputs.pendant_serial_fault
                 && !inputs.pendant_quadrature_fault;
         }
-        if inputs.pendant_coherent && self.pendant_link_valid {
+        if inputs.pendant_coherent && self.pendant_connected && !self.pendant_serial_fault {
             self.pendant_freshness
                 .update(inputs.pendant_sample.sequence, period_ns);
         } else {
             self.pendant_freshness.elapse(period_ns);
         }
 
-        self.supervisor.observe_inputs(SupervisorInputs {
+        let supervisor_inputs = SupervisorInputs {
             link: LinkSnapshot {
                 connected: self.pendant_connected,
                 serial_fault: self.pendant_serial_fault,
@@ -177,7 +197,8 @@ impl RuntimeController {
             pendant_mode_enabled: inputs.pendant_mode_enabled,
             motion_command_ready: inputs.motion_command_ready,
             linuxcnc_estop_reset_rising,
-        });
+        };
+        self.supervisor.observe_inputs(supervisor_inputs);
 
         self.mesa_guard.update(
             period_ns,
@@ -192,14 +213,47 @@ impl RuntimeController {
         let task_valid = inputs.task_monitor_connected
             && !inputs.task_monitor_fault
             && self.task_freshness.is_fresh(TASK_HEARTBEAT_TIMEOUT_NS);
-        let pendant_valid = self.pendant_link_known
-            && self.pendant_link_valid
+        let pendant_transport_valid = self.pendant_link_known
+            && self.pendant_connected
+            && !self.pendant_serial_fault
             && self.pendant_freshness.is_fresh(PENDANT_PACKET_TIMEOUT_NS);
-        let fault_reset_allowed = self.fault_reset_allowed(&inputs, pendant_valid);
-        if linuxcnc_estop_reset_rising && fault_reset_allowed && self.clear_fault_state() {
-            self.supervisor.begin_linuxcnc_estop_reset();
+        let pendant_valid = pendant_transport_valid && self.pendant_link_valid;
+        let fault_reset_allowed = self.fault_reset_allowed(&inputs, pendant_transport_valid);
+        let mut pendant_reset_acknowledged = false;
+        if let Some(mut pending) = self.pending_pendant_reset {
+            pending.elapsed_ns = pending.elapsed_ns.saturating_add(period_ns);
+            if !self.reset_environment_healthy(&inputs, pendant_transport_valid)
+                || pending.elapsed_ns >= PENDANT_PACKET_TIMEOUT_NS
+                || (inputs.pendant_coherent && inputs.pendant_sample.deadman_held)
+            {
+                self.pending_pendant_reset = None;
+            } else if inputs.pendant_coherent && inputs.pendant_fault_reset_ack == pending.request {
+                pendant_reset_acknowledged = pendant_valid;
+                self.pending_pendant_reset = None;
+            } else {
+                self.pending_pendant_reset = Some(pending);
+            }
+        }
+        if linuxcnc_estop_reset_rising && fault_reset_allowed && self.pendant_quadrature_fault {
+            self.pendant_reset_generation = self.pendant_reset_generation.wrapping_add(1).max(1);
+            self.pending_pendant_reset = Some(PendingPendantReset {
+                request: self.pendant_reset_generation,
+                elapsed_ns: 0,
+            });
+        }
+        if pendant_reset_acknowledged
+            || (linuxcnc_estop_reset_rising
+                && fault_reset_allowed
+                && pendant_valid
+                && self.supervisor.fault().is_some())
+        {
+            self.pending_pendant_reset = None;
+            self.clear_fault_state();
+            self.supervisor
+                .begin_linuxcnc_estop_reset(&supervisor_inputs);
             let supervisor = self.supervisor.outputs();
             return RuntimeOutputs {
+                pendant_fault_reset_request: 0,
                 heartbeat,
                 watchdog_enable: self.watchdog_guard.enable,
                 mesa_watchdog_clear_requested: self.mesa_guard.watchdog_clear_requested,
@@ -207,7 +261,7 @@ impl RuntimeController {
                 mesa_phase: self.mesa_guard.phase(),
                 controller_watchdog_phase: self.watchdog_guard.phase(),
                 supervisor,
-                limit_reset: [false; 3],
+                limit_reset: supervisor.limit_reset,
                 fault_reset_allowed: false,
             };
         }
@@ -288,6 +342,9 @@ impl RuntimeController {
             self.mesa_guard.limit_reset
         };
         RuntimeOutputs {
+            pendant_fault_reset_request: self
+                .pending_pendant_reset
+                .map_or(0, |pending| pending.request),
             heartbeat,
             watchdog_enable: self.watchdog_guard.enable,
             mesa_watchdog_clear_requested: self.mesa_guard.watchdog_clear_requested,
@@ -296,7 +353,7 @@ impl RuntimeController {
             controller_watchdog_phase: self.watchdog_guard.phase(),
             supervisor,
             limit_reset,
-            fault_reset_allowed: self.fault_reset_allowed(&inputs, pendant_valid),
+            fault_reset_allowed: self.fault_reset_allowed(&inputs, pendant_transport_valid),
         }
     }
 }
@@ -308,11 +365,14 @@ impl Default for RuntimeController {
 }
 
 #[cfg(test)]
+mod reset_tests;
+
+#[cfg(test)]
 mod tests {
     use super::*;
     use crate::pendant::{AxisSelector, MultiplierSelector};
 
-    fn inputs(sequence: u32, task_heartbeat: u32) -> RuntimeInputs {
+    pub(super) fn inputs(sequence: u32, task_heartbeat: u32) -> RuntimeInputs {
         RuntimeInputs {
             servo_thread_ready: true,
             mesa_watchdog_has_bit: false,
@@ -326,6 +386,7 @@ mod tests {
             pendant_connected: true,
             pendant_serial_fault: false,
             pendant_quadrature_fault: false,
+            pendant_fault_reset_ack: 0,
             pendant_sample: PendantSample {
                 sequence,
                 quadrature_errors: 0,
@@ -367,7 +428,7 @@ mod tests {
         }
     }
 
-    fn reach_committed_runtime(controller: &mut RuntimeController) -> (u32, u32) {
+    pub(super) fn reach_committed_runtime(controller: &mut RuntimeController) -> (u32, u32) {
         let mut sequence = 1;
         let mut heartbeat = 1;
         for cycle in 0..1_000 {

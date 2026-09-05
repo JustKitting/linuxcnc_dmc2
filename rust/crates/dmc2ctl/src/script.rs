@@ -3,7 +3,7 @@
 
 use std::fmt;
 use std::fs::{self, File};
-use std::io::{BufRead, BufReader, Read, Seek, SeekFrom};
+use std::io::{self, BufRead, BufReader, Read};
 use std::path::{Path, PathBuf};
 
 use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
@@ -63,6 +63,11 @@ pub struct ContentRevision {
 }
 
 impl ContentRevision {
+    const EMPTY: Self = Self {
+        bytes: 0,
+        fnv1a64: FNV1A64_OFFSET_BASIS,
+    };
+
     pub const fn bytes(self) -> u64 {
         self.bytes
     }
@@ -126,20 +131,33 @@ impl ScriptContract {
         if !metadata.is_file() {
             return Err(ScriptError::NotRegularFile { path });
         }
-        let mut file = File::open(&path).map_err(|source| ScriptError::Open {
+        let file = File::open(&path).map_err(|source| ScriptError::Open {
             path: path.clone(),
             source,
         })?;
-        let revision = content_revision(&mut file).map_err(|source| ScriptError::RevisionRead {
+        // Parse and hash one read stream: the contract's header must belong to
+        // the same bytes as its revision, not a separate pass over the path.
+        let mut reader = BufReader::new(RevisionReader::new(file));
+        let mut contract = parse_header(&path, &mut reader, ContentRevision::EMPTY)?;
+        io::copy(&mut reader, &mut io::sink()).map_err(|source| ScriptError::RevisionRead {
             path: path.clone(),
             source,
         })?;
-        file.seek(SeekFrom::Start(0))
-            .map_err(|source| ScriptError::RevisionRewind {
-                path: path.clone(),
-                source,
-            })?;
-        parse_header(&path, BufReader::new(file), revision)
+        contract.revision = reader.into_inner().revision;
+        Ok(contract)
+    }
+
+    pub fn revalidate(&self) -> Result<(), ScriptError> {
+        let current = Self::open(&self.path)?;
+        if current == *self {
+            Ok(())
+        } else {
+            Err(ScriptError::ContentChanged {
+                path: self.path.clone(),
+                expected: self.revision,
+                observed: current.revision,
+            })
+        }
     }
 
     pub fn path(&self) -> &Path {
@@ -167,22 +185,30 @@ impl ScriptContract {
     }
 }
 
-fn content_revision(mut reader: impl Read) -> Result<ContentRevision, std::io::Error> {
-    let mut bytes = 0_u64;
-    let mut fnv1a64 = FNV1A64_OFFSET_BASIS;
-    let mut buffer = [0_u8; 8192];
-    loop {
-        let count = reader.read(&mut buffer)?;
-        if count == 0 {
-            break;
-        }
-        bytes += count as u64;
-        for byte in &buffer[..count] {
-            fnv1a64 ^= u64::from(*byte);
-            fnv1a64 = fnv1a64.wrapping_mul(FNV1A64_PRIME);
+struct RevisionReader<R> {
+    inner: R,
+    revision: ContentRevision,
+}
+
+impl<R> RevisionReader<R> {
+    fn new(inner: R) -> Self {
+        Self {
+            inner,
+            revision: ContentRevision::EMPTY,
         }
     }
-    Ok(ContentRevision { bytes, fnv1a64 })
+}
+
+impl<R: Read> Read for RevisionReader<R> {
+    fn read(&mut self, buffer: &mut [u8]) -> io::Result<usize> {
+        let count = self.inner.read(buffer)?;
+        self.revision.bytes += count as u64;
+        for byte in &buffer[..count] {
+            self.revision.fnv1a64 ^= u64::from(*byte);
+            self.revision.fnv1a64 = self.revision.fnv1a64.wrapping_mul(FNV1A64_PRIME);
+        }
+        Ok(count)
+    }
 }
 
 fn parse_header(
@@ -459,9 +485,10 @@ pub enum ScriptError {
         path: PathBuf,
         source: std::io::Error,
     },
-    RevisionRewind {
+    ContentChanged {
         path: PathBuf,
-        source: std::io::Error,
+        expected: ContentRevision,
+        observed: ContentRevision,
     },
     Read {
         path: PathBuf,
@@ -546,7 +573,7 @@ impl fmt::Display for ScriptError {
             Self::NotRegularFile { path } => write!(formatter, "SCRIPT_PATH_NOT_REGULAR_FILE: path={}; action: choose a regular machine-code file", path.display()),
             Self::Open { path, source } => write!(formatter, "SCRIPT_OPEN_FAILED: path={} cause={source}; action: restore read access or choose another machine-code file", path.display()),
             Self::RevisionRead { path, source } => write!(formatter, "SCRIPT_REVISION_READ_FAILED: path={} cause={source}; action: restore stable read access or choose another machine-code file", path.display()),
-            Self::RevisionRewind { path, source } => write!(formatter, "SCRIPT_REVISION_REWIND_FAILED: path={} cause={source}; action: use a seekable regular machine-code file", path.display()),
+            Self::ContentChanged { path, expected, observed } => write!(formatter, "SCRIPT_CONTENT_CHANGED: path={} inspected_revision={}:fnv1a64:{:016x} current_revision={}:fnv1a64:{:016x}; execution blocked; action: reopen the intended file with AXIS File Open, review it, then explicitly Run or Step", path.display(), expected.bytes, expected.fnv1a64, observed.bytes, observed.fnv1a64),
             Self::Read { path, line, source } => write!(formatter, "SCRIPT_HEADER_READ_FAILED: path={} line={line} cause={source}; action: correct the text encoding/read error or choose another file", path.display()),
             Self::HeaderLineTooLong { path, line, bytes } => write!(formatter, "SCRIPT_HEADER_LINE_TOO_LONG: path={} line={line} bytes={bytes} maximum={MAX_HEADER_LINE_BYTES}; action: shorten the DMC2 header line", path.display()),
             Self::HeaderMagic { path, line, observed } => write!(formatter, "SCRIPT_HEADER_MAGIC_INVALID: path={} line={line} observed={observed:?} expected={HEADER_MAGIC:?}; action: correct the DMC2 header or remove it to use the conservative contract", path.display()),
@@ -576,6 +603,12 @@ impl RecoveryClassified for ScriptError {
 mod tests {
     use super::*;
     use std::io::Cursor;
+
+    fn content_revision(reader: impl Read) -> io::Result<ContentRevision> {
+        let mut reader = RevisionReader::new(reader);
+        io::copy(&mut reader, &mut io::sink())?;
+        Ok(reader.revision)
+    }
 
     fn parse(content: &[u8]) -> Result<ScriptContract, ScriptError> {
         let revision = content_revision(Cursor::new(content)).expect("memory read cannot fail");

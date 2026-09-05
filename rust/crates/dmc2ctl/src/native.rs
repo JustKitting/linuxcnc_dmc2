@@ -15,6 +15,9 @@ mod ffi {
     include!(concat!(env!("OUT_DIR"), "/control_client_bindings.rs"));
 }
 
+mod failure;
+pub use failure::CommandFailure;
+
 const TASK_STATE_ESTOP: i32 = 1;
 const TASK_STATE_ESTOP_RESET: i32 = 2;
 const TASK_STATE_OFF: i32 = 3;
@@ -210,7 +213,7 @@ impl Session {
         } else {
             Err(NativeError::Command {
                 operation,
-                result,
+                result: CommandFailure::from_raw(result),
                 receipt: receipt.into(),
             })
         }
@@ -384,7 +387,7 @@ pub enum NativeError {
     UnknownMachineState(MachineState),
     Command {
         operation: NativeOperation,
-        result: ffi::dmc2_control_result,
+        result: CommandFailure,
         receipt: Receipt,
     },
 }
@@ -429,7 +432,9 @@ impl fmt::Display for NativeError {
                 receipt,
             } => write!(
                 formatter,
-                "LINUXCNC_COMMAND_FAILED: operation={operation:?} result={result} command_serial={} echo_serial={} rcs_status={} nml_error={} cms_status={}",
+                "LINUXCNC_COMMAND_FAILED: {}; operation={operation:?} result={} command_serial={} echo_serial={} rcs_status={} nml_error={} cms_status={}",
+                result.description(),
+                result.wire_code(),
                 receipt.command_serial_number,
                 receipt.echo_serial_number,
                 receipt.rcs_status,

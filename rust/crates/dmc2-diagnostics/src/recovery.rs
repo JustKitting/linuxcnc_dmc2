@@ -238,7 +238,7 @@ define_recovery_contracts! {
         "restore-pendant",
         PendantStreamRestored = 3,
         "PENDANT_STREAM_RESTORED",
-        "the Nano supplies a fresh coherent stream, Clear Fault is accepted, and both the bridge and controller pendant faults are absent",
+        "with E-stop and deadman released, use Clear Fault; a fresh unchanged-counter packet acknowledges the bounded request and clears both bridge and controller faults without replaying a detent; after a new decoder/transport error or timeout, restore the named cause and explicitly retry Clear Fault",
         [ClearFault, PendantMode]
     ),
     ReleaseLimit = 4 => (
@@ -246,8 +246,8 @@ define_recovery_contracts! {
         "release-limit",
         LimitReleased = 4,
         "LIMIT_RELEASED",
-        "after the physical cause is clear, Clear Fault is accepted and the configured startup backoff leaves both raw and safety-limit indications clear",
-        [ClearFault, PendantMode]
+        "Clear Fault resets only inactive raw-input latches without turning Machine On; for one remaining attributed switch, select Machine On and Pendant Mode and command the existing away-only release until raw and safety indications clear; conflicting active switches must be resolved before retrying Clear Fault",
+        [ClearFault, MachineOn, PendantMode]
     ),
     AbortTask = 5 => (
         "ABORT_TASK",

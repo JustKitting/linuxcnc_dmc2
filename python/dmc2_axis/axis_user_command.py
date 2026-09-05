@@ -3,6 +3,7 @@
 import importlib as _importlib
 import os as _os
 import sys as _sys
+from functools import partial as _partial
 
 
 _package_directory = _os.path.dirname(_os.path.abspath(rcfile))
@@ -62,6 +63,49 @@ def _present_bootstrap_failure(error):
                 f"fallback={message!r}",
                 flush=True,
             )
+
+
+# Install the closed execution boundary before importing optional extensions.
+# No installation rollback may restore a stock Run/Step path. Recovery controls
+# are deliberately absent from this catalog and install independently below.
+_dmc2_stock_execution = {}
+_dmc2_execution_interlock_errors = []
+_DMC2_EXECUTION_CONTROLS = (("task_run", "r"), ("task_step", "t"))
+
+
+def _dispatch_program_execution(command_name, *args):
+    guard = getattr(live_plotter, "_dmc2_axis_run_guard", None)
+    if guard is None or _dmc2_execution_interlock_errors:
+        _present_bootstrap_failure(
+            "Run and Step are blocked because the script loader/execution guard "
+            "is unavailable. Abort, Clear Fault, and Pendant Mode remain "
+            "independent. Correct the named installation error and relaunch "
+            f"through Applications. Details: {_dmc2_execution_interlock_errors!r}"
+        )
+        return "break"
+    return guard.submit(command_name, *args)
+
+
+for _command_name, _key in _DMC2_EXECUTION_CONTROLS:
+    _dmc2_stock_execution[_command_name] = getattr(commands, _command_name)
+    _callback = _partial(_dispatch_program_execution, _command_name)
+    setattr(commands, _command_name, _callback)
+    # Remove both old routes before registering their guarded replacements.
+    # A registration failure leaves a missing/blocked execution command, not
+    # an alias to the original unguarded Tcl or keyboard callback.
+    for _route, _install in (
+        ("keyboard removal", _partial(root_window.tk.call, "bind", root_window._w, _key, "")),
+        ("Tcl removal", _partial(root_window.tk.call, "rename", _command_name, "")),
+        ("Tcl guard", _partial(root_window.tk.createcommand, _command_name, _callback)),
+        ("keyboard guard", _partial(root_window.bind, _key, _callback)),
+    ):
+        try:
+            _install()
+        except Exception as _error:
+            _dmc2_execution_interlock_errors.append(f"{_command_name} {_route}: {_error}")
+
+if _dmc2_execution_interlock_errors:
+    _present_bootstrap_failure("; ".join(_dmc2_execution_interlock_errors))
 
 
 try:

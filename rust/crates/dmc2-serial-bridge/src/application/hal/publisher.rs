@@ -25,8 +25,12 @@ impl HalPublisher {
         })
     }
 
+    pub fn fault_reset_request(&self) -> u32 {
+        unsafe { ptr::read_volatile((*self.pins).fault_reset_request) }
+    }
+
     pub fn publish(&self, snapshot: Snapshot, packet_age_ms: f64) {
-        let pins = unsafe { &*self.pins };
+        let pins = unsafe { &(*self.pins).telemetry };
         let generation = self
             .publication_generation
             .fetch_add(2, Ordering::Relaxed)
@@ -34,6 +38,7 @@ impl HalPublisher {
         let generation_pin = unsafe { &*(pins.snapshot_generation.cast::<AtomicU32>()) };
         unsafe {
             generation_pin.store(generation | 1, Ordering::SeqCst);
+            write(pins.fault_reset_ack, snapshot.fault_reset_ack);
             write(pins.connected, snapshot.connected);
             write(pins.serial_fault, snapshot.serial_fault);
             write(pins.quadrature_fault, snapshot.quadrature_fault);

@@ -1,10 +1,21 @@
 use crate::{BridgeFaultCode, ProtocolError};
 use dmc2_hal_sys as hal;
 
-hal::userspace_hal_output_catalog! {
+hal::userspace_hal_pin_catalog! {
     pub(super) struct HalPins;
     error = super::registration::RegistrationError;
-    register = super::registration::output_pin;
+    register = super::registration::register_pin;
+    pins {
+        fault_reset_request: u32 in => "fault-reset-request";
+    }
+    groups { telemetry: TelemetryPins; }
+}
+
+hal::userspace_hal_output_catalog! {
+    pub(super) struct TelemetryPins;
+    error = super::registration::RegistrationError;
+    register = super::registration::register_pin;
+    fault_reset_ack: u32 => "fault-reset-ack";
     snapshot_generation: u32 => "snapshot-generation";
     connected: bit => "connected";
     serial_fault: bit => "serial-fault";

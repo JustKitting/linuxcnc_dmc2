@@ -3,6 +3,10 @@ use crate::{
     MultiplierCode, Packet, ProtocolError, BOOT_MARKER, MAX_SERIAL_LINE_BYTES,
 };
 
+#[cfg(test)]
+#[path = "state_tests.rs"]
+mod tests;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct ProtocolErrorEvidence {
     pub line_bytes: Option<u32>,
@@ -28,6 +32,7 @@ pub struct ProtocolErrorRecord {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Snapshot {
+    pub fault_reset_ack: u32,
     pub connected: bool,
     pub serial_fault: bool,
     pub quadrature_fault: bool,
@@ -54,6 +59,7 @@ pub struct Snapshot {
 impl Snapshot {
     pub const fn safe() -> Self {
         Self {
+            fault_reset_ack: 0,
             connected: false,
             serial_fault: true,
             quadrature_fault: false,
@@ -88,6 +94,13 @@ impl Default for Snapshot {
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
+struct PendingFaultReset {
+    request: u32,
+    quadrature_errors: u32,
+    requested_ns: u64,
+}
+
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct BridgeState {
     pub snapshot: Snapshot,
     timeout_ns: u64,
@@ -96,6 +109,8 @@ pub struct BridgeState {
     previous_quadrature_errors: Option<u32>,
     latched_quadrature_fault: Option<BridgeFaultRecord>,
     baseline_required: bool,
+    last_reset_request: u32,
+    pending_reset: Option<PendingFaultReset>,
 }
 
 impl BridgeState {
@@ -108,6 +123,39 @@ impl BridgeState {
             previous_quadrature_errors: None,
             latched_quadrature_fault: None,
             baseline_required: true,
+            last_reset_request: 0,
+            pending_reset: None,
+        }
+    }
+
+    /// Zero cancels a request; a nonzero generation represents one explicit
+    /// operator reset. It is consumed once, never retried automatically.
+    pub fn observe_fault_reset(&mut self, request: u32, now_ns: u64) {
+        if request == 0 {
+            self.pending_reset = None;
+            return;
+        }
+        if request == self.last_reset_request {
+            return;
+        }
+        self.last_reset_request = request;
+        self.pending_reset = None;
+        let fresh = self
+            .last_packet_ns
+            .is_some_and(|last| now_ns.saturating_sub(last) <= self.timeout_ns);
+        if fresh
+            && !self.baseline_required
+            && self.snapshot.connected
+            && !self.snapshot.serial_fault
+            && self.snapshot.quadrature_fault
+            && !self.snapshot.estop_pressed
+            && !self.snapshot.deadman_held
+        {
+            self.pending_reset = Some(PendingFaultReset {
+                request,
+                quadrature_errors: self.snapshot.quadrature_errors,
+                requested_ns: now_ns,
+            });
         }
     }
 
@@ -128,6 +176,7 @@ impl BridgeState {
     }
 
     pub fn reset_for_boot(&mut self) {
+        self.pending_reset = None;
         let heartbeat = self.snapshot.heartbeat;
         let protocol_errors = self.snapshot.protocol_errors;
         let last_protocol_error = self.snapshot.last_protocol_error;
@@ -157,6 +206,7 @@ impl BridgeState {
         operating_system_error: Option<i32>,
         transport_contract_result: Option<i64>,
     ) {
+        self.pending_reset = None;
         let fault = BridgeFaultRecord::new(
             code,
             BridgeFaultEvidence {
@@ -216,6 +266,7 @@ impl BridgeState {
             code: error,
             evidence,
         };
+        self.pending_reset = None;
         let fault = BridgeFaultRecord::new(
             BridgeFaultCode::ProtocolRejected,
             BridgeFaultEvidence {
@@ -268,6 +319,21 @@ impl BridgeState {
 
         let first_packet = self.baseline_required;
         let mut quadrature_fault = self.snapshot.quadrature_fault;
+        let pending_reset = self.pending_reset.take();
+        let reset_accepted = pending_reset.is_some_and(|reset| {
+            !first_packet
+                && self.snapshot.connected
+                && !self.snapshot.serial_fault
+                && !packet.estop_pressed
+                && !packet.deadman_held
+                && now_ns.saturating_sub(reset.requested_ns) <= self.timeout_ns
+                && packet.quadrature_errors == reset.quadrature_errors
+                && self.previous_quadrature_errors == Some(reset.quadrature_errors)
+        });
+        if reset_accepted {
+            quadrature_fault = false;
+            self.latched_quadrature_fault = None;
+        }
         if let Some(previous) = self.previous_quadrature_errors {
             if packet.quadrature_errors != previous {
                 quadrature_fault = true;
@@ -281,12 +347,15 @@ impl BridgeState {
                 ));
             }
         }
-        let latest_detent = if first_packet || quadrature_fault {
+        let latest_detent = if first_packet || quadrature_fault || reset_accepted {
             0
         } else {
             packet.latest_detent
         };
         self.snapshot = Snapshot {
+            fault_reset_ack: pending_reset
+                .filter(|_| reset_accepted)
+                .map_or(self.snapshot.fault_reset_ack, |reset| reset.request),
             connected: true,
             serial_fault: false,
             quadrature_fault,
@@ -365,6 +434,7 @@ impl BridgeState {
             return false;
         }
         let timeouts = self.snapshot.timeouts.wrapping_add(1);
+        self.pending_reset = None;
         let fault = BridgeFaultRecord::new(
             BridgeFaultCode::PacketTimeout,
             BridgeFaultEvidence {

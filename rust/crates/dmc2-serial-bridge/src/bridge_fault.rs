@@ -33,7 +33,7 @@ diagnostic_catalog! {
     "QUADRATURE_COUNTER_CHANGED",
     "quadrature-counter-changed",
     "the Nano reported a changed quadrature-error counter after the accepted baseline",
-    "inspect retained previous/current counters and the pendant wheel signals before restarting control";
+    "inspect retained counters and restore the wheel signals; release E-stop and deadman, then use Clear Fault to rebaseline on a fresh unchanged-counter packet";
     }
 }
 

@@ -62,10 +62,10 @@ impl LinuxCncPendantSupervisor {
     }
 
     pub(super) fn check_startup_limits(&mut self, inputs: &SupervisorInputs) {
-        if self.startup_limits_checked {
+        if self.startup_progress == StartupProgress::Consumed {
             return;
         }
-        self.startup_limits_checked = true;
+        self.startup_progress = StartupProgress::Consumed;
         if !any(inputs.raw_limits) && !any(inputs.safety_limits) {
             if inputs.machine.estopped || !inputs.machine.machine_on {
                 self.begin_startup_power();

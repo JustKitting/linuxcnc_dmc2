@@ -11,6 +11,8 @@ hal::realtime_hal_pin_catalog! {
         connected: bit in => "dmc2-pendant-control.connected";
         serial_fault: bit in => "dmc2-pendant-control.serial-fault";
         quadrature_fault: bit in => "dmc2-pendant-control.quadrature-fault";
+        pendant_fault_reset_ack: u32 in => "dmc2-pendant-control.pendant-reset-ack";
+        pendant_fault_reset_request: u32 out => "dmc2-pendant-control.pendant-reset-request";
         estop_pressed: bit in => "dmc2-pendant-control.estop-pressed";
         deadman_held: bit in => "dmc2-pendant-control.deadman-held";
         selector_valid: bit in => "dmc2-pendant-control.selector-valid";

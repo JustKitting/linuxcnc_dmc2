@@ -36,21 +36,43 @@ impl LinuxCncPendantSupervisor {
     /// Rejoin the controller gate to LinuxCNC's canonical E-stop latch.
     /// Unlike the pendant recovery gesture, a base AXIS reset does not also
     /// request Machine On.
-    pub fn begin_linuxcnc_estop_reset(&mut self) {
+    pub fn begin_linuxcnc_estop_reset(&mut self, inputs: &SupervisorInputs) {
         self.clear_state_requests();
-        self.external_enable = true;
+        self.startup_progress = StartupProgress::Consumed;
+        self.external_enable = false;
         self.recovery.accept_unlock();
-        self.recovery_power_phase = Some(RecoveryPowerPhase::GateSettle);
         self.recovery_restore_machine_on = false;
         self.recovery_elapsed_ns = 0;
         self.interpreter.reset();
+        // This explicit reset may release stale latches, never asserted raw
+        // switches. A unique remaining switch uses the existing manual-only
+        // away-jog state, not another automatic startup backoff.
+        self.collision_motor = single_active(inputs.raw_limits);
+        if any(inputs.raw_limits) && self.collision_motor.is_none() {
+            self.fail(FaultCode::LimitDuringRecovery);
+            return;
+        }
+        self.transition(if self.collision_motor.is_some() {
+            Phase::BounceReleaseWait
+        } else {
+            Phase::Idle
+        });
+        let stale =
+            core::array::from_fn(|motor| inputs.safety_limits[motor] && !inputs.raw_limits[motor]);
+        if any(stale) {
+            self.limit_reset = stale;
+            self.recovery_power_phase = Some(RecoveryPowerPhase::LimitResetAssert(stale));
+        } else {
+            self.external_enable = true;
+            self.recovery_power_phase = Some(RecoveryPowerPhase::GateSettle);
+        }
     }
 
     pub(super) fn accept_linuxcnc_estop_reset(&mut self, inputs: &SupervisorInputs) {
-        if any(inputs.raw_limits) || any(inputs.safety_limits) || inputs.machine.any_homing() {
+        if inputs.machine.any_homing() {
             return;
         }
-        self.begin_linuxcnc_estop_reset();
+        self.begin_linuxcnc_estop_reset(inputs);
     }
 
     pub(super) fn advance_recovery(&mut self, period_ns: u64, inputs: &SupervisorInputs) {
@@ -60,12 +82,41 @@ impl LinuxCncPendantSupervisor {
             }
             return;
         }
-        if any(inputs.raw_limits) || any(inputs.safety_limits) {
+        let attributed = self.collision_motor.map_or([false; 3], one_hot);
+        let resetting = match self.recovery_power_phase {
+            Some(
+                RecoveryPowerPhase::LimitResetAssert(mask)
+                | RecoveryPowerPhase::LimitResetValidate(mask),
+            ) => mask,
+            _ => [false; 3],
+        };
+        if (0..3).any(|motor| {
+            (inputs.raw_limits[motor] && !attributed[motor])
+                || (inputs.safety_limits[motor] && !attributed[motor] && !resetting[motor])
+        }) {
             self.fail(FaultCode::LimitDuringRecovery);
             return;
         }
         self.recovery_elapsed_ns = self.recovery_elapsed_ns.saturating_add(period_ns);
         match self.recovery_power_phase {
+            Some(RecoveryPowerPhase::LimitResetAssert(mask))
+                if self.recovery_elapsed_ns >= LIMIT_RESET_NS =>
+            {
+                self.limit_reset = [false; 3];
+                self.recovery_power_phase = Some(RecoveryPowerPhase::LimitResetValidate(mask));
+                self.recovery_elapsed_ns = 0;
+            }
+            Some(RecoveryPowerPhase::LimitResetValidate(mask)) => {
+                if self.recovery_elapsed_ns >= LIMIT_RESET_TIMEOUT_NS {
+                    self.fail(FaultCode::LimitLatchResetTimedOut);
+                } else if self.recovery_elapsed_ns >= LIMIT_RESET_VALIDATE_NS
+                    && !(0..3).any(|motor| mask[motor] && inputs.safety_limits[motor])
+                {
+                    self.external_enable = true;
+                    self.recovery_power_phase = Some(RecoveryPowerPhase::GateSettle);
+                    self.recovery_elapsed_ns = 0;
+                }
+            }
             Some(RecoveryPowerPhase::GateSettle) if self.recovery_elapsed_ns >= GATE_SETTLE_NS => {
                 self.estop_reset_request = true;
                 self.machine_on_request = false;
@@ -243,5 +294,102 @@ mod tests {
             supervisor.update(1_000_000, inputs(sample(5, false), true, false, false));
         assert!(!on_acknowledged.recovery_active);
         assert!(!on_acknowledged.machine_on_request);
+    }
+
+    fn faulted_reset(
+        raw: [bool; 3],
+        safety: [bool; 3],
+    ) -> (LinuxCncPendantSupervisor, SupervisorInputs) {
+        let mut supervisor = LinuxCncPendantSupervisor::new();
+        let mut frame = inputs(sample(1, false), false, true, false);
+        supervisor.update(1_000_000, frame);
+        supervisor.fail(FaultCode::UnexpectedLimit);
+        assert!(supervisor.clear_latched_fault());
+        frame.raw_limits = raw;
+        frame.safety_limits = safety;
+        supervisor.begin_linuxcnc_estop_reset(&frame);
+        (supervisor, frame)
+    }
+
+    #[test]
+    fn ui_reset_releases_each_stale_latch_mask_without_power_or_motion() {
+        for mask in 1..8 {
+            let stale = core::array::from_fn(|motor| mask & (1 << motor) != 0);
+            let (mut supervisor, mut frame) = faulted_reset([false; 3], stale);
+            assert_eq!(supervisor.outputs().limit_reset, stale);
+            for cycle in 1..120 {
+                frame.packet = Some(sample(cycle + 1, false));
+                frame.machine.estopped = cycle < 80;
+                if cycle >= 10 {
+                    frame.safety_limits = [false; 3];
+                }
+                let output = supervisor.update(1_000_000, frame);
+                assert!(output.fault.is_none());
+                assert!(!output.machine_on_request);
+                assert!(!matches!(
+                    output.command,
+                    Some(CommandEvent::JogIncrement(_))
+                ));
+            }
+            assert!(!supervisor.outputs().recovery_active);
+            assert_eq!(supervisor.outputs().limit_reset, [false; 3]);
+        }
+    }
+
+    #[test]
+    fn new_raw_limit_immediately_cancels_stale_latch_reset() {
+        let (mut supervisor, mut frame) = faulted_reset([false; 3], [true, false, false]);
+        frame.raw_limits[0] = true;
+        let output = supervisor.update(1_000_000, frame);
+        assert_eq!(output.fault, Some(FaultCode::LimitDuringRecovery));
+        assert_eq!(output.limit_reset, [false; 3]);
+        assert!(!output.external_enable);
+    }
+
+    #[test]
+    fn ui_limit_recovery_preserves_manual_release_after_an_unaccepted_increment() {
+        let (mut supervisor, mut frame) = faulted_reset([false, true, false], [true; 3]);
+        assert_eq!(supervisor.outputs().limit_reset, [true, false, true]);
+        for cycle in 1..120 {
+            frame.packet = Some(sample(cycle + 1, false));
+            frame.machine.estopped = cycle < 80;
+            if cycle >= 10 {
+                frame.safety_limits = [false, true, false];
+            }
+            let output = supervisor.update(1_000_000, frame);
+            assert!(output.fault.is_none());
+            assert!(!output.machine_on_request);
+            assert!(!matches!(
+                output.command,
+                Some(CommandEvent::JogIncrement(_))
+            ));
+        }
+        assert_eq!(supervisor.outputs().phase, Phase::BounceReleaseWait);
+        frame.machine.machine_on = true;
+        frame.motion.enabled = true;
+        frame.pendant_mode_enabled = true;
+        let away_detent = -Axis::X.clockwise_machine_sign();
+        for (offset, latest_detent) in [0, 0, away_detent].into_iter().enumerate() {
+            frame.packet = Some(PendantSample {
+                latest_detent,
+                deadman_held: true,
+                ..sample(200 + offset as u32, false)
+            });
+            supervisor.update(1_000_000, frame);
+        }
+        assert_eq!(supervisor.outputs().phase, Phase::BounceReleaseJog);
+        for sequence in 203..350 {
+            frame.packet = Some(PendantSample {
+                deadman_held: true,
+                ..sample(sequence, false)
+            });
+            let output = supervisor.update(1_000_000, frame);
+            assert!(output.fault.is_none());
+            assert!(output.external_enable);
+            assert!(!output.recovery_active);
+        }
+        assert_eq!(supervisor.outputs().phase, Phase::BounceReleaseWait);
+        assert_eq!(supervisor.collision_motor, Some(1));
+        assert!(!supervisor.outputs().jog_active);
     }
 }

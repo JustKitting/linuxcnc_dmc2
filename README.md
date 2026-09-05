@@ -250,6 +250,19 @@ physical pendant E-stop is released, this clears a retained controller fault
 and re-arms the same canonical latch. It does not home, move an axis, start the
 spindle, or turn Machine On.
 
+Clear Fault is distinct from cold startup. It resets retained safety-limit
+latches only where the corresponding raw switch is inactive. One remaining
+attributed switch keeps the existing operator-commanded away-only release
+path; Machine On and Pendant Mode are explicit UI choices, with no new
+automatic backoff. Conflicting active switches still block recovery.
+
+For a retained wheel-decoder fault, release E-stop and deadman after restoring
+the named signal cause, then use Clear Fault. The controller waits within the
+packet deadline for a fresh unchanged-counter packet to acknowledge the
+bridge reset. That packet's detent is discarded. New errors, transport loss,
+or an expired request require another explicit Clear Fault; neither a hidden
+terminal command nor a bridge restart is the normal recovery path.
+
 ### Typed recovery contract
 
 Every admitted error state that crosses the controller/bridge/spindle

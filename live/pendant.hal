@@ -9,6 +9,12 @@ loadusr -Wn dmc2-task-monitor ../native/bin/dmc2-process-supervisor --role task-
 
 source hal/pendant_input_sources.hal
 
+# One explicit UI reset is held as a generation until the bridge replies or
+# the configured packet deadline expires. Zero cancels it; no servo pulse is
+# lost between realtime and the userspace serial read period.
+net dmc2-pendant-reset-request dmc2-pendant-control.pendant-reset-request => dmc2-pendant.fault-reset-request
+net dmc2-pendant-reset-ack dmc2-pendant.fault-reset-ack => dmc2-pendant-control.pendant-reset-ack
+
 # Every externally visible component fault is decoded by the task monitor and
 # written to the checksummed diagnostic journal with its stable identity,
 # cause, operator action, source domain, retained raw value, and one coherent

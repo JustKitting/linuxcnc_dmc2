@@ -109,14 +109,16 @@ dmc2_control_result send_command(
             return DMC2_CONTROL_OK;
         }
         if (serial_difference == 0) {
+            // Receipt-only operations still must report an observed rejection.
+            // RCS_ERROR belongs to this command only when the serials match.
+            if (receipt->rcs_status == RCS_ERROR) {
+                return DMC2_CONTROL_REJECTED;
+            }
             if (!wait_until_done) {
                 return DMC2_CONTROL_OK;
             }
             if (receipt->rcs_status == RCS_DONE) {
                 return DMC2_CONTROL_OK;
-            }
-            if (receipt->rcs_status == RCS_ERROR) {
-                return DMC2_CONTROL_REJECTED;
             }
         }
         std::this_thread::sleep_for(POLL_PERIOD);

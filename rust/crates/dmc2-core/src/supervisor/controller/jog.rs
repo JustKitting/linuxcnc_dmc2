@@ -293,12 +293,22 @@ impl LinuxCncPendantSupervisor {
         // input outcome rather than a machine fault or E-stop condition.
         self.active = None;
         self.pending = None;
-        self.transition(Phase::Idle);
+        // A skipped limit-release increment retains attribution and the
+        // operator's existing away-only control path; it does not retry.
+        self.transition(if self.phase == Phase::BounceReleaseJog {
+            Phase::BounceReleaseWait
+        } else {
+            Phase::Idle
+        });
         self.interpreter.reset();
     }
 
     fn finish_bounce(&mut self, inputs: &SupervisorInputs) {
-        let (Some(motor), Some(_)) = (self.collision_motor, self.bounce_start_count) else {
+        if self.phase == Phase::Bouncing && self.bounce_start_count.is_none() {
+            self.fail(FaultCode::BounceLostLimitAttribution);
+            return;
+        }
+        let Some(motor) = self.collision_motor else {
             self.fail(FaultCode::BounceLostLimitAttribution);
             return;
         };
@@ -431,16 +441,27 @@ impl LinuxCncPendantSupervisor {
             }
             Phase::Bouncing | Phase::BounceReleaseJog => {
                 if !inputs.path_ready(active.path) {
-                    self.fail(FaultCode::MotionPathUnavailable);
+                    if self.phase == Phase::BounceReleaseJog {
+                        self.cancel_pendant_motion();
+                    } else {
+                        self.fail(FaultCode::MotionPathUnavailable);
+                    }
                     return;
                 }
                 if !active.consumer_active_seen {
                     if active.command_elapsed_ns >= MOTION_ACCEPT_TIMEOUT_NS {
-                        self.fail(FaultCode::JogCommandNotAccepted);
+                        if self.phase == Phase::BounceReleaseJog {
+                            self.finish_unaccepted_manual_jog();
+                        } else {
+                            self.fail(FaultCode::JogCommandNotAccepted);
+                        }
                     }
                     return;
                 }
                 if !inputs.motion.path_settled(active.intent.axis, active.path) {
+                    if active.command_elapsed_ns >= BOUNCE_TIMEOUT_NS {
+                        self.fail(FaultCode::BounceTimedOut);
+                    }
                     return;
                 }
                 self.finish_bounce(inputs);

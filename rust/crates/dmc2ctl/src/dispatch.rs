@@ -6,10 +6,32 @@ use std::time::Duration;
 
 use crate::catalog::{Catalog, Operation, OperationKind, Prerequisite};
 use crate::native::{ControlBackend, MachineState, NativeError, Receipt, Status, TaskMode};
-use crate::script::ScriptContract;
+use crate::script::{ScriptContract, ScriptError};
 use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 const STATUS_POLL_PERIOD: Duration = Duration::from_millis(20);
+
+#[derive(Clone, Copy)]
+enum ProgramSource<'a> {
+    Catalog(&'a Path),
+    Inspected(&'a ScriptContract),
+}
+
+impl<'a> ProgramSource<'a> {
+    fn path(self) -> &'a Path {
+        match self {
+            Self::Catalog(path) => path,
+            Self::Inspected(script) => script.path(),
+        }
+    }
+
+    fn revalidate(self) -> Result<(), DispatchError> {
+        match self {
+            Self::Catalog(_) => Ok(()),
+            Self::Inspected(script) => script.revalidate().map_err(DispatchError::Script),
+        }
+    }
+}
 
 #[derive(Debug)]
 pub enum ExecutionOutcome {
@@ -33,7 +55,12 @@ pub fn execute_operation(
         OperationKind::Program => {
             require_program_driver(operation)?;
             let path = program_path(catalog, operation)?;
-            execute_program_path(&operation.id, &path, &operation.prerequisites, backend)
+            execute_program_path(
+                &operation.id,
+                ProgramSource::Catalog(&path),
+                &operation.prerequisites,
+                backend,
+            )
         }
         OperationKind::Ui | OperationKind::Internal => {
             Err(DispatchError::UnsupportedExecutionKind {
@@ -50,7 +77,7 @@ pub fn execute_script(
 ) -> Result<ExecutionOutcome, DispatchError> {
     execute_program_path(
         &script_identity(script.path()),
-        script.path(),
+        ProgramSource::Inspected(script),
         script.prerequisites(),
         backend,
     )
@@ -115,21 +142,26 @@ pub fn load_program(
     require_kind(operation, OperationKind::Program)?;
     require_program_driver(operation)?;
     let path = program_path(catalog, operation)?;
-    load_program_path(&operation.id, &path, backend)
+    load_program_path(&operation.id, ProgramSource::Catalog(&path), backend)
 }
 
 pub fn load_script(
     script: &ScriptContract,
     backend: &mut impl ControlBackend,
 ) -> Result<(PathBuf, Receipt), DispatchError> {
-    load_program_path(&script_identity(script.path()), script.path(), backend)
+    load_program_path(
+        &script_identity(script.path()),
+        ProgramSource::Inspected(script),
+        backend,
+    )
 }
 
 fn load_program_path(
     identity: &str,
-    path: &Path,
+    source: ProgramSource<'_>,
     backend: &mut impl ControlBackend,
 ) -> Result<(PathBuf, Receipt), DispatchError> {
+    let path = source.path();
     let status = backend.status()?;
     if !status.interpreter_idle() {
         return Err(DispatchError::LoadWhileInterpreterActive {
@@ -139,7 +171,9 @@ fn load_program_path(
         });
     }
 
+    source.revalidate()?;
     backend.program_close()?;
+    source.revalidate()?;
     let receipt = backend.program_open(path)?;
     let observed = backend.status()?;
     if !same_file(path, &observed.loaded_file) {
@@ -148,6 +182,7 @@ fn load_program_path(
             observed: observed.loaded_file,
         });
     }
+    source.revalidate()?;
     Ok((path.to_path_buf(), receipt))
 }
 
@@ -159,28 +194,34 @@ pub fn run_program(
     require_kind(operation, OperationKind::Program)?;
     require_program_driver(operation)?;
     let path = program_path(catalog, operation)?;
-    run_program_path(&operation.id, &path, &operation.prerequisites, backend)
+    run_program_path(
+        &operation.id,
+        ProgramSource::Catalog(&path),
+        &operation.prerequisites,
+        backend,
+    )
 }
 
 fn execute_program_path(
     identity: &str,
-    path: &Path,
+    source: ProgramSource<'_>,
     prerequisites: &[Prerequisite],
     backend: &mut impl ControlBackend,
 ) -> Result<ExecutionOutcome, DispatchError> {
     let status = backend.status()?;
     check_prerequisite_values(identity, prerequisites, &status, None)?;
-    let (path, load) = load_program_path(identity, path, backend)?;
-    let run = run_program_path(identity, &path, prerequisites, backend)?;
+    let (path, load) = load_program_path(identity, source, backend)?;
+    let run = run_program_path(identity, source, prerequisites, backend)?;
     Ok(ExecutionOutcome::Program { path, load, run })
 }
 
 fn run_program_path(
     identity: &str,
-    path: &Path,
+    source: ProgramSource<'_>,
     prerequisites: &[Prerequisite],
     backend: &mut impl ControlBackend,
 ) -> Result<Receipt, DispatchError> {
+    let path = source.path();
     let status = backend.status()?;
     if !same_file(path, &status.loaded_file) {
         return Err(DispatchError::RunRequiresExactLoadedProgram {
@@ -189,9 +230,21 @@ fn run_program_path(
         });
     }
     check_prerequisite_values(identity, prerequisites, &status, None)?;
+    source.revalidate()?;
     if status.task_mode != TaskMode::Auto {
         backend.set_auto_mode()?;
     }
+    // Mode acknowledgement can wait. Recheck both state and content after
+    // that wait, immediately before issuing the explicitly requested Run.
+    let status = backend.status()?;
+    if !same_file(path, &status.loaded_file) {
+        return Err(DispatchError::RunRequiresExactLoadedProgram {
+            requested: path.to_path_buf(),
+            loaded: status.loaded_file,
+        });
+    }
+    check_prerequisite_values(identity, prerequisites, &status, None)?;
+    source.revalidate()?;
     backend.program_run().map_err(Into::into)
 }
 
@@ -308,6 +361,7 @@ fn check_prerequisite_values(
 
 #[derive(Debug)]
 pub enum DispatchError {
+    Script(ScriptError),
     Native(NativeError),
     WrongKind {
         id: String,
@@ -373,6 +427,7 @@ impl From<NativeError> for DispatchError {
 impl fmt::Display for DispatchError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::Script(error) => error.fmt(formatter),
             Self::Native(error) => error.fmt(formatter),
             Self::WrongKind {
                 id,
@@ -463,6 +518,7 @@ impl fmt::Display for DispatchError {
 impl RecoveryClassified for DispatchError {
     fn recovery_class(&self) -> RecoveryClass {
         match self {
+            Self::Script(error) => error.recovery_class(),
             Self::Native(error) => error.recovery_class(),
             Self::Prerequisite { prerequisite, .. } => prerequisite.recovery_class(),
             Self::WrongKind { .. }
@@ -482,7 +538,7 @@ impl RecoveryClassified for DispatchError {
 mod tests {
     use super::*;
     use crate::catalog::{default_catalog_path, Catalog};
-    use crate::native::{NativeOperation, Receipt};
+    use crate::native::{CommandFailure, NativeOperation, Receipt};
 
     #[derive(Clone, Debug, Eq, PartialEq)]
     enum ObservedAction {
@@ -495,6 +551,18 @@ mod tests {
     struct FakeBackend {
         status: Status,
         actions: Vec<ObservedAction>,
+        replace_on: Option<(ObservedAction, PathBuf)>,
+    }
+
+    impl FakeBackend {
+        fn record(&mut self, action: ObservedAction) {
+            if let Some((trigger, path)) = &self.replace_on {
+                if *trigger == action {
+                    fs::write(path, b"(changed after inspection)\nM2\n").unwrap();
+                }
+            }
+            self.actions.push(action);
+        }
     }
 
     impl ControlBackend for FakeBackend {
@@ -511,7 +579,7 @@ mod tests {
         }
 
         fn set_auto_mode(&mut self) -> Result<Receipt, NativeError> {
-            self.actions.push(ObservedAction::SetAuto);
+            self.record(ObservedAction::SetAuto);
             self.status.task_mode = TaskMode::Auto;
             Ok(Receipt::default())
         }
@@ -529,18 +597,18 @@ mod tests {
         }
 
         fn program_close(&mut self) -> Result<Receipt, NativeError> {
-            self.actions.push(ObservedAction::Close);
+            self.record(ObservedAction::Close);
             Ok(Receipt::default())
         }
 
         fn program_open(&mut self, path: &Path) -> Result<Receipt, NativeError> {
-            self.actions.push(ObservedAction::Open(path.to_path_buf()));
+            self.record(ObservedAction::Open(path.to_path_buf()));
             self.status.loaded_file = path.to_path_buf();
             Ok(Receipt::default())
         }
 
         fn program_run(&mut self) -> Result<Receipt, NativeError> {
-            self.actions.push(ObservedAction::Run);
+            self.record(ObservedAction::Run);
             Ok(Receipt::default())
         }
     }
@@ -548,7 +616,7 @@ mod tests {
     fn fake_error(operation: NativeOperation) -> NativeError {
         NativeError::Command {
             operation,
-            result: 6,
+            result: CommandFailure::Rejected,
             receipt: Receipt::default(),
         }
     }
@@ -573,6 +641,47 @@ mod tests {
     }
 
     #[test]
+    fn changed_script_never_reaches_run_across_load_and_mode_waits() {
+        use std::io::Write;
+        for stage in 0..4 {
+            let path = std::env::temp_dir().join(format!(
+                "dmc2-script-revision-{}-{stage}.ngc",
+                std::process::id()
+            ));
+            let mut file = fs::File::options()
+                .write(true)
+                .create_new(true)
+                .open(&path)
+                .unwrap();
+            file.write_all(b"M2\n").unwrap();
+            drop(file);
+            let script = ScriptContract::open(&path).unwrap();
+            let trigger = match stage {
+                0 => {
+                    fs::write(&path, b"(changed before dispatch)\nM2\n").unwrap();
+                    None
+                }
+                1 => Some(ObservedAction::Close),
+                2 => Some(ObservedAction::Open(script.path().to_path_buf())),
+                3 => Some(ObservedAction::SetAuto),
+                _ => unreachable!(),
+            };
+            let mut backend = FakeBackend {
+                status: ready_status(),
+                actions: Vec::new(),
+                replace_on: trigger.map(|action| (action, path.clone())),
+            };
+            let result = execute_script(&script, &mut backend);
+            fs::remove_file(&path).unwrap();
+            assert!(matches!(
+                result,
+                Err(DispatchError::Script(ScriptError::ContentChanged { .. }))
+            ));
+            assert!(!backend.actions.contains(&ObservedAction::Run));
+        }
+    }
+
+    #[test]
     fn load_dispatch_cannot_emit_run() {
         let catalog = Catalog::open(default_catalog_path()).expect("catalog should parse");
         let operation = catalog
@@ -581,6 +690,7 @@ mod tests {
         let mut backend = FakeBackend {
             status: ready_status(),
             actions: Vec::new(),
+            replace_on: None,
         };
 
         load_program(&catalog, operation, &mut backend).expect("load should be acknowledged");
@@ -603,6 +713,7 @@ mod tests {
         let mut backend = FakeBackend {
             status,
             actions: Vec::new(),
+            replace_on: None,
         };
 
         run_program(&catalog, operation, &mut backend).expect("run should be accepted");
@@ -622,6 +733,7 @@ mod tests {
         let mut backend = FakeBackend {
             status: ready_status(),
             actions: Vec::new(),
+            replace_on: None,
         };
 
         let outcome = execute_operation(&catalog, operation, &mut backend, None)

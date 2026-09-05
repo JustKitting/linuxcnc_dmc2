@@ -58,6 +58,10 @@ pub(super) fn run() -> Result<(), ApplicationError> {
         let mut assembler = LineAssembler::new();
         let mut buffer = [0_u8; 256];
         loop {
+            state.observe_fault_reset(
+                hal.fault_reset_request(),
+                epoch.elapsed().as_nanos().min(u64::MAX as u128) as u64,
+            );
             let count = match serial.read(&mut buffer) {
                 Ok(value) => value,
                 Err(error) => {

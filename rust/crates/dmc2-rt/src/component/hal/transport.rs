@@ -342,14 +342,31 @@ const fn generation_is_coherent(first: u32, second: u32) -> bool {
     first == second && second & 1 == 0
 }
 
-unsafe fn read_pendant(pins: &Pins) -> (bool, PendantSample, bool, bool, bool) {
+struct PendantSnapshot {
+    coherent: bool,
+    sample: PendantSample,
+    connected: bool,
+    serial_fault: bool,
+    quadrature_fault: bool,
+    fault_reset_ack: u32,
+}
+
+unsafe fn read_pendant(pins: &Pins) -> PendantSnapshot {
     let first = unsafe { generation(pins.pendant_snapshot_generation) };
     if first & 1 != 0 {
-        return (false, safe_pendant(), false, true, false);
+        return PendantSnapshot {
+            coherent: false,
+            sample: safe_pendant(),
+            connected: false,
+            serial_fault: true,
+            quadrature_fault: false,
+            fault_reset_ack: 0,
+        };
     }
     let connected = unsafe { read(pins.connected) };
     let serial_fault = unsafe { read(pins.serial_fault) };
     let quadrature_fault = unsafe { read(pins.quadrature_fault) };
+    let fault_reset_ack = unsafe { read(pins.pendant_fault_reset_ack) };
     let axis_code = unsafe { read(pins.axis_code) };
     let multiplier_code = unsafe { read(pins.multiplier_code) };
     let sample = PendantSample {
@@ -364,13 +381,14 @@ unsafe fn read_pendant(pins: &Pins) -> (bool, PendantSample, bool, bool, bool) {
         selector_valid: unsafe { read(pins.selector_valid) },
     };
     let second = unsafe { generation(pins.pendant_snapshot_generation) };
-    (
-        generation_is_coherent(first, second),
+    PendantSnapshot {
+        coherent: generation_is_coherent(first, second),
         sample,
         connected,
         serial_fault,
         quadrature_fault,
-    )
+        fault_reset_ack,
+    }
 }
 
 const fn safe_pendant() -> PendantSample {
@@ -439,8 +457,7 @@ pub(in crate::component) unsafe fn runtime_inputs(
     pins: &Pins,
     motion_command_ready: bool,
 ) -> RuntimeInputs {
-    let (pendant_coherent, pendant_sample, connected, serial_fault, quadrature_fault) =
-        unsafe { read_pendant(pins) };
+    let pendant = unsafe { read_pendant(pins) };
     unsafe { refresh_task_snapshot(pins, &mut state.task) };
     RuntimeInputs {
         servo_thread_ready: unsafe { read(pins.servo_thread_ready) },
@@ -451,11 +468,12 @@ pub(in crate::component) unsafe fn runtime_inputs(
         task_monitor_connected: state.task.connected,
         task_monitor_fault: state.task.fault,
         task_heartbeat: state.task.heartbeat,
-        pendant_coherent,
-        pendant_connected: connected,
-        pendant_serial_fault: serial_fault,
-        pendant_quadrature_fault: quadrature_fault,
-        pendant_sample,
+        pendant_coherent: pendant.coherent,
+        pendant_connected: pendant.connected,
+        pendant_serial_fault: pendant.serial_fault,
+        pendant_quadrature_fault: pendant.quadrature_fault,
+        pendant_fault_reset_ack: pendant.fault_reset_ack,
+        pendant_sample: pendant.sample,
         machine: state.task.machine,
         motion: MotionSnapshot {
             enabled: unsafe { read(pins.motion_enabled) },
@@ -519,6 +537,10 @@ pub(in crate::component) unsafe fn publish(
         write(pins.position_unknown, !outputs.position_known);
         write(pins.control_ready, supervisor.control_ready);
         write(pins.fault_reset_allowed, outputs.fault_reset_allowed);
+        write(
+            pins.pendant_fault_reset_request,
+            outputs.pendant_fault_reset_request,
+        );
         publish_fault_record(pins, supervisor.fault_record);
         write(pins.recovery_active, supervisor.recovery_active);
         write(pins.jog_active, supervisor.jog_active);
@@ -628,6 +650,8 @@ pub(in crate::component) unsafe fn publish_initial_safe(pins: &Pins) {
         write(pins.position_unknown, true);
         write(pins.control_ready, false);
         write(pins.fault_reset_allowed, false);
+        write(pins.pendant_fault_reset_request, 0);
+        write(pins.pendant_fault_reset_ack, 0);
         write(pins.fault_snapshot_generation, 0);
         publish_fault_record(pins, None);
         write(pins.recovery_active, false);

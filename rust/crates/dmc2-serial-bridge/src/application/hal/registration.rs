@@ -10,7 +10,7 @@ unsafe fn publish_initial_safe(pins: &HalPins) {
 
 hal::userspace_hal_component! {
     error pub RegistrationError;
-    register pub(super) output_pin;
+    register pub(super) register_pin;
     create pub(super) create_hal;
     pins HalPins;
     initialize publish_initial_safe;

@@ -117,8 +117,8 @@ diagnostic_catalog! {
     BounceReleaseWait = 13,
     "BOUNCE_RELEASE_WAIT",
     "bounce-release-wait",
-    "the exact automatic backoff completed but the attributed raw limit remains active",
-    "use the pendant deadman and command only the attributed axis away from its limit";
+    "one raw limit remains attributed after backoff or an explicit UI fault reset",
+    "select Machine On and Pendant Mode, then use the deadman to command only the attributed axis away from its limit";
     BounceReleaseJog = 14,
     "BOUNCE_RELEASE_JOG",
     "bounce-release-jog",
@@ -161,7 +161,11 @@ impl Phase {
     }
 
     const fn timed_bounce(self) -> bool {
-        self.bounce() && !matches!(self, Self::BounceReleaseWait)
+        self.bounce()
+            && !matches!(
+                self,
+                Self::BounceReleaseWait | Self::BounceReleaseJog | Self::BounceReleaseStopping
+            )
     }
 }
 
@@ -216,9 +220,17 @@ impl ActiveJog {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RecoveryPowerPhase {
+    LimitResetAssert([bool; 3]),
+    LimitResetValidate([bool; 3]),
     GateSettle,
     WaitReset,
     WaitOn,
+}
+
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum StartupProgress {
+    Pending,
+    Consumed,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -226,7 +238,7 @@ pub struct LinuxCncPendantSupervisor {
     interpreter: PendantInterpreter,
     recovery: EstopRecoverySequence,
     link_established: bool,
-    startup_limits_checked: bool,
+    startup_progress: StartupProgress,
     phase: Phase,
     phase_elapsed_ns: u64,
     phase_total_ns: u64,
@@ -256,7 +268,7 @@ impl LinuxCncPendantSupervisor {
             interpreter: PendantInterpreter::new(),
             recovery: EstopRecoverySequence::new(),
             link_established: false,
-            startup_limits_checked: false,
+            startup_progress: StartupProgress::Pending,
             phase: Phase::Idle,
             phase_elapsed_ns: 0,
             phase_total_ns: 0,
@@ -316,7 +328,9 @@ impl LinuxCncPendantSupervisor {
         self.control_ready = false;
         self.clear_state_requests();
         self.interpreter.reset();
-        self.startup_limits_checked = false;
+        // Fault clearing is not another cold start and cannot inherit its
+        // automatic Machine On or startup-backoff sequence.
+        self.startup_progress = StartupProgress::Consumed;
         self.fault = None;
         // Reassert the native realtime stop while the cleared controller is
         // still deliberately held disabled for this complete update cycle.
@@ -329,7 +343,9 @@ impl LinuxCncPendantSupervisor {
     }
 
     pub const fn startup_sequence_complete(&self) -> bool {
-        self.startup_limits_checked && !self.phase.startup_power() && !self.phase.startup_bounce()
+        matches!(self.startup_progress, StartupProgress::Consumed)
+            && !self.phase.startup_power()
+            && !self.phase.startup_bounce()
     }
 
     fn transition(&mut self, phase: Phase) {
@@ -348,7 +364,11 @@ impl LinuxCncPendantSupervisor {
         record.evidence.supervisor_phase = self.phase.wire_code();
         match fault {
             FaultCode::BounceTimedOut => {
-                record.evidence.elapsed_ns = Some(self.phase_total_ns);
+                record.evidence.elapsed_ns = if self.phase == Phase::BounceReleaseJog {
+                    active_elapsed(self.active)
+                } else {
+                    Some(self.phase_total_ns)
+                };
                 record.evidence.timeout_ns = Some(BOUNCE_TIMEOUT_NS);
             }
             FaultCode::JogCommandNotAccepted => {
@@ -364,7 +384,11 @@ impl LinuxCncPendantSupervisor {
                 record.evidence.timeout_ns = Some(MOTION_STOP_TIMEOUT_NS);
             }
             FaultCode::LimitLatchResetTimedOut => {
-                record.evidence.elapsed_ns = Some(self.phase_total_ns);
+                record.evidence.elapsed_ns = Some(if self.recovery_power_phase.is_some() {
+                    self.recovery_elapsed_ns
+                } else {
+                    self.phase_total_ns
+                });
                 record.evidence.timeout_ns = Some(LIMIT_RESET_TIMEOUT_NS);
             }
             _ => {}
@@ -446,6 +470,8 @@ impl LinuxCncPendantSupervisor {
         self.external_enable = false;
         self.control_ready = false;
         self.clear_state_requests();
+        self.recovery_power_phase = None;
+        self.recovery_restore_machine_on = false;
         self.fault = Some(record);
     }
 
