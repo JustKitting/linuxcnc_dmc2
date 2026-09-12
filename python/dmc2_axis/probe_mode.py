@@ -136,7 +136,9 @@ class ProbeModeBinding:
         try:
             packet = self.socket.recv(16384)
         except BlockingIOError:
-            self.message = f"Waiting for probe recorder ({time.monotonic() - self.pending_since:.1f} s); Probe Mode off remains available."
+            # An outstanding nonblocking request is normal. Preserve the last
+            # status until a reply arrives or the deadline above reports an
+            # actual timeout, rather than flashing a waiting message per poll.
             return
         self.pending_since = None
         status = json.loads(packet)
