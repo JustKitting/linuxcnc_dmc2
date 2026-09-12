@@ -63,6 +63,7 @@ pub const FILES: &[File] = &[
     project_file!("python/dmc2_axis/diagnostic_journal.py"),
     project_file!("python/dmc2_axis/error_journal.py"),
     project_file!("python/dmc2_axis/notifications.py"),
+    project_file!("python/dmc2_axis/notification_paint.tcl"),
     project_file!("python/dmc2_axis/operation_catalog.py"),
     project_file!("python/dmc2_axis/pendant_mode.py"),
     project_file!("python/dmc2_axis/probe_mode.py"),

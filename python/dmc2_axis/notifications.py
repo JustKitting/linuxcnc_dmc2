@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
+from pathlib import Path
 
 from .constants import (
     AGGREGATED_ERROR_PREFIXES,
@@ -512,3 +513,6 @@ def install_axis_ui_policy(
     live_plotter._dmc2_active_diagnostic_widgets = active_diagnostic_widgets
     live_plotter._dmc2_recovery_contract = lambda: checked_recovery_contract
     live_plotter._dmc2_ui_policy_installed = True
+    # Keep diagnostics/recovery installed if optional repaint setup raises.
+    notifications.tk.call("source", str(Path(__file__).with_name("notification_paint.tcl")))
+    notifications.tk.call("::dmc2::notification_paint::install", str(notifications))
