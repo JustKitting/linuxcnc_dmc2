@@ -56,6 +56,14 @@ extern "C" {
 #endif
 
 uint32_t dmc2_control_abi_version(void) DMC2_NOEXCEPT;
+/* Operator error only: opens no command channel and changes no machine state. */
+int32_t dmc2_probe_capture_error(
+    const char *nml_file,
+    const char *message) DMC2_NOEXCEPT;
+/* Read the original machine-frame G38 trigger; never read a post-stop position. */
+int32_t dmc2_probe_capture_position(
+    const char *nml_file,
+    double xyz[3]) DMC2_NOEXCEPT;
 size_t dmc2_control_status_size(void) DMC2_NOEXCEPT;
 dmc2_control_session *dmc2_control_open(
     const char *nml_file,
@@ -102,4 +110,3 @@ dmc2_control_result dmc2_control_program_run(
 
 #undef DMC2_NOEXCEPT
 #endif
-
