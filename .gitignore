@@ -37,3 +37,6 @@ linuxcnc.report
 
 /live/*.var
 /live/*.var.bak
+
+# Probe sessions are written only when the operator stops recording.
+/tmp/output/

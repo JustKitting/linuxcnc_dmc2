@@ -1,0 +1,17 @@
+# Observations only. trivkins maps homed joint positions directly to machine
+# XYZ; halui's userspace DRO and stale G38 probed_position are not used.
+# Physical LEFT / LinuxCNC +X; physical RIGHT / LinuxCNC -X.
+net dmc2-probe-x joint.0.pos-fb => dmc2-probe.x
+net dmc2-probe-y joint.1.pos-fb => dmc2-probe.y
+net dmc2-probe-z joint.2.pos-fb => dmc2-probe.z
+net dmc2-probe-command-x joint.0.pos-cmd => dmc2-probe.command-x
+net dmc2-probe-command-y joint.1.pos-cmd => dmc2-probe.command-y
+net dmc2-probe-command-z joint.2.pos-cmd => dmc2-probe.command-z
+net dmc2-probe-velocity-x joint.0.vel-cmd => dmc2-probe.velocity-x
+net dmc2-probe-velocity-y joint.1.vel-cmd => dmc2-probe.velocity-y
+net dmc2-probe-velocity-z joint.2.vel-cmd => dmc2-probe.velocity-z
+# LinuxCNC has already processed this contact and stopped the manual jog.
+# Retire its interrupted pendant target instead of faulting on non-arrival.
+net dmc2-probe-jog-contact dmc2-probe.jog-contact => dmc2-pendant-control.manual-probe-contact
+
+net dmc2-probe-all-homed motion.is-all-homed => dmc2-probe.all-homed

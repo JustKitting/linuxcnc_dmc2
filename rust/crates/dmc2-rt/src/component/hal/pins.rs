@@ -7,6 +7,7 @@ hal::realtime_hal_pin_catalog! {
     pub(in crate::component) struct Pins;
     pub(in crate::component) fn register_pins;
     pins {
+        manual_probe_contact: bit in => "dmc2-pendant-control.manual-probe-contact";
         pendant_snapshot_generation: u32 in => "dmc2-pendant-control.snapshot-generation";
         connected: bit in => "dmc2-pendant-control.connected";
         serial_fault: bit in => "dmc2-pendant-control.serial-fault";

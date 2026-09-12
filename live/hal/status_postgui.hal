@@ -62,17 +62,18 @@ net dmc2-puck-latched    => pyvcp.puck-latched
 net dmc2-probe-latched   => pyvcp.probe-latched
 net dmc2-probe-power-enabled => pyvcp.probe-power-enabled
 
-# This no-motion connectivity test is available while unhomed. START opens
-# the already configured OUT5 power path for no more than 300 seconds. A real
-# IN0 puck contact, IN1 side-probe contact, or STOP resets the realtime window
-# immediately.
-net dmc2-contact-test-start pyvcp.contact-test-start => dmc2-contact-test-window.in
-net dmc2-contact-test-stop pyvcp.contact-test-stop => dmc2-contact-test-reset-or.in1
-net dmc2-contact-test-active => pyvcp.contact-test-active
-net dmc2-contact-test-time-left => pyvcp.contact-test-time-left
+# AXIS owns these user toggles. Mode off clears Record in the UI and the
+# realtime recorder also applies mode AND record on the same servo sample.
+net dmc2-probe-mode-request axisui.probe-mode => dmc2-probe.mode-request
+net dmc2-probe-record-request axisui.probe-record => dmc2-probe.record-request
+net dmc2-probe-retry-save axisui.probe-retry-save => dmc2-probe-session.retry-save
+net dmc2-probe-recorder-ready dmc2-probe-session.ready => axisui.probe-recorder-ready
+net dmc2-probe-dropped dmc2-probe.dropped-samples => dmc2-probe-session.dropped-samples
+net dmc2-manual-probe-selected => axisui.probe-selected
+net dmc2-probe-live => axisui.probe-contact
+net dmc2-probe-recording dmc2-probe.recording => axisui.probe-recording
 
-# The separate G-code source remains false while LinuxCNC is idle or aborted;
-# the finite panel-test source above intentionally remains available unhomed.
+# Preserve the program-running gate for the original G-code OUT5 path.
 net dmc2-probe-program-running halui.program.is-running => dmc2-probe-power-gate.in1
 
 # Clearing these five latches has no effect on a safety latch or motion state.

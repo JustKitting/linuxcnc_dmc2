@@ -161,6 +161,11 @@ def user_hal_pins():
         "install_axis_spindle_feedback",
         _AxisUiFaultKind.SPINDLE_FEEDBACK_UI_INSTALL_FAILED,
     )
+    _install_extension(
+        ".probe_mode",
+        "install_axis_probe_mode",
+        _AxisUiFaultKind.PROBE_MODE_UI_INSTALL_FAILED,
+    )
 
 
 if _recovery_bootstrap_ready:

@@ -6,6 +6,7 @@ mod error_channel;
 mod hal;
 mod journal_error;
 pub(crate) mod nml;
+mod probe;
 mod runtime;
 
 use std::mem;

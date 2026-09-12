@@ -225,6 +225,19 @@ def install_axis_ui_policy(
                         message,
                         linuxcnc_module,
                     )
+                    probe_binding = getattr(live_plotter, "_dmc2_probe_mode", None)
+                    if (
+                        probe_binding is not None
+                        and bool(probe_binding.comp["probe-mode"])
+                        and bool(probe_binding.comp["probe-selected"])
+                        and message.strip() in (
+                            "Probe tripped during a joint jog.",
+                            "Probe tripped during a coordinate jog.",
+                        )
+                    ):
+                        # Rust delivers the retained contact sample as the info
+                        # bubble; preserve the raw LinuxCNC event in its journal.
+                        suppressed = True
                     print(
                         "DMC2_LINUXCNC_ERROR_CHANNEL "
                         f"sequence={event.sequence} kind={kind} name={name} "

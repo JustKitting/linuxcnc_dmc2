@@ -4,6 +4,28 @@ use super::*;
 use crate::BOUNCE_PULSES;
 
 impl LinuxCncPendantSupervisor {
+    /// The stock motion controller has stopped a pendant jog on an IN1 edge.
+    /// Retire its interrupted target, without issuing motion, clearing a fault,
+    /// changing power, or requiring assistant-only recovery.
+    pub fn observe_manual_probe_stop(&mut self) {
+        if self.fault.is_some()
+            || !matches!(
+                self.phase,
+                Phase::Idle | Phase::StoppingCancel | Phase::StoppingReplace
+            )
+        {
+            return;
+        }
+        if self.active.is_none() {
+            self.pending = None;
+            return;
+        }
+        self.active = None;
+        self.pending = None;
+        self.interpreter.reset();
+        self.transition(Phase::Idle);
+    }
+
     pub(super) fn cancel_pendant_motion(&mut self) {
         self.pending = None;
         if self.active.is_none() {

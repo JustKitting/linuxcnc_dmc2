@@ -13,12 +13,11 @@ loadrt dmc2_rt
 loadrt flipflop names=dmc2-safety-limit-x,dmc2-safety-limit-y,dmc2-safety-limit-z,dmc2-display-limit-x,dmc2-display-limit-y,dmc2-display-limit-z,dmc2-display-puck,dmc2-display-probe
 loadrt watchdog num_inputs=1
 loadrt and2 names=dmc2-controller-watchdog-and,dmc2-own-toward-block-m0,dmc2-own-toward-block-m1,dmc2-own-toward-block-m2,dmc2-command-blocked-m0,dmc2-command-blocked-m1,dmc2-command-blocked-m2,dmc2-hard-limit-x-enabled,dmc2-hard-limit-y-enabled,dmc2-hard-limit-z-enabled,dmc2-probe-power-gate,dmc2-probe-select-in0,dmc2-probe-select-in1
-loadrt or2 names=dmc2-other-limit-block-m0,dmc2-other-limit-block-m1,dmc2-other-limit-block-m2,dmc2-blocked-m0,dmc2-blocked-m1,dmc2-blocked-m2,dmc2-jog-stop-01,dmc2-jog-stop-all,dmc2-jog-stop-immediate-all,dmc2-limit-recovery-owned,dmc2-probe-power-source-or,dmc2-contact-test-detected-or,dmc2-contact-test-reset-or,dmc2-selected-probe-or
+loadrt or2 names=dmc2-other-limit-block-m0,dmc2-other-limit-block-m1,dmc2-other-limit-block-m2,dmc2-blocked-m0,dmc2-blocked-m1,dmc2-blocked-m2,dmc2-jog-stop-01,dmc2-jog-stop-all,dmc2-jog-stop-immediate-all,dmc2-limit-recovery-owned,dmc2-manual-probe-select-or,dmc2-selected-probe-or
 loadrt not names=dmc2-pendant-jog-inactive,dmc2-probe-select-in0-enable
 loadrt mux2 names=dmc2-x-feedback-loss-guard,dmc2-y-feedback-loss-guard,dmc2-z-feedback-loss-guard
 loadrt estop_latch
 loadrt timedelay names=dmc2-servo-startup-delay
-loadrt oneshot names=dmc2-contact-test-window
 
 # Read the card before every realtime consumer.
 addf hm2_7i95.0.read servo-thread
@@ -91,6 +90,8 @@ addf dmc2-hard-limit-z-enabled servo-thread
 addf dmc2-x-feedback-loss-guard servo-thread
 addf dmc2-y-feedback-loss-guard servo-thread
 addf dmc2-z-feedback-loss-guard servo-thread
+addf dmc2-probe.select servo-thread
+addf dmc2-manual-probe-select-or servo-thread
 addf dmc2-probe-select-in0-enable servo-thread
 addf dmc2-probe-select-in0 servo-thread
 addf dmc2-probe-select-in1 servo-thread
@@ -98,22 +99,17 @@ addf dmc2-selected-probe-or servo-thread
 
 addf motion-command-handler servo-thread
 addf motion-controller servo-thread
+addf dmc2-probe.capture servo-thread
+source hal/probe_mode.hal
 # Consume LinuxCNC's spindle command, enforce the H100 state machine, then
 # let hm2_modbus exchange the resulting STOP/RUN and frequency state. The
 # sequencer sees readback from the preceding scan and therefore cannot release
 # RUN in the same cycle that it first requests a frequency write.
 addf h100-spindle servo-thread
 addf hm2_modbus.0.process servo-thread
-# OUT5 can be requested by either the program-running-gated G-code path or the
-# finite, explicitly operator-started no-motion panel test.  A real IN0 puck
-# contact, a real IN1 side-probe contact, or the panel STOP button resets the
-# panel test immediately. All of this executes before the Mesa write sends the
-# resulting state to the card.
+# Retain the existing program-controlled OUT5 path. The mounted XYZ probe
+# is powered from the USER-OBSERVED ACTUAL fixed +5 V supply.
 addf dmc2-probe-power-gate servo-thread
-addf dmc2-contact-test-detected-or servo-thread
-addf dmc2-contact-test-reset-or servo-thread
-addf dmc2-contact-test-window servo-thread
-addf dmc2-probe-power-source-or servo-thread
 addf watchdog.set-timeouts servo-thread
 addf watchdog.process servo-thread
 addf dmc2-controller-watchdog-and servo-thread
@@ -122,14 +118,6 @@ addf estop-latch.0 servo-thread
 # Write all resulting step/output state only after motion and safety logic.
 addf hm2_7i95.0.write servo-thread
 addf dmc2-servo-startup-delay servo-thread
-
-# Preserve the previously specified exact 300-second maximum test window.
-# A contact or STOP request ends it sooner; a second START edge cannot extend
-# an already active window.
-setp dmc2-contact-test-window.width 300.0
-setp dmc2-contact-test-window.retriggerable false
-setp dmc2-contact-test-window.rising true
-setp dmc2-contact-test-window.falling false
 
 # USER-OBSERVED ACTUAL isolated input mapping and scan behavior.
 setp hm2_7i95.0.inmux.00.scan_rate 20000
