@@ -7,12 +7,18 @@ symlink. There is no Python machine-control path or alternate launcher.
 
 ## Settings and entry
 
-Set `search_mm` and `feed_mm_min` at the top of the script for the particular
-opening before selecting it with **File → Open**. Their initial zero values mean
+Set `search_mm` at the top of the script for the particular
+opening before selecting it with **File → Open**. Its initial zero value means
 **unset**, and Run refuses motion. `search_mm` is the maximum distance of each
 contact approach from that pass's center, in each signed axis direction; it is
-not a diameter. The same feed applies to approaches, releases, returns, and
-centering moves. No separately guessed backoff distance is used.
+not a diameter. Coarse contact uses `coarse_feed_mm_min = 200`; the final
+measurement, release, return, and centering feed is `feed_mm_min = 50`.
+These are the endpoints of the probe's published **50–200 mm/min** range,
+not a separately manufacturer-designated optimum. This is a 4× first approach;
+5× the lower endpoint would exceed the published range. Sources:
+[Amazon specification](https://www.amazon.com/dp/B0CC5BFFZW) and
+[manufacturer Main Specs](https://pgfuntransmission.com/product/npn-nc-cnc-3d-touch-probe-with-6-mm-shank-and-2-0-mm-tungsten-steel-ball-tip/).
+No separately guessed backoff distance is used.
 
 The ball starts clear inside the opening at the intended probing Z. The script
 makes no Z movement and writes no work or tool offsets. Its checks require all
@@ -33,8 +39,11 @@ Each pass approaches Y-, returns to the pass center, approaches Y+, returns,
 approaches **physical RIGHT / LinuxCNC -X**, returns **physical LEFT / LinuxCNC
 +X**, approaches **physical LEFT / LinuxCNC +X**, and returns **physical RIGHT /
 LinuxCNC -X**. Every return uses the same axis as its approach. When contact is
-still asserted, a release probe first stops on loss of contact, then a feed move
-finishes the return to the already-clear pass center. A new center move is a
+still asserted, a release probe stops on loss of contact. Each wall receives
+a coarse contact, release backoff, slow re-touch, release, then return to the
+already-clear pass center. Both trigger records are saved before their respective
+release moves; **only the slow trigger enters the circle calculation**.
+A new center move is a
 contact-sensitive XY move: unexpected contact aborts instead of being used as a
 normal wall measurement. For a center move, increasing X means **physical LEFT /
 LinuxCNC +X** and decreasing X means **physical RIGHT / LinuxCNC -X**.
@@ -118,7 +127,9 @@ They are not a sensor repeatability or physical accuracy claim.
 Each run gets a unique `tmp/output/circle/circle-<timestamp>-<pid>.txt` ledger.
 Each record has a sequence and `BEGIN`/`END` delimiters. Records are typed
 `start`, `touch`, `sweep`, `selection`, and `result`. Touch axis codes are X=0,
-Y=1; direction is the signed LinuxCNC direction. All motion metadata uses mm and
+Y=1; direction is the signed LinuxCNC direction. Version 2 records distinguish
+stage 0 (coarse location) from stage 1 (fine measurement), and retain each feed.
+All motion metadata uses mm and
 commanded mm/min; it is not a measurement of actual instantaneous velocity.
 
 `selection` is the provisional best measured target before the final move.
@@ -146,4 +157,6 @@ different probe coordinate. The standalone LinuxCNC interpreter has exercised
 the program arithmetic with synthetic off-center, equal-chord diagonal,
 initially centered, half-command-step, ellipse/repeat, and missing-contact
 fixtures. These are assistant-arranged checks, not evidence of machine behavior.
+The two-speed fixture deliberately gave coarse contacts different coordinates;
+the retained feeds/stages and fine-only circle spans matched the check assertions.
 The circle routine has not been run on the physical machine.

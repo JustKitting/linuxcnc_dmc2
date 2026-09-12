@@ -1,12 +1,8 @@
-use std::collections::BTreeMap;
+use super::schema::{validate, Workflow};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
-
-const REQUEST: &str = "circle-request.txt";
-const ACTIVE: &str = "circle-active.txt";
-const MAGIC: &str = "DMC2_CIRCLE_RECORD_V1";
 
 fn io(context: &str, error: std::io::Error) -> String {
     format!("{context}: {error}")
@@ -18,22 +14,23 @@ fn sync_directory(path: &Path) -> Result<(), String> {
         .map_err(|e| io("syncing capture directory", e))
 }
 
-fn save_active(output: &Path, file: &str, sequence: u64) -> Result<(), String> {
+fn save_active(output: &Path, workflow: Workflow, file: &str, sequence: u64) -> Result<(), String> {
     let bytes = format!("{file}\n{sequence}\n");
-    let pending = output.join("circle-active.pending");
+    let pending = output.join(format!("{}-active.pending", workflow.name()));
     let mut f = File::create(&pending).map_err(|e| io("opening capture state", e))?;
     f.write_all(bytes.as_bytes())
         .map_err(|e| io("writing capture state", e))?;
     f.sync_all().map_err(|e| io("syncing capture state", e))?;
-    fs::rename(&pending, output.join(ACTIVE)).map_err(|e| io("publishing capture state", e))?;
+    fs::rename(&pending, output.join(workflow.active()))
+        .map_err(|e| io("publishing capture state", e))?;
     sync_directory(output)
 }
 
-pub(super) fn begin(output: &Path) -> Result<(), String> {
-    fs::create_dir_all(output.join("circle"))
-        .map_err(|e| io("creating circle output directory", e))?;
+pub(super) fn begin(output: &Path, workflow: Workflow) -> Result<(), String> {
+    fs::create_dir_all(output.join(workflow.name()))
+        .map_err(|e| io("creating probe output directory", e))?;
     // Only this program's scratch request is removed; previous ledgers remain.
-    match fs::remove_file(output.join(REQUEST)) {
+    match fs::remove_file(output.join(workflow.request())) {
         Ok(()) => (),
         Err(e) if e.kind() == std::io::ErrorKind::NotFound => (),
         Err(e) => return Err(io("discarding an uncommitted old capture request", e)),
@@ -42,36 +39,39 @@ pub(super) fn begin(output: &Path) -> Result<(), String> {
         .duration_since(UNIX_EPOCH)
         .map_err(|e| format!("reading capture timestamp: {e}"))?
         .as_nanos();
-    let name = format!("circle-{stamp}-{}.txt", std::process::id());
+    let name = format!("{}-{stamp}-{}.txt", workflow.name(), std::process::id());
     let mut ledger = OpenOptions::new()
         .write(true)
         .create_new(true)
-        .open(output.join("circle").join(&name))
+        .open(output.join(workflow.name()).join(&name))
         .map_err(|e| io("creating a unique capture ledger", e))?;
-    ledger.write_all(b"DMC2_CIRCLE_LEDGER_V1\nunits=mm,mm/min\nsource=LinuxCNC G38 trigger parameters; serialized decimal precision=9\nX_positive=physical LEFT / LinuxCNC +X\nX_negative=physical RIGHT / LinuxCNC -X\n")
+    let header = format!("{}\nunits=mm,mm/min\nsource=LinuxCNC G38 trigger parameters; serialized decimal precision=9\nstage=0:coarse-location,1:fine-measurement\nX_positive=physical LEFT / LinuxCNC +X\nX_negative=physical RIGHT / LinuxCNC -X\n", workflow.ledger_magic());
+    ledger
+        .write_all(header.as_bytes())
         .map_err(|e| io("writing capture ledger header", e))?;
     ledger
         .sync_all()
         .map_err(|e| io("syncing capture ledger header", e))?;
-    sync_directory(&output.join("circle"))?;
-    save_active(output, &name, 0)?;
+    sync_directory(&output.join(workflow.name()))?;
+    save_active(output, workflow, &name, 0)?;
     println!(
-        "DMC2 circle capture ledger: {}",
-        output.join("circle").join(name).display()
+        "DMC2 capture ledger: {}",
+        output.join(workflow.name()).join(name).display()
     );
     Ok(())
 }
 
 pub(super) fn commit(
     output: &Path,
+    workflow: Workflow,
     sequence: u64,
     trigger: impl FnOnce() -> Result<[f64; 3], String>,
 ) -> Result<(), String> {
-    let active = fs::read_to_string(output.join(ACTIVE))
+    let active = fs::read_to_string(output.join(workflow.active()))
         .map_err(|e| io("reading active capture state", e))?;
     let lines: Vec<_> = active.lines().collect();
     if lines.len() != 2
-        || !lines[0].starts_with("circle-")
+        || !lines[0].starts_with(&format!("{}-", workflow.name()))
         || !lines[0].ends_with(".txt")
         || lines[0].contains('/')
         || lines[0].contains('\\')
@@ -86,19 +86,22 @@ pub(super) fn commit(
     if sequence != expected {
         return Err(format!("capture sequence {sequence} does not match expected {expected}; no return move is permitted"));
     }
-    let request = fs::read_to_string(output.join(REQUEST)).map_err(|e| {
+    let request = fs::read_to_string(output.join(workflow.request())).map_err(|e| {
         io(
-            "reading staged contact; LinuxCNC may not have written circle-request.txt",
+            "reading staged contact; LinuxCNC may not have written the request file",
             e,
         )
     })?;
-    validate(&request, sequence)?;
-    let exact = if request.lines().any(|line| line == "kind=touch") {
+    validate(workflow, &request, sequence)?;
+    let exact = if request
+        .lines()
+        .any(|line| matches!(line, "kind=touch" | "kind=obstruction"))
+    {
         exact_trigger(&request, trigger()?)?
     } else {
         String::new()
     };
-    let path = output.join("circle").join(lines[0]);
+    let path = output.join(workflow.name()).join(lines[0]);
     let bytes = format!("BEGIN {sequence}\n{request}{exact}END {sequence}\n");
     let mut ledger = OpenOptions::new()
         .read(true)
@@ -124,111 +127,16 @@ pub(super) fn commit(
     if retained != bytes {
         return Err("saved contact readback differs from the staged trigger record; retained result is quarantined".into());
     }
-    fs::remove_file(output.join(REQUEST))
+    if workflow == Workflow::Surface && request.lines().any(|line| line == "kind=result") {
+        super::surface::export(&path, true)?;
+    }
+    fs::remove_file(output.join(workflow.request()))
         .map_err(|e| io("consuming the saved capture request", e))?;
-    save_active(output, lines[0], sequence + 1)?;
+    save_active(output, workflow, lines[0], sequence + 1)?;
     println!(
         "DMC2 capture readback: {} sequence={sequence}\n{retained}",
         path.display()
     );
-    Ok(())
-}
-
-fn validate(request: &str, sequence: u64) -> Result<(), String> {
-    let mut lines = request.lines();
-    if lines.next() != Some(MAGIC) || !request.ends_with('\n') {
-        return Err("staged capture is missing its complete versioned header/terminator".into());
-    }
-    let mut values = BTreeMap::new();
-    for line in lines {
-        let (key, value) = line
-            .split_once('=')
-            .ok_or("malformed staged capture field")?;
-        if values.insert(key, value).is_some() {
-            return Err(format!("duplicate capture field {key}"));
-        }
-    }
-    if values
-        .remove("sequence")
-        .and_then(|v| v.parse::<u64>().ok())
-        != Some(sequence)
-    {
-        return Err("staged record has a stale or missing capture sequence".into());
-    }
-    let kind = values
-        .remove("kind")
-        .ok_or("capture record kind is missing")?;
-    let required: &[&str] = match kind {
-        "start" => &[
-            "x",
-            "y",
-            "z",
-            "offset_x",
-            "offset_y",
-            "offset_z",
-            "feed",
-            "search",
-            "ball_diameter",
-            "step_x",
-            "step_y",
-        ],
-        "touch" => &[
-            "pass",
-            "axis",
-            "direction",
-            "success",
-            "work_x",
-            "work_y",
-            "work_z",
-            "machine_x",
-            "machine_y",
-            "machine_z",
-            "feed",
-        ],
-        "sweep" => &[
-            "pass",
-            "x",
-            "y",
-            "center_x",
-            "center_y",
-            "dx",
-            "dy",
-            "span_error",
-            "balance",
-            "radius_x",
-            "radius_y",
-        ],
-        "selection" | "result" => &[
-            "reason",
-            "x",
-            "y",
-            "machine_x",
-            "machine_y",
-            "dx",
-            "dy",
-            "span_error",
-            "balance",
-            "diameter",
-            "pass",
-        ],
-        _ => return Err(format!("unknown capture record kind {kind}")),
-    };
-    if values.len() != required.len() {
-        return Err(format!("{kind} capture has missing or unexpected fields"));
-    }
-    for key in required {
-        let value = values
-            .get(key)
-            .ok_or_else(|| format!("missing {kind} field {key}"))?;
-        if !value.parse::<f64>().map(|v| v.is_finite()).unwrap_or(false) {
-            return Err(format!(
-                "{kind} field {key} is not a finite number: {value}"
-            ));
-        }
-    }
-    if kind == "touch" && values["success"].parse::<f64>() != Ok(1.0) {
-        return Err("G38 did not report a contact; no reconstructed position is accepted".into());
-    }
     Ok(())
 }
 
@@ -263,13 +171,24 @@ mod tests {
 
     #[test]
     fn reject_incomplete_stale_and_nonfinite_trigger_records() {
-        assert!(validate("", 0).is_err());
-        let record = "DMC2_CIRCLE_RECORD_V1\nsequence=1\nkind=touch\npass=1\naxis=1\ndirection=-1\nsuccess=1\nwork_x=1\nwork_y=2\nwork_z=3\nmachine_x=4\nmachine_y=5\nmachine_z=6\nfeed=50\n";
-        assert!(validate(record, 1).is_ok());
-        assert!(validate(record, 0).is_err());
-        assert!(validate(&record.replace("success=1", "success=0"), 1).is_err());
-        assert!(validate(&record.replace("machine_y=5", "machine_y=NaN"), 1).is_err());
-        assert!(validate(&record.replace("machine_y=5\n", ""), 1).is_err());
+        assert!(validate(Workflow::Circle, "", 0).is_err());
+        let record = "DMC2_CIRCLE_RECORD_V2\nsequence=1\nkind=touch\nstage=1\npass=1\naxis=1\ndirection=-1\nsuccess=1\nwork_x=1\nwork_y=2\nwork_z=3\nmachine_x=4\nmachine_y=5\nmachine_z=6\nfeed=50\n";
+        assert!(validate(Workflow::Circle, record, 1).is_ok());
+        assert!(validate(Workflow::Circle, &record.replace("stage=1", "stage=2"), 1).is_err());
+        assert!(validate(Workflow::Circle, record, 0).is_err());
+        assert!(validate(
+            Workflow::Circle,
+            &record.replace("success=1", "success=0"),
+            1
+        )
+        .is_err());
+        assert!(validate(
+            Workflow::Circle,
+            &record.replace("machine_y=5", "machine_y=NaN"),
+            1
+        )
+        .is_err());
+        assert!(validate(Workflow::Circle, &record.replace("machine_y=5\n", ""), 1).is_err());
     }
 
     #[test]
@@ -282,16 +201,19 @@ mod tests {
                 .unwrap()
                 .as_nanos()
         ));
-        begin(&path).unwrap();
-        let record = "DMC2_CIRCLE_RECORD_V1\nsequence=0\nkind=result\nreason=2\nx=1\ny=2\nmachine_x=1\nmachine_y=2\ndx=3\ndy=3\nspan_error=0\nbalance=0.0005\ndiameter=5\npass=1\n";
-        fs::write(path.join(REQUEST), record).unwrap();
-        commit(&path, 0, || panic!("result does not read a probe snapshot")).unwrap();
-        let state = fs::read_to_string(path.join(ACTIVE)).unwrap();
+        begin(&path, Workflow::Circle).unwrap();
+        let record = "DMC2_CIRCLE_RECORD_V2\nsequence=0\nkind=result\nreason=2\nx=1\ny=2\nmachine_x=1\nmachine_y=2\ndx=3\ndy=3\nspan_error=0\nbalance=0.0005\ndiameter=5\npass=1\n";
+        fs::write(path.join(Workflow::Circle.request()), record).unwrap();
+        commit(&path, Workflow::Circle, 0, || {
+            panic!("result does not read a probe snapshot")
+        })
+        .unwrap();
+        let state = fs::read_to_string(path.join(Workflow::Circle.active())).unwrap();
         let ledger =
             fs::read_to_string(path.join("circle").join(state.lines().next().unwrap())).unwrap();
         assert!(ledger.ends_with(&format!("BEGIN 0\n{record}END 0\n")));
-        assert!(commit(&path, 0, || unreachable!()).is_err());
-        assert!(commit(&path, 1, || unreachable!()).is_err());
+        assert!(commit(&path, Workflow::Circle, 0, || unreachable!()).is_err());
+        assert!(commit(&path, Workflow::Circle, 1, || unreachable!()).is_err());
         fs::remove_dir_all(&path).unwrap();
     }
 

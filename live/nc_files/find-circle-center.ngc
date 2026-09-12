@@ -6,15 +6,19 @@
 (DMC2 END)
 (Internal XY circle. Start with the ball clear inside the opening at probing Z.)
 (Physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
-(Sequence each pass: Y-, return, Y+, return, X-, return, X+, return.)
+(Each wall: fast touch, release backoff, slow re-touch, return to pass center.)
+(Wall order each pass: Y-, Y+, physical RIGHT / LinuxCNC -X, physical LEFT / LinuxCNC +X.)
 (Then move to the predicted center and repeat. No Z move or work-offset write.)
-(Every return uses the same configured feed and the previously clear pass center.)
+(Backoff and return use the slow feed toward the previously clear pass center.)
 (Operator recovery uses the existing Abort, Clear Fault and Pendant Mode controls.)
 (See ../../docs/circle-centering.md for capture, scoring and result definitions.)
 
-(Required operator settings. Zero means UNSET and refuses all motion.)
+(Required search setting. Zero means UNSET and refuses all motion.)
 #<search_mm> = 0
-#<feed_mm_min> = 0
+(SOURCE-VERIFIED published feed range: 50-200 mm/min; no separate optimum specified.)
+(PROPOSAL: published upper endpoint for coarse touch, lower endpoint for measurement.)
+#<coarse_feed_mm_min> = 200
+#<feed_mm_min> = 50
 (SOURCE-VERIFIED nominal 2.0 mm spherical ball; not the 6 mm shank.)
 #<ball_diameter_mm> = 2.0
 
@@ -24,8 +28,14 @@ o<cc_preview> if [#<_task> EQ 0]
     M2
 o<cc_preview> endif
 o<cc_missing_settings> if [[#<search_mm> LE 0] OR [#<feed_mm_min> LE 0]]
-    (ABORT,Circle settings are unset. Set search_mm and feed_mm_min in the file, then File Open again. Pendant Mode remains available.)
+    (ABORT,Circle search is unset or feed is invalid. Set search_mm and review the feeds, then File Open again. Pendant Mode remains available.)
 o<cc_missing_settings> endif
+o<cc_feed_order> if [#<coarse_feed_mm_min> LE #<feed_mm_min>]
+    (ABORT,The coarse feed must exceed the measurement feed. Review the two feeds and reopen the file; Pendant Mode remains available.)
+o<cc_feed_order> endif
+o<cc_feed_range> if [[#<feed_mm_min> LT 50] OR [#<coarse_feed_mm_min> GT 200]]
+    (ABORT,Circle feeds exceed the published 50-200 mm/min range. Review the feeds and reopen the file; Pendant Mode remains available.)
+o<cc_feed_range> endif
 o<cc_spindle_on> if [#<_spindle_on> NE 0]
     (ABORT,Circle probing requires the spindle off. Use Spindle Stop, then File Open and Run again; Pendant Mode remains available.)
 o<cc_spindle_on> endif
@@ -40,6 +50,7 @@ o<cc_rotation> endif
 M70
 G21 G90 G94 G17 G40 G80 G61.1
 #<_cc_feed> = #<feed_mm_min>
+#<_cc_coarse_feed> = #<coarse_feed_mm_min>
 #<_cc_search> = #<search_mm>
 #<_cc_step_x> = [1 / ABS[#<_ini[joint_0]scale>]]
 #<_cc_step_y> = [1 / ABS[#<_ini[joint_1]scale>]]
@@ -78,7 +89,7 @@ o<cc_contact_at_start> endif
 M190 P0 Q0
 M66 P5 L0
 (LOGOPEN,../tmp/output/circle-request.txt)
-(LOG,DMC2_CIRCLE_RECORD_V1)
+(LOG,DMC2_CIRCLE_RECORD_V2)
 (LOG,sequence=%d#<_cc_sequence>)
 (LOG,kind=start)
 (LOG,x=%.9f#<_cc_x>)
@@ -88,6 +99,7 @@ M66 P5 L0
 (LOG,offset_y=%.9f#<_cc_offset_y>)
 (LOG,offset_z=%.9f#<_cc_offset_z>)
 (LOG,feed=%.9f#<_cc_feed>)
+(LOG,coarse_feed=%.9f#<_cc_coarse_feed>)
 (LOG,search=%.9f#<_cc_search>)
 (LOG,ball_diameter=%.9f#<ball_diameter_mm>)
 (LOG,step_x=%.9f#<_cc_step_x>)
@@ -133,7 +145,7 @@ o<cc_loop> while [#<_cc_reason> EQ 0]
     #<ry> = SQRT[[#<dy> / 2] ** 2 + [#<cx> - #<_cc_x>] ** 2]
     #<diameter> = [#<rx> + #<ry> + 2 * #<_cc_radius>]
     (LOGOPEN,../tmp/output/circle-request.txt)
-    (LOG,DMC2_CIRCLE_RECORD_V1)
+    (LOG,DMC2_CIRCLE_RECORD_V2)
     (LOG,sequence=%d#<_cc_sequence>)
     (LOG,kind=sweep)
     (LOG,pass=%d#<_cc_pass>)
@@ -224,7 +236,7 @@ M2
 
 o<cc_result_record> sub
 (LOGOPEN,../tmp/output/circle-request.txt)
-(LOG,DMC2_CIRCLE_RECORD_V1)
+(LOG,DMC2_CIRCLE_RECORD_V2)
 (LOG,sequence=%d#<_cc_sequence>)
 o<cc_result_kind> if [#1 EQ 0]
     (LOG,kind=selection)
@@ -256,14 +268,41 @@ o<cc_save> endsub
 
 o<cc_touch> sub
     (Arguments: axis 0=X or 1=Y; direction -1 or +1.)
+    (Stage 0 is coarse location; stage 1 is the measurement used by circle geometry.)
+    #<stage> = 0
+    o<cc_contact_stages> repeat [2]
+        o<cc_stage_feed> if [#<stage> EQ 0]
+            #<contact_feed> = #<_cc_coarse_feed>
+        o<cc_stage_feed> else
+            #<contact_feed> = #<_cc_feed>
+        o<cc_stage_feed> endif
+        (X #2=-1: physical RIGHT / LinuxCNC -X; #2=+1: physical LEFT / LinuxCNC +X.)
+        o<cc_contact> call [#1] [#2] [#<stage>] [#<contact_feed>]
+        (Backoff X: from -X touch = physical LEFT / LinuxCNC +X; from +X touch = physical RIGHT / LinuxCNC -X.)
+        o<cc_release> call [#1] [#2]
+        #<stage> = [#<stage> + 1]
+    o<cc_contact_stages> endrepeat
+    (Only the final slow trigger remains in _cc_trigger_x/y/z at this point.)
+    (Finish returning on the same axis to the already-clear pass center.)
+    o<cc_return_axis> if [#1 EQ 0]
+        (Return from -X touch = physical LEFT / LinuxCNC +X; from +X touch = physical RIGHT / LinuxCNC -X.)
+        G1 X#<_cc_x> F#<_cc_feed>
+    o<cc_return_axis> else
+        G1 Y#<_cc_y> F#<_cc_feed>
+    o<cc_return_axis> endif
+    M66 P5 L0
+o<cc_touch> endsub
+
+o<cc_contact> sub
+    (Arguments: axis, signed direction, stage, commanded feed in mm/min.)
     o<cc_before_touch> if [#<_hal[motion.probe-input]> NE 0]
-        (ABORT,Probe is still active before the next circle contact. Abort then Pendant Mode; no further probe move was issued.)
+        (ABORT,Probe is still active before the next circle touch. Abort then Pendant Mode; no further probe move was issued.)
     o<cc_before_touch> endif
     o<cc_touch_axis> if [#1 EQ 0]
         (X #2=-1: physical RIGHT / LinuxCNC -X; #2=+1: physical LEFT / LinuxCNC +X.)
-        G38.3 X[#<_cc_x> + #2 * #<_cc_search>] F#<_cc_feed>
+        G38.3 X[#<_cc_x> + #2 * #<_cc_search>] F#4
     o<cc_touch_axis> else
-        G38.3 Y[#<_cc_y> + #2 * #<_cc_search>] F#<_cc_feed>
+        G38.3 Y[#<_cc_y> + #2 * #<_cc_search>] F#4
     o<cc_touch_axis> endif
     o<cc_captured> if [#5070 NE 1]
         (ABORT,CAPTURE FAILED - KEEP THE SETUP IN PLACE. No contact within the configured search. Abort then Pendant Mode; no return move was issued.)
@@ -276,9 +315,10 @@ o<cc_touch> sub
     #<my> = [#<_cc_trigger_y> + #<_cc_offset_y>]
     #<mz> = [#<_cc_trigger_z> + #<_cc_offset_z>]
     (LOGOPEN,../tmp/output/circle-request.txt)
-    (LOG,DMC2_CIRCLE_RECORD_V1)
+    (LOG,DMC2_CIRCLE_RECORD_V2)
     (LOG,sequence=%d#<_cc_sequence>)
     (LOG,kind=touch)
+    (LOG,stage=%d#3)
     (LOG,pass=%d#<_cc_pass>)
     (LOG,axis=%d#1)
     (LOG,direction=%d#2)
@@ -289,12 +329,15 @@ o<cc_touch> sub
     (LOG,machine_x=%.9f#<mx>)
     (LOG,machine_y=%.9f#<my>)
     (LOG,machine_z=%.9f#<mz>)
-    (LOG,feed=%.9f#<_cc_feed>)
+    (LOG,feed=%.9f#4)
     (LOGCLOSE)
     o<cc_save> call
-    (DEBUG,Captured IN1 trigger machine XYZ %.9f#<mx>,#<my>,#<mz> mm; durable record read back before release)
+    (DEBUG,Circle touch stage %d#3 at F#4: machine XYZ %.9f#<mx>,#<my>,#<mz> mm; saved and read back)
+o<cc_contact> endsub
 
+o<cc_release> sub
     (Release toward this pass center only if contact remains asserted.)
+    (Stop on release; do not return fully to center between the coarse and fine contacts.)
     o<cc_need_release> if [#<_hal[motion.probe-input]> NE 0]
         o<cc_release_axis> if [#1 EQ 0]
             (Return from -X touch = physical LEFT / LinuxCNC +X; from +X touch = physical RIGHT / LinuxCNC -X.)
@@ -306,15 +349,7 @@ o<cc_touch> sub
             (ABORT,Probe did not release on return toward the pass center. Captured contact is retained. Abort then Pendant Mode.)
         o<cc_released> endif
     o<cc_need_release> endif
-    (Finish returning on the same axis to the already-clear pass center.)
-    o<cc_return_axis> if [#1 EQ 0]
-        (Return from -X touch = physical LEFT / LinuxCNC +X; from +X touch = physical RIGHT / LinuxCNC -X.)
-        G1 X#<_cc_x> F#<_cc_feed>
-    o<cc_return_axis> else
-        G1 Y#<_cc_y> F#<_cc_feed>
-    o<cc_return_axis> endif
-    M66 P5 L0
-o<cc_touch> endsub
+o<cc_release> endsub
 
 o<cc_move> sub
     (Moving within the presumed circular opening: stop on unexpected contact.)

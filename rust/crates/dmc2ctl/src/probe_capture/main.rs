@@ -1,7 +1,10 @@
-//! Synchronous M190 persistence gate for find-circle-center.ngc.
+//! Synchronous M190 persistence gate for circle and surface probing.
 //! No motion, command channel, reset, restart, or fault-clear capability.
+mod schema;
 mod storage;
+mod surface;
 
+use schema::Workflow;
 use std::env;
 use std::ffi::{c_char, CString};
 use std::path::PathBuf;
@@ -12,6 +15,20 @@ extern "C" {
 }
 
 fn main() {
+    let args: Vec<_> = env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--export-surface") {
+        // Offline data export must never publish a live machine error.
+        let result = if args.len() == 2 {
+            surface::export(std::path::Path::new(&args[1]), false)
+        } else {
+            Err("use --export-surface <retained-surface-ledger.txt>".into())
+        };
+        if let Err(error) = result {
+            eprintln!("Surface export failed; retained contacts were not changed: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if let Err(error) = run() {
         let message = format!(
             "CAPTURE FAILED - KEEP THE SETUP IN PLACE. Abort, then Pendant Mode. Recording error: {error}"
@@ -35,12 +52,12 @@ fn main() {
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args == ["--help"] {
-        println!("dmc2-probe-capture is the synchronous M190 capture gate. P0 Q0 starts a new ledger; P1 Q<sequence> durably saves and reads back a staged record. No machine commands are issued.");
+        println!("dmc2-probe-capture is the synchronous M190 capture gate. Circle: P0 Q0 begins, P1 Q<sequence> saves. Surface: P2 Q0 begins, P3 Q<sequence> saves. Records are durably saved and read back. --export-surface <ledger> exports retained surface data without a machine connection. No machine commands are issued.");
         return Ok(());
     }
     if args.len() != 2 {
         return Err(
-            "M190 requires P<action> Q<sequence>; reopen find-circle-center.ngc".to_owned(),
+            "M190 requires P<action> Q<sequence>; reopen the selected probing script".to_owned(),
         );
     }
     let action = integer(&args[0])?;
@@ -56,9 +73,11 @@ fn run() -> Result<(), String> {
     }
     let output: PathBuf = root.join("tmp/output");
     match action {
-        0 if sequence == 0 => storage::begin(&output),
-        1 => storage::commit(&output, sequence, trigger_position),
-        _ => Err("unknown capture action; reopen find-circle-center.ngc".to_owned()),
+        0 if sequence == 0 => storage::begin(&output, Workflow::Circle),
+        1 => storage::commit(&output, Workflow::Circle, sequence, trigger_position),
+        2 if sequence == 0 => storage::begin(&output, Workflow::Surface),
+        3 => storage::commit(&output, Workflow::Surface, sequence, trigger_position),
+        _ => Err("unknown capture action; reopen the selected probing script".to_owned()),
     }
 }
 

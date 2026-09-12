@@ -1,0 +1,356 @@
+%
+(DMC2 SCRIPT 1)
+(DMC2 EFFECTS axis-motion;digital-output;coordinate-state;external-command)
+(DMC2 REQUIRES running-session;estop-clear;machine-on;interpreter-idle;all-homed)
+(DMC2 RECOVERY abort-task)
+(DMC2 END)
+(Shallow top contact map. Start clear just above the chosen high reference point.)
+(The reference plus clearance must clear everything along the selected XY region and entry path.)
+(Physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+(Measure reference, retract, scan rows with fast contact / release / slow re-touch.)
+(Every XY transfer is at the same clearance plane. No progressive downward following.)
+(A missing grid contact is unmeasured below the fixed search floor, never a fabricated height.)
+(Ends at the last grid point at clearance. No work-offset or tool-offset writes.)
+(Operator recovery uses Abort, Clear Fault and Pendant Mode. See ../../docs/surface-mapping.md.)
+
+(Required region offsets from the starting XY in signed LinuxCNC mm; zero span is UNSET.)
+(X offset positive = physical LEFT / LinuxCNC +X; negative = physical RIGHT / LinuxCNC -X.)
+#<x_min_offset_mm> = 0
+#<x_max_offset_mm> = 0
+#<y_min_offset_mm> = 0
+#<y_max_offset_mm> = 0
+(Required grid spacing and mounted usable reach. Zero is UNSET.)
+#<spacing_mm> = 0
+(Usable reach is clearance from the ball bottom to the first interfering part over this region.)
+(The nominal stylus drawing is not a measurement of the mounted clearance.)
+#<usable_reach_mm> = 0
+(PROPOSAL - NOT ACTUAL: shallow layer requested by operator, with a few mm reserve.)
+#<max_drop_mm> = 3
+#<reference_search_mm> = 3
+#<clearance_mm> = 2
+#<reach_reserve_mm> = 2
+(SOURCE-VERIFIED feed range endpoints. No separately specified optimum was found.)
+#<coarse_feed_mm_min> = 200
+#<fine_feed_mm_min> = 50
+#<ball_diameter_mm> = 2
+
+o<sm_preview> if [#<_task> EQ 0]
+    (PREVIEW,stop)
+    M2
+o<sm_preview> endif
+o<sm_region> if [[#<x_max_offset_mm> LE #<x_min_offset_mm>] OR [#<y_max_offset_mm> LE #<y_min_offset_mm>]]
+    (ABORT,Surface region is unset or reversed. Set its signed X/Y extents, then File Open again. Pendant Mode remains available.)
+o<sm_region> endif
+o<sm_settings> if [[#<spacing_mm> LE 0] OR [#<usable_reach_mm> LE 0]]
+    (ABORT,Set grid spacing and mounted usable probe reach, then File Open again. No motion was issued; Pendant Mode remains available.)
+o<sm_settings> endif
+o<sm_depth_positive> if [[#<max_drop_mm> LE 0] OR [#<reference_search_mm> LE 0] OR [#<clearance_mm> LE 0] OR [#<reach_reserve_mm> LE 0]]
+    (ABORT,Search, drop, clearance and reach reserve must be positive. Review the settings and reopen the file; Pendant Mode remains available.)
+o<sm_depth_positive> endif
+#<reach_budget> = [#<usable_reach_mm> - #<reach_reserve_mm>]
+o<sm_reach> if [[#<max_drop_mm> GT #<reach_budget>] OR [#<reference_search_mm> GT #<reach_budget>]]
+    (ABORT,Requested descent exceeds mounted usable reach minus reserve. The script has not clipped the range. Review the settings and reopen; Pendant Mode remains available.)
+o<sm_reach> endif
+o<sm_feed> if [[#<fine_feed_mm_min> LT 50] OR [#<coarse_feed_mm_min> GT 200] OR [#<coarse_feed_mm_min> LE #<fine_feed_mm_min>]]
+    (ABORT,Use increasing fine/coarse feeds within the published 50-200 mm/min range. Review settings and reopen; Pendant Mode remains available.)
+o<sm_feed> endif
+o<sm_spindle> if [#<_spindle_on> NE 0]
+    (ABORT,Surface probing requires the spindle off. Use Spindle Stop and reopen the file; Pendant Mode remains available.)
+o<sm_spindle> endif
+M66 P3 L0
+o<sm_spindle_report> if [#5399 NE 0]
+    (ABORT,The spindle monitor reports running. Use Spindle Stop before surface probing; Pendant Mode remains available.)
+o<sm_spindle_report> endif
+o<sm_rotation> if [#[5230 + [#5220 - 1] * 20] NE 0]
+    (ABORT,Surface mapping requires an unrotated work frame. Select that frame and reopen; no offsets have been changed.)
+o<sm_rotation> endif
+
+M70
+G21 G90 G94 G17 G40 G80 G61.1
+#<_sm_ox> = [#<_abs_x> - #<_x>]
+#<_sm_oy> = [#<_abs_y> - #<_y>]
+#<_sm_oz> = [#<_abs_z> - #<_z>]
+#<_sm_start_x> = #<_x>
+#<_sm_start_y> = #<_y>
+#<_sm_start_z> = #<_z>
+#<_sm_xmin> = [#<_x> + #<x_min_offset_mm>]
+#<_sm_xmax> = [#<_x> + #<x_max_offset_mm>]
+#<_sm_ymin> = [#<_y> + #<y_min_offset_mm>]
+#<_sm_ymax> = [#<_y> + #<y_max_offset_mm>]
+#<_sm_spacing> = #<spacing_mm>
+#<_sm_coarse> = #<coarse_feed_mm_min>
+#<_sm_fine> = #<fine_feed_mm_min>
+(Half the configured Z command increment defines the clearance comparison cell.)
+#<_sm_z_cell> = [0.5 / ABS[#<_ini[joint_2]scale>]]
+#<_sm_nx> = FUP[[#<_sm_xmax> - #<_sm_xmin>] / #<_sm_spacing>]
+#<_sm_ny> = FUP[[#<_sm_ymax> - #<_sm_ymin>] / #<_sm_spacing>]
+#<columns> = [#<_sm_nx> + 1]
+#<rows> = [#<_sm_ny> + 1]
+#<points> = [#<columns> * #<rows>]
+(Reserve two contact records per point, reference contacts, start and result in signed decimal sequence storage.)
+o<sm_record_capacity> if [[2 * #<points> + 4] GT 2147483647]
+    (ABORT,Grid exceeds capture sequence storage. Increase spacing or reduce the region and reopen; Pendant Mode remains available.)
+o<sm_record_capacity> endif
+#<bx> = [[[#<_sm_xmin> + #<_sm_ox>] LE #<_ini[axis_x]min_limit>] OR [[#<_sm_xmax> + #<_sm_ox>] GE #<_ini[axis_x]max_limit>]]
+#<by> = [[[#<_sm_ymin> + #<_sm_oy>] LE #<_ini[axis_y]min_limit>] OR [[#<_sm_ymax> + #<_sm_oy>] GE #<_ini[axis_y]max_limit>]]
+#<lowest> = [#<_sm_start_z> + #<_sm_oz> - #<reference_search_mm> - #<max_drop_mm>]
+#<highest> = [#<_sm_start_z> + #<_sm_oz> + #<clearance_mm>]
+o<sm_bounds> if [#<bx> OR #<by> OR [#<lowest> LE #<_ini[axis_z]min_limit>] OR [#<highest> GE #<_ini[axis_z]max_limit>]]
+    (ABORT,The region or possible reference/drop/clearance envelope reaches a configured travel boundary. Review settings and reopen; no range was clipped. Pendant Mode remains available.)
+o<sm_bounds> endif
+#<_sm_sequence> = 0
+#<_sm_point> = -1
+#<_sm_row> = -1
+#<_sm_column> = -1
+#<_sm_hits> = 0
+#<_sm_misses> = 0
+(P1 selects the already-wired XYZ probe IN1; it does not power the probe.)
+M64 P1
+M66 P5 L0
+o<sm_select> if [#5399 NE 1]
+    (ABORT,XYZ probe selection was not reported. Abort then Pendant Mode; review the IN1 selection indication before rerunning.)
+o<sm_select> endif
+o<sm_start_contact> if [#<_hal[motion.probe-input]> NE 0]
+    (ABORT,The probe is already touching. Abort then use Pendant Mode to place it clear above the high reference point.)
+o<sm_start_contact> endif
+M190 P2 Q0
+M66 P5 L0
+(LOGOPEN,../tmp/output/surface-request.txt)
+(LOG,DMC2_SURFACE_RECORD_V1)
+(LOG,sequence=%d#<_sm_sequence>)
+(LOG,kind=start)
+(LOG,x=%.9f#<_sm_start_x>)
+(LOG,y=%.9f#<_sm_start_y>)
+(LOG,z=%.9f#<_sm_start_z>)
+(LOG,offset_x=%.9f#<_sm_ox>)
+(LOG,offset_y=%.9f#<_sm_oy>)
+(LOG,offset_z=%.9f#<_sm_oz>)
+(LOG,x_min=%.9f#<_sm_xmin>)
+(LOG,x_max=%.9f#<_sm_xmax>)
+(LOG,y_min=%.9f#<_sm_ymin>)
+(LOG,y_max=%.9f#<_sm_ymax>)
+(LOG,spacing=%.9f#<_sm_spacing>)
+(LOG,columns=%d#<columns>)
+(LOG,rows=%d#<rows>)
+(LOG,reference_search=%.9f#<reference_search_mm>)
+(LOG,max_drop=%.9f#<max_drop_mm>)
+(LOG,clearance=%.9f#<clearance_mm>)
+(LOG,usable_reach=%.9f#<usable_reach_mm>)
+(LOG,reach_reserve=%.9f#<reach_reserve_mm>)
+(LOG,feed=%.9f#<_sm_fine>)
+(LOG,coarse_feed=%.9f#<_sm_coarse>)
+(LOG,ball_diameter=%.9f#<ball_diameter_mm>)
+(LOGCLOSE)
+o<sm_save> call
+
+(Reference at current XY: physical Z down / LinuxCNC -Z.)
+#<_sm_floor> = [#<_sm_start_z> - #<reference_search_mm>]
+o<sm_seek> call [#<_sm_coarse>] [0]
+o<sm_reference_missing> if [#<_sm_hit> NE 1]
+    (ABORT,CAPTURE FAILED - KEEP THE SETUP IN PLACE. No high-reference contact within the configured search. Abort then Pendant Mode; no return was issued.)
+o<sm_reference_missing> endif
+o<sm_release> call [#<_sm_start_z>]
+o<sm_seek> call [#<_sm_fine>] [1]
+o<sm_reference_fine_missing> if [#<_sm_hit> NE 1]
+    (ABORT,CAPTURE FAILED - KEEP THE SETUP IN PLACE. The reference slow re-touch failed. Abort then Pendant Mode; coarse data is not used as a surface height.)
+o<sm_reference_fine_missing> endif
+#<_sm_reference> = #<_sm_tz>
+#<_sm_clear> = [#<_sm_reference> + #<clearance_mm>]
+#<_sm_floor> = [#<_sm_reference> - #<max_drop_mm>]
+o<sm_retract> call
+
+#<_sm_point> = 0
+#<_sm_row> = 0
+o<sm_rows> while [#<_sm_row> LE #<_sm_ny>]
+    #<target_y> = [#<_sm_ymin> + #<_sm_row> * #<_sm_spacing>]
+    o<sm_last_y> if [#<_sm_row> EQ #<_sm_ny>]
+        #<target_y> = #<_sm_ymax>
+    o<sm_last_y> endif
+    #<walk> = 0
+    o<sm_columns> while [#<walk> LE #<_sm_nx>]
+        #<_sm_column> = #<walk>
+        o<sm_reverse_row> if [[#<_sm_row> MOD 2] EQ 1]
+            #<_sm_column> = [#<_sm_nx> - #<walk>]
+        o<sm_reverse_row> endif
+        #<target_x> = [#<_sm_xmin> + #<_sm_column> * #<_sm_spacing>]
+        o<sm_last_x> if [#<_sm_column> EQ #<_sm_nx>]
+            #<target_x> = #<_sm_xmax>
+        o<sm_last_x> endif
+        (Even rows increase X: physical LEFT / LinuxCNC +X; odd rows decrease: physical RIGHT / LinuxCNC -X.)
+        (Entry X also follows increasing = physical LEFT / LinuxCNC +X; decreasing = physical RIGHT / LinuxCNC -X.)
+        o<sm_move> call [#<target_x>] [#<target_y>] [#<_sm_clear>]
+        o<sm_seek> call [#<_sm_coarse>] [0]
+        o<sm_point_contact> if [#<_sm_hit> EQ 1]
+            o<sm_release> call [#<_sm_clear>]
+            o<sm_seek> call [#<_sm_fine>] [1]
+            o<sm_point_fine_missing> if [#<_sm_hit> NE 1]
+                (ABORT,CAPTURE FAILED - KEEP THE SETUP IN PLACE. Coarse contact was found but slow re-touch failed. Abort then Pendant Mode; this point has no accepted height.)
+            o<sm_point_fine_missing> endif
+            #<_sm_hits> = [#<_sm_hits> + 1]
+        o<sm_point_contact> else
+            o<sm_miss_record> call
+            #<_sm_misses> = [#<_sm_misses> + 1]
+        o<sm_point_contact> endif
+        o<sm_retract> call
+        #<_sm_point> = [#<_sm_point> + 1]
+        #<walk> = [#<walk> + 1]
+    o<sm_columns> endwhile
+    (Next row increases LinuxCNC Y; all lateral travel remains at the reference clearance plane.)
+    #<_sm_row> = [#<_sm_row> + 1]
+o<sm_rows> endwhile
+
+M65 P1
+M66 P5 L0
+o<sm_selection_release> if [#5399 NE 0]
+    (ABORT,Grid ended but program probe selection did not clear. Use Abort then Pendant Mode; captures remain in tmp/output/surface.)
+o<sm_selection_release> endif
+(LOGOPEN,../tmp/output/surface-request.txt)
+(LOG,DMC2_SURFACE_RECORD_V1)
+(LOG,sequence=%d#<_sm_sequence>)
+(LOG,kind=result)
+(LOG,points=%d#<_sm_point>)
+(LOG,hits=%d#<_sm_hits>)
+(LOG,misses=%d#<_sm_misses>)
+(LOG,reference_work_z=%.9f#<_sm_reference>)
+(LOG,clearance_work_z=%.9f#<_sm_clear>)
+(LOG,floor_work_z=%.9f#<_sm_floor>)
+(LOG,final_work_x=%.9f#<_x>)
+(LOG,final_work_y=%.9f#<_y>)
+(LOG,final_work_z=%.9f#<_z>)
+(LOGCLOSE)
+o<sm_save> call
+(DEBUG,Surface records: %d#<_sm_hits> measured, %d#<_sm_misses> unmeasured. Ledger, CSV and metadata in tmp/output/surface.)
+M72
+M2
+
+o<sm_save> sub
+    M190 P3 Q#<_sm_sequence>
+    M66 P5 L0
+    #<_sm_sequence> = [#<_sm_sequence> + 1]
+o<sm_save> endsub
+
+o<sm_seek> sub
+    (Arguments: commanded feed, stage 0 coarse or 1 fine. Physical DOWN / LinuxCNC -Z.)
+    o<sm_seek_active> if [#<_hal[motion.probe-input]> NE 0]
+        (ABORT,Probe remains active before a downward touch. Abort then Pendant Mode; no new probe move was issued.)
+    o<sm_seek_active> endif
+    G38.3 Z#<_sm_floor> F#1
+    #<_sm_hit> = #5070
+    o<sm_seek_hit> if [#<_sm_hit> EQ 1]
+        #<_sm_tx> = #5061
+        #<_sm_ty> = #5062
+        #<_sm_tz> = #5063
+        #<mx> = [#<_sm_tx> + #<_sm_ox>]
+        #<my> = [#<_sm_ty> + #<_sm_oy>]
+        #<mz> = [#<_sm_tz> + #<_sm_oz>]
+        (LOGOPEN,../tmp/output/surface-request.txt)
+        (LOG,DMC2_SURFACE_RECORD_V1)
+        (LOG,sequence=%d#<_sm_sequence>)
+        (LOG,kind=touch)
+        (LOG,point=%d#<_sm_point>)
+        (LOG,row=%d#<_sm_row>)
+        (LOG,column=%d#<_sm_column>)
+        (LOG,stage=%d#2)
+        (LOG,axis=2)
+        (LOG,direction=-1)
+        (LOG,success=%d#5070)
+        (LOG,work_x=%.9f#<_sm_tx>)
+        (LOG,work_y=%.9f#<_sm_ty>)
+        (LOG,work_z=%.9f#<_sm_tz>)
+        (LOG,machine_x=%.9f#<mx>)
+        (LOG,machine_y=%.9f#<my>)
+        (LOG,machine_z=%.9f#<mz>)
+        (LOG,feed=%.9f#1)
+        (LOGCLOSE)
+        o<sm_save> call
+        (DEBUG,Surface point %d#<_sm_point> stage %d#2: machine trigger %.9f#<mx>,#<my>,#<mz> mm; saved and read back)
+    o<sm_seek_hit> endif
+o<sm_seek> endsub
+
+o<sm_release> sub
+    (Physical UP / LinuxCNC +Z; stop on release before a slow re-touch or full retract.)
+    o<sm_release_needed> if [#<_hal[motion.probe-input]> NE 0]
+        G38.5 Z#1 F#<_sm_fine>
+        o<sm_release_failed> if [#5070 NE 1]
+            (ABORT,Probe did not release before its clear return height. Captures are retained. Abort then Pendant Mode; no sideways move was issued.)
+        o<sm_release_failed> endif
+    o<sm_release_needed> endif
+o<sm_release> endsub
+
+o<sm_retract> sub
+    o<sm_release> call [#<_sm_clear>]
+    (Retract physical UP / LinuxCNC +Z; X and Y remain unchanged.)
+    (No X change; if numerical X increases = physical LEFT / LinuxCNC +X, decreases = physical RIGHT / LinuxCNC -X.)
+    o<sm_move> call [#<_x>] [#<_y>] [#<_sm_clear>]
+o<sm_retract> endsub
+
+o<sm_move> sub
+    (Arguments: work X,Y,Z; use only after release, always transfer XY at the common clearance.)
+    #<from_x> = #<_x>
+    #<from_y> = #<_y>
+    #<from_z> = #<_z>
+    #<z_clear> = [[ABS[#<from_z> - #<_sm_clear>] LE #<_sm_z_cell>] AND [#3 EQ #<_sm_clear>]]
+    o<sm_transfer_height> if [[[#1 NE #<from_x>] OR [#2 NE #<from_y>]] AND [#<z_clear> EQ 0]]
+        (ABORT,XY transfer was requested below the reference clearance plane. Abort then Pendant Mode; no sideways move was issued.)
+    o<sm_transfer_height> endif
+    o<sm_move_needed> if [[#1 NE #<from_x>] OR [#2 NE #<from_y>] OR [#3 NE #<from_z>]]
+        (X increasing = physical LEFT / LinuxCNC +X; X decreasing = physical RIGHT / LinuxCNC -X.)
+        G38.3 X#1 Y#2 Z#3 F#<_sm_coarse>
+        o<sm_obstructed> if [#5070 NE 0]
+            o<sm_obstruction_record> call [#<from_x>] [#<from_y>] [#<from_z>] [#1] [#2] [#3]
+            (ABORT,Unexpected contact during a clearance transfer. KEEP THE SETUP IN PLACE. Obstruction trigger is retained; Abort then Pendant Mode. This is not a surface sample.)
+        o<sm_obstructed> endif
+    o<sm_move_needed> endif
+o<sm_move> endsub
+
+o<sm_miss_record> sub
+    #<mx> = [#<_x> + #<_sm_ox>]
+    #<my> = [#<_y> + #<_sm_oy>]
+    #<mz> = [#<_sm_floor> + #<_sm_oz>]
+    (LOGOPEN,../tmp/output/surface-request.txt)
+    (LOG,DMC2_SURFACE_RECORD_V1)
+    (LOG,sequence=%d#<_sm_sequence>)
+    (LOG,kind=miss)
+    (LOG,point=%d#<_sm_point>)
+    (LOG,row=%d#<_sm_row>)
+    (LOG,column=%d#<_sm_column>)
+    (LOG,work_x=%.9f#<_x>)
+    (LOG,work_y=%.9f#<_y>)
+    (LOG,floor_work_z=%.9f#<_sm_floor>)
+    (LOG,machine_x=%.9f#<mx>)
+    (LOG,machine_y=%.9f#<my>)
+    (LOG,floor_machine_z=%.9f#<mz>)
+    (LOG,feed=%.9f#<_sm_coarse>)
+    (LOGCLOSE)
+    o<sm_save> call
+o<sm_miss_record> endsub
+
+o<sm_obstruction_record> sub
+    #<wx> = #5061
+    #<wy> = #5062
+    #<wz> = #5063
+    #<mx> = [#<wx> + #<_sm_ox>]
+    #<my> = [#<wy> + #<_sm_oy>]
+    #<mz> = [#<wz> + #<_sm_oz>]
+    (LOGOPEN,../tmp/output/surface-request.txt)
+    (LOG,DMC2_SURFACE_RECORD_V1)
+    (LOG,sequence=%d#<_sm_sequence>)
+    (LOG,kind=obstruction)
+    (LOG,success=%d#5070)
+    (LOG,work_x=%.9f#<wx>)
+    (LOG,work_y=%.9f#<wy>)
+    (LOG,work_z=%.9f#<wz>)
+    (LOG,machine_x=%.9f#<mx>)
+    (LOG,machine_y=%.9f#<my>)
+    (LOG,machine_z=%.9f#<mz>)
+    (LOG,from_x=%.9f#1)
+    (LOG,from_y=%.9f#2)
+    (LOG,from_z=%.9f#3)
+    (LOG,target_x=%.9f#4)
+    (LOG,target_y=%.9f#5)
+    (LOG,target_z=%.9f#6)
+    (LOG,feed=%.9f#<_sm_coarse>)
+    (LOGCLOSE)
+    o<sm_save> call
+o<sm_obstruction_record> endsub
+%
