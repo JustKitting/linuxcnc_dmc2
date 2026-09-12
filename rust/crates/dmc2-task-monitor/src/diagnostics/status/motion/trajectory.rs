@@ -13,7 +13,7 @@ use super::super::super::catalog::{
 use super::super::super::category;
 use super::super::super::report::{DiagnosticReport, Severity};
 use super::super::super::validation::{
-    account_open, check_finite, check_finite_f32_array, check_i32_range, check_pose, check_u32_flag,
+    account_open, check_finite, check_finite_f32, check_i32_range, check_pose, check_u32_flag,
 };
 
 pub(super) fn evaluate(snapshot: &NativeSnapshot, report: &mut DiagnosticReport) {
@@ -86,10 +86,10 @@ pub(super) fn evaluate(snapshot: &NativeSnapshot, report: &mut DiagnosticReport)
         report,
         "trajectory.active_queue",
         trajectory.active_queue,
-        0,
+        -1,
         i32::MAX,
-        "nonnegative_count",
-        "active trajectory queue depth is negative",
+        "linuxcnc_2_9_10_active_depth",
+        "active trajectory queue depth is below LinuxCNC 2.9.10's minimum value of -1",
     );
     check_u32_flag(
         report,
@@ -188,11 +188,25 @@ pub(super) fn evaluate(snapshot: &NativeSnapshot, report: &mut DiagnosticReport)
         "feed-hold state is neither false nor true",
     );
 
-    check_finite_f32_array(
+    account_open(
         report,
-        "trajectory.state_tag.fields_float",
-        &trajectory.state_tag.fields_float,
+        "trajectory.state_tag.fields_float[0]",
+        "linuxcnc_2_9_10_unused_float_line_number_slot",
     );
+    for (index, value) in trajectory
+        .state_tag
+        .fields_float
+        .iter()
+        .copied()
+        .enumerate()
+        .skip(1)
+    {
+        check_finite_f32(
+            report,
+            format!("trajectory.state_tag.fields_float[{index}]"),
+            value,
+        );
+    }
     account_open(
         report,
         "trajectory.state_tag.fields",

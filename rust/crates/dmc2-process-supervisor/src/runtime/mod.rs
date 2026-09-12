@@ -12,7 +12,7 @@ use dmc2_diagnostics::RecoveryDisplay;
 use crate::backtrace::{self, BacktraceEvidence};
 use crate::catalog::{BacktraceKind, Ownership, ProcessRole};
 use crate::cli::Invocation;
-use crate::event::{encode_arguments, Event};
+use crate::event::{encode_arguments, Event, EventTime};
 use crate::journal::{FailureTracker, Journal};
 use crate::limits::CoreDumpPlan;
 use crate::{process, wait};
@@ -192,7 +192,7 @@ fn supervise(invocation: Invocation) -> Result<u8, SupervisorError> {
         }
     };
 
-    let exit_ns = unix_ns_or_zero();
+    let exit_ns = EventTime::from(unix_ns());
     let backtrace = match invocation.role.backtrace() {
         BacktraceKind::None => BacktraceEvidence::NotApplicable,
         BacktraceKind::LinuxCncTask => {
@@ -256,12 +256,12 @@ fn append_after_spawn(
 }
 
 fn base_event(kind: &'static str, supervisor_pid: u32, role: ProcessRole) -> Event {
-    base_event_at(kind, unix_ns_or_zero(), supervisor_pid, role)
+    base_event_at(kind, unix_ns(), supervisor_pid, role)
 }
 
 fn base_event_at(
     kind: &'static str,
-    unix_ns: u128,
+    unix_ns: impl Into<EventTime>,
     supervisor_pid: u32,
     role: ProcessRole,
 ) -> Event {
@@ -291,8 +291,4 @@ fn unix_ns() -> Result<u128, SystemTimeError> {
     SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
-}
-
-fn unix_ns_or_zero() -> u128 {
-    unix_ns().unwrap_or(0)
 }

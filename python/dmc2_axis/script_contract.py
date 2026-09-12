@@ -79,6 +79,7 @@ class ScriptContract:
 
 class ScriptLoaderFailureKind(Enum):
     REQUEST_PATH_INVALID = "SCRIPT_REQUEST_PATH_INVALID"
+    PATH_IDENTITY_UNAVAILABLE = "SCRIPT_PATH_IDENTITY_UNAVAILABLE"
     INSPECTOR_UNAVAILABLE = "SCRIPT_INSPECTOR_UNAVAILABLE"
     INSPECTION_TIMED_OUT = "SCRIPT_INSPECTION_TIMED_OUT"
     INSPECTION_REJECTED = "SCRIPT_INSPECTION_REJECTED"
@@ -116,22 +117,21 @@ def _path_text(value: object) -> str:
 
 
 def same_machine_file(left: object, right: object) -> bool:
-    """Compare two existing paths by identity, with a lexical fallback."""
+    """Compare existing file identities; an unreadable identity is an error."""
     if left is None or right is None:
         return False
-    try:
-        left_path = _path_text(left)
-        right_path = _path_text(right)
-    except ScriptLoaderFailure:
-        return False
+    left_path = _path_text(left)
+    right_path = _path_text(right)
     if not left_path or not right_path:
         return False
     try:
         return os.path.samefile(left_path, right_path)
-    except OSError:
-        return os.fsencode(os.path.realpath(left_path)) == os.fsencode(
-            os.path.realpath(right_path)
-        )
+    except OSError as error:
+        raise ScriptLoaderFailure(
+            ScriptLoaderFailureKind.PATH_IDENTITY_UNAVAILABLE,
+            f"cannot compare {left_path!r} with {right_path!r}: {error}; "
+            "restore access to the files and reopen the program through AXIS File Open",
+        ) from error
 
 
 def _protocol_failure(detail: object) -> ScriptLoaderFailure:

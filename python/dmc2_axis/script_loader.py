@@ -110,6 +110,8 @@ class AxisScriptLoader:
 
         try:
             result = self.stock_open_file_name(contract.path)
+            axis_loaded_path = self.namespace.get("loaded_file")
+            matching_file = same_machine_file(contract.path, axis_loaded_path)
         except Exception as error:
             self._present(
                 AxisUiFaultKind.SCRIPT_LOAD_SUBMISSION_FAILED,
@@ -120,8 +122,7 @@ class AxisScriptLoader:
             )
             return ""
 
-        axis_loaded_path = self.namespace.get("loaded_file")
-        if not same_machine_file(contract.path, axis_loaded_path):
+        if not matching_file:
             self._present(
                 AxisUiFaultKind.SCRIPT_LOAD_SUBMISSION_FAILED,
                 ScriptLoaderFailure(
@@ -174,26 +175,12 @@ def install_axis_script_loader(namespace: Mapping[str, object]) -> AxisScriptLoa
     if not str(tk.call("info", "commands", "open_file_name")):
         raise RuntimeError("AXIS's stock open_file_name Tcl command is unavailable")
     callback_command = root_window.register(loader)
-    renamed = False
-    try:
-        tk.call("rename", "open_file_name", stock_tcl_command)
-        renamed = True
-        tk.call("interp", "alias", "", "open_file_name", "", callback_command)
-        commands.open_file_name = loader
-    except Exception:
-        if renamed:
-            try:
-                if str(tk.call("info", "commands", "open_file_name")):
-                    tk.call("rename", "open_file_name", "")
-                tk.call("rename", stock_tcl_command, "open_file_name")
-            except Exception:
-                pass
-        try:
-            root_window.deletecommand(callback_command)
-        except Exception:
-            pass
-        commands.open_file_name = stock_open_file_name
-        raise
+    # Installation failure propagates to the typed bootstrap error. Run/Step
+    # remain blocked until installation finishes; never restore an uninspected
+    # stock loader after a partial failure. Recovery controls are independent.
+    commands.open_file_name = loader
+    tk.call("rename", "open_file_name", stock_tcl_command)
+    tk.call("interp", "alias", "", "open_file_name", "", callback_command)
 
     live_plotter._dmc2_axis_script_loader = loader
     live_plotter._dmc2_stock_open_file_name = stock_open_file_name

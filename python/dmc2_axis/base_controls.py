@@ -3,11 +3,14 @@
 from __future__ import annotations
 
 from collections.abc import Mapping
+from pathlib import Path
 
 from .constants import (
     CLEAR_FAULT_OPERATION_ID,
     CLEAR_FAULT_WIDGET_PATH,
     CONTROLLER_FAULT_PIN,
+    GO_TO_HOME_OPERATION_ID,
+    GO_TO_HOME_WIDGET_PATH,
     HOME_ALL_OPERATION_ID,
     HOME_ALL_WIDGET_PATH,
     HOMING_STATE_POLL_MILLISECONDS,
@@ -36,6 +39,9 @@ class HomingSectionBinding:
         known_indicator_path: str,
         unknown_indicator_path: str,
         clear_fault_widget_path: str,
+        go_to_home_widget_path: str,
+        status,
+        linuxcnc_module,
     ) -> None:
         self.component = component
         self.namespace = namespace
@@ -43,6 +49,9 @@ class HomingSectionBinding:
         self.known_indicator_path = known_indicator_path
         self.unknown_indicator_path = unknown_indicator_path
         self.clear_fault_widget_path = clear_fault_widget_path
+        self.go_to_home_widget_path = go_to_home_widget_path
+        self.status = status
+        self.linuxcnc_module = linuxcnc_module
         self.poll_after_id = None
         self.refresh_error_notice = RecoveryUiNotice(namespace)
 
@@ -75,6 +84,27 @@ class HomingSectionBinding:
                 "#ef3030" if self._pin(CONTROLLER_FAULT_PIN) else "#ececec",
                 "-state",
                 "normal",
+            )
+            self.status.poll()
+            joint_count = int(self.status.joints)
+            all_homed = (
+                joint_count > 0
+                and len(self.status.homed[:joint_count]) == joint_count
+                and all(bool(value) for value in self.status.homed[:joint_count])
+            )
+            ready_to_return = (
+                all_homed
+                and int(self.status.interp_state)
+                == int(self.linuxcnc_module.INTERP_IDLE)
+                and int(self.status.task_state) == int(self.linuxcnc_module.STATE_ON)
+                and bool(self.status.enabled)
+                and not bool(self.status.estop)
+            )
+            self.root_window.tk.call(
+                self.go_to_home_widget_path,
+                "configure",
+                "-state",
+                "normal" if ready_to_return else "disabled",
             )
         except Exception as error:
             if not self.refresh_error_notice.is_visible():
@@ -212,6 +242,27 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
         or operation.ui_target != HOME_ALL_WIDGET_PATH
     ):
         raise RuntimeError(f"Operation has invalid Home All contract: {operation!r}")
+    go_to_home_operation = operations.get(GO_TO_HOME_OPERATION_ID)
+    if go_to_home_operation is None:
+        raise RuntimeError(f"Operation is missing: {GO_TO_HOME_OPERATION_ID}")
+    if (
+        go_to_home_operation.kind != "program"
+        or go_to_home_operation.driver != "linuxcnc.program"
+        or go_to_home_operation.ui_scope != "manual-tab-homing"
+        or go_to_home_operation.ui_target != GO_TO_HOME_WIDGET_PATH
+        or go_to_home_operation.effects != ("axis-motion",)
+        or go_to_home_operation.prerequisites
+        != (
+            "running-session",
+            "estop-clear",
+            "machine-on",
+            "interpreter-idle",
+            "all-homed",
+        )
+    ):
+        raise RuntimeError(
+            f"Operation has invalid Go to Home contract: {go_to_home_operation!r}"
+        )
     clear_fault_operation = operations.get(CLEAR_FAULT_OPERATION_ID)
     if clear_fault_operation is None:
         raise RuntimeError(f"Operation is missing: {CLEAR_FAULT_OPERATION_ID}")
@@ -230,10 +281,48 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
     section_path = f"{tabs_manual}.dmc2_homing"
     section_label_path = f"{tabs_manual}.dmc2_homing_label"
     home_widget_path = f"{section_path}.home_all"
+    go_to_home_widget_path = f"{section_path}.go_to_home"
     known_indicator_path = f"{section_path}.known_led"
     unknown_indicator_path = f"{section_path}.unknown_led"
     if home_widget_path != HOME_ALL_WIDGET_PATH:
         raise RuntimeError(f"Unexpected AXIS Manual-tab path: {home_widget_path!r}")
+    if go_to_home_widget_path != GO_TO_HOME_WIDGET_PATH:
+        raise RuntimeError(
+            f"Unexpected AXIS Go to Home path: {go_to_home_widget_path!r}"
+        )
+
+    project_root = Path(str(namespace["rcfile"])).resolve().parents[2]
+    go_to_home_path = project_root / go_to_home_operation.target
+    go_to_home_error_notice = RecoveryUiNotice(namespace)
+
+    def go_to_home_command() -> None:
+        # File Open and Run are the installed DMC2 typed loader and guarded
+        # execution commands. They retain their own readable recovery notices.
+        try:
+            commands = namespace["commands"]
+            commands.open_file_name(str(go_to_home_path))
+            namespace["c"].wait_complete()
+            loader = getattr(live_plotter, "_dmc2_axis_script_loader", None)
+            if loader is None:
+                raise RuntimeError(
+                    "typed script loader is unavailable; Go to Home was not run"
+                )
+            if loader.contract_for_loaded_path(go_to_home_path) is None:
+                # The loader already presented the exact inspection or load
+                # failure and its recovery route.
+                return
+            commands.task_run()
+        except Exception as error:
+            go_to_home_error_notice.present(
+                fault=AxisUiFault(
+                    AxisUiFaultKind.PROGRAM_RUN_SUBMISSION_FAILED,
+                    f"Go to Home integration failed before motion submission: {error}",
+                )
+            )
+            return
+        go_to_home_error_notice.clear()
+
+    go_to_home_tcl_command = root_window.register(go_to_home_command)
 
     stock_home_button = namespace["widgets"].homebutton
     stock_home_path = str(stock_home_button)
@@ -261,6 +350,22 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
         "-state",
         str(stock_home_button.cget("state")),
     )
+    tk.call(
+        "button",
+        go_to_home_widget_path,
+        "-command",
+        go_to_home_tcl_command,
+        "-text",
+        go_to_home_operation.label,
+        "-padx",
+        "2m",
+        "-pady",
+        0,
+        "-state",
+        "disabled",
+        "-takefocus",
+        0,
+    )
     _create_indicator(tk, path=known_indicator_path)
     tk.call(
         "label",
@@ -280,25 +385,72 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
         "w",
     )
 
-    tk.call("pack", home_widget_path, "-side", "left", "-padx", 2, "-pady", 2)
     tk.call(
-        "pack",
+        "grid",
+        home_widget_path,
+        "-column",
+        0,
+        "-row",
+        0,
+        "-padx",
+        2,
+        "-pady",
+        2,
+        "-sticky",
+        "w",
+    )
+    tk.call(
+        "grid",
         known_indicator_path,
-        "-side",
-        "left",
+        "-column",
+        1,
+        "-row",
+        0,
         "-padx",
         3,
     )
-    tk.call("pack", f"{section_path}.known_label", "-side", "left")
     tk.call(
-        "pack",
+        "grid",
+        f"{section_path}.known_label",
+        "-column",
+        2,
+        "-row",
+        0,
+    )
+    tk.call(
+        "grid",
         unknown_indicator_path,
-        "-side",
-        "left",
+        "-column",
+        3,
+        "-row",
+        0,
         "-padx",
         3,
     )
-    tk.call("pack", f"{section_path}.unknown_label", "-side", "left")
+    tk.call(
+        "grid",
+        f"{section_path}.unknown_label",
+        "-column",
+        4,
+        "-row",
+        0,
+    )
+    tk.call(
+        "grid",
+        go_to_home_widget_path,
+        "-column",
+        0,
+        "-row",
+        1,
+        "-columnspan",
+        5,
+        "-padx",
+        2,
+        "-pady",
+        2,
+        "-sticky",
+        "w",
+    )
 
     tk.call("grid", "remove", stock_home_path)
     tk.call(
@@ -342,6 +494,12 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
         "-text",
         "Home all axes [Ctrl-Home]",
     )
+    tk.call(
+        "DynamicHelp::add",
+        go_to_home_widget_path,
+        "-text",
+        "After all axes are homed, retract Z and move X/Y to machine home at 30 mm/s",
+    )
 
     binding = HomingSectionBinding(
         component=component,
@@ -350,6 +508,9 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
         known_indicator_path=known_indicator_path,
         unknown_indicator_path=unknown_indicator_path,
         clear_fault_widget_path=CLEAR_FAULT_WIDGET_PATH,
+        go_to_home_widget_path=go_to_home_widget_path,
+        status=namespace["s"],
+        linuxcnc_module=linuxcnc_module,
     )
     live_plotter._dmc2_base_controls = binding
     binding.poll()

@@ -39,6 +39,7 @@ pub const FILES: &[File] = &[
     project_file!("config/operations.tsv"),
     project_file!("config/processes.tsv"),
     project_file!("config/linuxcnc-driver-overlays.tsv"),
+    project_file!("packaging/dmc2-linuxcnc-autostart.desktop"),
     project_file!("live_requirements.json"),
     project_file!("live/dmc2.ini"),
     project_file!("live/machine.hal"),

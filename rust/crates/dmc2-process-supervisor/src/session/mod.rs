@@ -17,7 +17,7 @@ use dmc2_diagnostics::RecoveryDisplay;
 use crate::backtrace::{self, BacktraceEvidence};
 use crate::catalog::{BacktraceKind, Ownership, ProcessRole};
 use crate::cli::Invocation;
-use crate::event::{encode_arguments, Event};
+use crate::event::{encode_arguments, Event, EventTime};
 use crate::journal::{FailureTracker, Journal};
 use crate::limits::CoreDumpPlan;
 use crate::process::{self, ProcessIdentity};
@@ -307,18 +307,31 @@ fn record_termination(
     supervisor_pid: u32,
     journal_failures: &mut FailureTracker,
 ) {
-    let child = children.remove(&evidence.pid).unwrap_or_else(|| {
-        ObservedChild::new(ProcessIdentity::unknown(
+    let Some(child) = children.remove(&evidence.pid) else {
+        let identity = ProcessIdentity::unknown(
             "unobserved-terminal-child",
             "terminal-status-only",
-        ))
-    });
+        );
+        let event = identity.event_fields(
+            session_event("session-child-terminated", supervisor_pid)
+                .field("linuxcnc_pid", linuxcnc_pid)
+                .field("is_linuxcnc_root", evidence.pid == linuxcnc_pid)
+                .field("elapsed_since_observed_ns", "UNAVAILABLE")
+                .field("observation_state", "identity-and-start-time-unavailable")
+                .field("observation_error", "terminal status arrived before this child was observed; retain the raw exit evidence and recheck lifecycle tracking on the next UI launch"),
+        );
+        append_after_spawn(journal, &evidence.event_fields(event), journal_failures);
+        if evidence.pid == linuxcnc_pid {
+            *linuxcnc_status = Some(evidence.status);
+        }
+        return;
+    };
     let backtrace = match child.identity.role().map(ProcessRole::backtrace) {
         Some(BacktraceKind::LinuxCncTask) => backtrace::capture(
             journal.path(),
             evidence.pid,
             child.first_observed_wall,
-            unix_ns_or_zero(),
+            unix_ns(),
         ),
         _ => BacktraceEvidence::NotApplicable,
     };
@@ -590,9 +603,9 @@ fn verify_child_subreaper() -> io::Result<()> {
 }
 
 fn session_event(kind: &'static str, supervisor_pid: u32) -> Event {
-    session_event_at(kind, unix_ns_or_zero(), supervisor_pid)
+    session_event_at(kind, unix_ns(), supervisor_pid)
 }
-fn session_event_at(kind: &'static str, unix_ns: u128, supervisor_pid: u32) -> Event {
+fn session_event_at(kind: &'static str, unix_ns: impl Into<EventTime>, supervisor_pid: u32) -> Event {
     Event::new(kind, unix_ns, supervisor_pid).field("tracker", "session-subreaper")
 }
 
@@ -616,13 +629,11 @@ fn unix_ns() -> Result<u128, SystemTimeError> {
         .duration_since(UNIX_EPOCH)
         .map(|duration| duration.as_nanos())
 }
-fn unix_ns_or_zero() -> u128 {
-    unix_ns().unwrap_or(0)
-}
-fn system_time_unix_ns(value: SystemTime) -> u128 {
+fn system_time_unix_ns(value: SystemTime) -> EventTime {
     value
         .duration_since(UNIX_EPOCH)
-        .map_or(0, |duration| duration.as_nanos())
+        .map(|duration| duration.as_nanos())
+        .into()
 }
 
 unsafe extern "C" {
