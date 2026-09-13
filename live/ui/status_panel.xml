@@ -1,5 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <pyvcp>
+  <tabs name="dmc2_tabs" names="['pendant']">
   <vbox>
     <boxexpand expand="no"/>
     <boxfill fill="x"/>
@@ -316,4 +317,5 @@
       </table>
     </labelframe>
   </vbox>
+  </tabs>
 </pyvcp>

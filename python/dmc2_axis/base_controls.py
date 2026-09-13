@@ -371,7 +371,7 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
         "DynamicHelp::add",
         home_widget_path,
         "-text",
-        "Home all axes [Ctrl-Home]",
+        "Home Z fully, then X, then Y [Ctrl-Home]. X approach: physical LEFT / LinuxCNC +X; backoff: physical RIGHT / LinuxCNC -X.",
     )
 
     binding = HomingSectionBinding(

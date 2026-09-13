@@ -1,6 +1,7 @@
 # Custom Scripts in AXIS
 
-The **Custom Scripts** tab is beside **Manual Control** and **MDI**. Select
+The wider pendant pane contains **Pendant** and **Custom Scripts** tabs.
+The toolbar's existing **Pendant Mode** control shows that pane. Select
 **Hole centering** or **Surface map**, edit the parameter fields, and use that
 script's **Run** button. The +/− buttons increment a distance by 1 mm; the text
 fields accept decimals. Valid values are retained in stock AXIS preferences.
@@ -20,9 +21,11 @@ capture. The panel reports unmet machine prerequisites before submission.
 It does not home, reset, clear a fault, move, or start a script merely because
 the tab is selected or a value is edited.
 
-**Go to Home** is in this tab. It runs the existing Z-then-XY return program
-using the established machine home. **Home All**, which establishes that home,
-remains in Manual Control. The return remains unavailable while unhomed.
+**Go to Home** is in this tab. It uses the established machine home and sets
+G61.1 exact-stop mode: the Z move finishes before X/Y starts, without blending
+across the transition. Its return coordinates and speed remain the existing
+values. **Home All**, which establishes home, remains in Manual Control and
+homes Z fully, then X, then Y. The return remains unavailable while unhomed.
 
 The **Probe recorder** section is also in this tab: Probe Mode controls touch
 bubbles, Record controls retention, and Retry Save retains its existing failed

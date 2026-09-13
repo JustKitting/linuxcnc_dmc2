@@ -18,12 +18,16 @@
 
 G21 G90 G94
 G17 G40 G49 G80
+(Exact stop: finish the Z segment before any X/Y segment starts, even after G64.)
+G61.1
 
-(Retract first: physical UP / LinuxCNC +Z to machine Z134.)
+(First move Z to machine Z134 and stop.)
+(From below: physical UP / LinuxCNC +Z. From above: physical DOWN / LinuxCNC -Z.)
 G53 G1 Z#<safe_home_z> F#<feed_mm_min>
 
-(Return X physical LEFT / LinuxCNC +X to X299.)
-(Return Y LinuxCNC +Y to Y172; USER-OBSERVED ACTUAL: the plate moves toward the operator.)
+(Only after Z finishes: return X/Y to machine X299/Y172.)
+(X below X299: physical LEFT / LinuxCNC +X; above X299: physical RIGHT / LinuxCNC -X.)
+(Y below Y172: LinuxCNC +Y; above Y172: LinuxCNC -Y.)
 G53 G1 X#<safe_home_x> Y#<safe_home_y> F#<feed_mm_min>
 
 (DEBUG,DMC2 GO TO HOME ENDED: commanded Z134, then X299/Y172 at 30 mm/s; all targets are 1 mm inside the positive limits.)

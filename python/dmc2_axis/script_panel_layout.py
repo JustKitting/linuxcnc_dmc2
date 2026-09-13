@@ -8,12 +8,11 @@ from .constants import CUSTOM_SCRIPTS_CONTENT, CUSTOM_SCRIPTS_FRAME, GO_TO_HOME_
 def create_pane(namespace):
     root = namespace["root_window"]
     tk = root.tk
-    tabs = str(namespace["widgets"].tabs)
+    tabs = str(namespace["vcp_frame"]) + ".dmc2_tabs"
+    tk.call(tabs, "itemconfigure", "pendant", "-text", "Pendant")
     frame = str(tk.call(tabs, "insert", "end", "scripts", "-text", "Custom Scripts"))
     if frame != CUSTOM_SCRIPTS_FRAME:
         raise RuntimeError(f"Unexpected Custom Scripts tab path: {frame}")
-    # Stock AXIS sizes this notebook before user HAL pins add our page.
-    tk.call("show_all_tabs", tabs)
     canvas = frame + ".body"
     scrollbar = frame + ".scroll"
     tk.call("canvas", canvas, "-highlightthickness", 0, "-width", 1, "-height", 1)
@@ -28,6 +27,8 @@ def create_pane(namespace):
     # Create the recorder independently, before script/catalog setup can fail.
     tk.call("labelframe", PROBE_SECTION_PATH, "-text", "Probe recorder", "-padx", 4, "-pady", 4)
     tk.call("pack", PROBE_SECTION_PATH, "-side", "bottom", "-fill", "x", "-pady", 4)
+    # Match the existing pendant status page, keeping the scripts scrollable.
+    tk.call(tabs, "compute_size")
     return CUSTOM_SCRIPTS_CONTENT
 
 

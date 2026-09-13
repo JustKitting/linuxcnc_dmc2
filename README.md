@@ -51,7 +51,10 @@ velocity of 30 mm/s, and maximum acceleration of 50 mm/s². The 1000-pulse/mm
 scale passed the user's rough caliper sanity check, but it remains provisional
 until the later fine distance calibration.
 
-The standard AXIS **Home All** command homes X, then Y, then Z. Each joint uses
+The standard AXIS **Home All** command homes **Z fully, then X, then Y**.
+The configured sequence waits for Z's final move before starting X or Y.
+X's positive approach is **physical LEFT / LinuxCNC +X**; its negative
+backoff is **physical RIGHT / LinuxCNC -X**. Each joint uses
 the accepted sequence as one LinuxCNC homing operation:
 
 1. Search in the positive direction at 5 mm/s (5000 pulses/s).

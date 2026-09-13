@@ -54,7 +54,7 @@
       "blocking": true,
       "status": "implemented_offline",
       "value": {
-        "order": ["X", "Y", "Z"],
+        "order": ["Z", "X", "Y"],
         "search": "+5.0 mm/s (5000 pulses/s)",
         "latch": "+0.25 mm/s (250 pulses/s)",
         "final_move": "-0.25 mm at 0.25 mm/s (250 pulses at 250 pulses/s)",
@@ -67,7 +67,7 @@
       "blocking": true,
       "status": "implemented_offline",
       "value": "Catalogued Home All control with Known/Unknown indicators in the Manual Control tab's Homing section",
-      "reason": "The Manual-tab button retains AXIS's existing Home All command binding, which invokes LinuxCNC's configured HOME_SEQUENCE 0/1/2 path for X then Y then Z; no second homing sequence or substituted motion values were introduced."
+      "reason": "The Manual-tab button retains AXIS's existing Home All command binding. HOME_SEQUENCE is Z=0, X=1, Y=2, so Z finishes before X starts and X finishes before Y starts; the existing search, latch and final-move values remain in use."
     },
     {
       "id": "pendant_latest_wins_motion_backend",
