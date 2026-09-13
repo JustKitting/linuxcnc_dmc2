@@ -1,43 +1,43 @@
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
-pub(super) enum Workflow {
+pub enum Workflow {
     Circle,
     Surface,
     Block,
 }
 
 impl Workflow {
-    pub(super) fn name(self) -> &'static str {
+    pub fn name(self) -> &'static str {
         match self {
             Self::Circle => "circle",
             Self::Surface => "surface",
             Self::Block => "block",
         }
     }
-    pub(super) fn magic(self) -> &'static str {
+    pub fn magic(self) -> &'static str {
         match self {
             Self::Circle => "DMC2_CIRCLE_RECORD_V2",
             Self::Surface => "DMC2_SURFACE_RECORD_V1",
             Self::Block => "DMC2_BLOCK_RECORD_V1",
         }
     }
-    pub(super) fn ledger_magic(self) -> &'static str {
+    pub fn ledger_magic(self) -> &'static str {
         match self {
             Self::Circle => "DMC2_CIRCLE_LEDGER_V2",
             Self::Surface => "DMC2_SURFACE_LEDGER_V1",
             Self::Block => "DMC2_BLOCK_LEDGER_V1",
         }
     }
-    pub(super) fn request(self) -> String {
+    pub fn request(self) -> String {
         format!("{}-request.txt", self.name())
     }
-    pub(super) fn active(self) -> String {
+    pub fn active(self) -> String {
         format!("{}-active.txt", self.name())
     }
 }
 
-pub(super) fn validate(workflow: Workflow, request: &str, sequence: u64) -> Result<(), String> {
+pub fn validate(workflow: Workflow, request: &str, sequence: u64) -> Result<(), String> {
     let mut lines = request.lines();
     if lines.next() != Some(workflow.magic()) || !request.ends_with('\n') {
         return Err("staged capture is missing its complete versioned header/terminator".into());
@@ -194,11 +194,11 @@ pub(super) fn validate(workflow: Workflow, request: &str, sequence: u64) -> Resu
             "final_work_y",
             "final_work_z",
         ],
-        (Workflow::Block, "start") => super::block::START_FIELDS,
+        (Workflow::Block, "start") => super::block_schema::START_FIELDS,
         (
             Workflow::Block,
             "touch" | "miss" | "travel" | "obstruction" | "ready" | "recovery" | "result",
-        ) => super::block::EVENT_FIELDS,
+        ) => super::block_schema::EVENT_FIELDS,
         _ => return Err(format!("unknown capture record kind {kind}")),
     };
     if values.len() != required.len() {
@@ -221,7 +221,7 @@ pub(super) fn validate(workflow: Workflow, request: &str, sequence: u64) -> Resu
         return Err("touch stage must be coarse-location=0 or fine-measurement=1".into());
     }
     if workflow == Workflow::Block {
-        super::block::validate_fields(kind, &values)?;
+        super::block_schema::validate_fields(kind, &values)?;
     }
     for key in [
         "point", "row", "column", "rows", "columns", "points", "hits", "misses",

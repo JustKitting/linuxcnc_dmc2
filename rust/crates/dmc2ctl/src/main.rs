@@ -19,6 +19,19 @@ use native::{ControlBackend, NativeError, Session, Status};
 use script::{ScriptContract, ScriptError, INSPECTION_FORMAT};
 
 fn main() {
+    let args = std::env::args_os().skip(1).collect::<Vec<_>>();
+    if args.first().and_then(|v| v.to_str()) == Some("object-map") {
+        // Offline object data commands never open NML or publish machine faults.
+        match dmc2ctl::object_map::cli::run(&args[1..], &dmc2ctl::object_map::cli::default_store())
+        {
+            Ok(output) => println!("{output}"),
+            Err(error) => {
+                eprintln!("dmc2ctl object-map: {error}");
+                std::process::exit(1);
+            }
+        }
+        return;
+    }
     match run() {
         Ok(()) => {}
         Err(error) => {

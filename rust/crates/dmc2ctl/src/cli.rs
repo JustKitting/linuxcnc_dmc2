@@ -6,7 +6,7 @@ use std::path::PathBuf;
 use crate::catalog::default_catalog_path;
 use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
-pub const USAGE: &str = "Usage: dmc2ctl [--catalog PATH] [--nml-file PATH] <list|describe ID|status|execute ID|load ID|run ID|inspect-file PATH|load-file PATH|execute-file PATH>";
+pub const USAGE: &str = "Usage: dmc2ctl [--catalog PATH] [--nml-file PATH] <list|describe ID|status|execute ID|load ID|run ID|inspect-file PATH|load-file PATH|execute-file PATH>\n       dmc2ctl object-map --help";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Action {

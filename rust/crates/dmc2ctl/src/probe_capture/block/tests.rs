@@ -13,7 +13,7 @@ fn start() -> Fields {
         ("kind".into(), "start".into()),
         ("sequence".into(), "0".into()),
     ]);
-    for &key in super::START_FIELDS {
+    for &key in dmc2ctl::probe_data::block_schema::START_FIELDS {
         fields.insert(key.into(), "1".into());
     }
     for (key, value) in [
@@ -45,7 +45,7 @@ fn start() -> Fields {
 
 fn event(plan: &Plan, kind: &str, stage: i32, xyz: [f64; 3], sequence: usize) -> Fields {
     let mut f = Fields::new();
-    for &key in super::EVENT_FIELDS {
+    for &key in dmc2ctl::probe_data::block_schema::EVENT_FIELDS {
         f.insert(key.into(), "0".into());
     }
     for (key, value) in [

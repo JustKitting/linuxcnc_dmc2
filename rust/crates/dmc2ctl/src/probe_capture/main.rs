@@ -1,8 +1,7 @@
 //! Synchronous M190 persistence and data-planning gate for probing scripts.
 //! No motion, command channel, reset, restart, or fault-clear capability.
 mod block;
-mod ledger;
-mod schema;
+use dmc2ctl::probe_data::{ledger, schema};
 mod storage;
 mod surface;
 

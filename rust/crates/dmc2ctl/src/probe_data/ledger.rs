@@ -6,9 +6,9 @@ use std::io::Write;
 use std::path::Path;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-pub(super) type Fields = BTreeMap<String, String>;
+pub type Fields = BTreeMap<String, String>;
 
-pub(super) fn number(fields: &Fields, key: &str) -> Result<f64, String> {
+pub fn number(fields: &Fields, key: &str) -> Result<f64, String> {
     fields
         .get(key)
         .and_then(|v| v.parse::<f64>().ok())
@@ -16,7 +16,7 @@ pub(super) fn number(fields: &Fields, key: &str) -> Result<f64, String> {
         .ok_or_else(|| format!("probe record lacks finite {key}"))
 }
 
-pub(super) fn records(text: &str, workflow: Workflow) -> Result<Vec<Fields>, String> {
+pub fn records(text: &str, workflow: Workflow) -> Result<Vec<Fields>, String> {
     if text.lines().next() != Some(workflow.ledger_magic()) {
         return Err("this is not a versioned probe ledger".into());
     }
@@ -75,7 +75,7 @@ pub(super) fn records(text: &str, workflow: Workflow) -> Result<Vec<Fields>, Str
     Ok(result)
 }
 
-pub(super) fn publish(path: &Path, bytes: &[u8]) -> Result<(), String> {
+pub fn publish(path: &Path, bytes: &[u8]) -> Result<(), String> {
     if path.exists() {
         return if fs::read(path).map_err(|e| format!("reading existing map: {e}"))? == bytes {
             Ok(())
