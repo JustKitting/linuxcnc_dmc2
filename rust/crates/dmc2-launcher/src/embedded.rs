@@ -72,6 +72,7 @@ pub const FILES: &[File] = &[
     project_file!("python/dmc2_axis/__init__.py"),
     project_file!("python/dmc2_axis/axis_user_command.py"),
     project_file!("python/dmc2_axis/base_controls.py"),
+    project_file!("python/dmc2_axis/fault_clear.py"),
     project_file!("python/dmc2_axis/custom_scripts.py"),
     project_file!("python/dmc2_axis/block_plan.py"),
     project_file!("python/dmc2_axis/script_panel_layout.py"),

@@ -267,3 +267,18 @@ index d1c93dcf4..a64764e98 100644
  
      int comm_error_counter;
      uint16_t old_rxudpcount, rxudpcount;
+diff --git a/src/hal/drivers/mesa-hostmot2/hm2_eth.c b/src/hal/drivers/mesa-hostmot2/hm2_eth.c
+--- a/src/hal/drivers/mesa-hostmot2/hm2_eth.c
++++ b/src/hal/drivers/mesa-hostmot2/hm2_eth.c
+@@ -934,6 +934,11 @@ static int hm2_eth_receive_queued_reads(hm2_lowlevel_io_t *this) {
+     // or not)
+     if(board->hal && board->comm_error_counter == board->hal->packet_error_limit && !*board->llio.io_error) {
+         board->comm_error_counter = 0;
++        // DMC2: an operator has acknowledged the retained I/O fault.
++        // Other clients (such as pktuart) can queue writes while normal
++        // HostMot2 writes are stopped. Discard those stale commands before
++        // allowing the next servo cycle to enqueue current output state.
++        board->write_packet_ptr = board->write_packet;
+     }
+ 
+     long read_timeout = board->hal ? board->hal->read_timeout : 1600000;

@@ -108,7 +108,7 @@ diagnostic_catalog! {
     "MESA_STARTUP_FAILURE",
     "mesa-startup-failure",
     "the Mesa startup guard detected an I/O error or could not clear its watchdog state",
-    "inspect retained Mesa phase, watchdog bit, and packet-error state";
+    "use Clear Fault with the machine stopped to acknowledge the retained Mesa I/O/watchdog error; if communication does not recover, restore the Mesa connection and retry Clear Fault";
     ControllerWatchdogFailure = 22,
     "CONTROLLER_WATCHDOG_FAILURE",
     "controller-watchdog-failure",
@@ -203,6 +203,7 @@ impl RecoveryClassified for FaultCode {
             | Self::BounceTimedOut
             | Self::LimitLatchResetTimedOut => RecoveryClass::ReleaseLimit,
             Self::AdapterFailure
+            | Self::MesaStartupFailure
             | Self::ControllerWatchdogFailure
             | Self::JogCountMismatch
             | Self::JogFeedbackUnavailable
@@ -213,7 +214,6 @@ impl RecoveryClassified for FaultCode {
             | Self::MotionStopTimedOut
             | Self::MotionZeroDistance => RecoveryClass::ClearController,
             Self::TaskHeartbeatTimeout
-            | Self::MesaStartupFailure
             | Self::MotionCommandEncodingFailure
             | Self::MotionInvalidPulsesPerMillimeter
             | Self::MotionInvalidServoPeriod

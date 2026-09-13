@@ -1,6 +1,7 @@
 mod catalog;
 mod cli;
 mod dispatch;
+mod fault_clear;
 mod hal;
 mod native;
 mod script;

@@ -15,6 +15,7 @@ from .constants import (
     POSITION_UNKNOWN_PIN,
 )
 from .operation_catalog import project_catalog_path, read_operations
+from .fault_clear import ClearFaultBinding
 from .recovery_contract import RecoveryOperationCode
 from .recovery_ui import (
     RECOVERY_OPERATION_CONTRACTS,
@@ -139,24 +140,12 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
 
     root_window = namespace["root_window"]
     tk = root_window.tk
-    linuxcnc_module = namespace["linuxcnc"]
-    command_channel = namespace["c"]
     clear_fault_contract = RECOVERY_OPERATION_CONTRACTS[
         RecoveryOperationCode.CLEAR_FAULT
     ]
 
-    clear_fault_error_notice = RecoveryUiNotice(namespace)
-
-    def clear_fault_command() -> None:
-        """Issue only LinuxCNC's canonical E-stop-reset state request."""
-        try:
-            command_channel.state(linuxcnc_module.STATE_ESTOP_RESET)
-        except Exception as error:
-            clear_fault_error_notice.present(
-                fault=AxisUiFault(AxisUiFaultKind.CLEAR_FAULT_UI_COMMAND_FAILED, error)
-            )
-        else:
-            clear_fault_error_notice.clear()
+    clear_fault_command = ClearFaultBinding(namespace)
+    live_plotter._dmc2_clear_fault_binding = clear_fault_command
 
     # Install the recovery control before the optional homing layout and
     # indicator pins. A failure in either must not remove fault clearing.
@@ -196,7 +185,7 @@ def install_axis_base_controls(namespace: Mapping[str, object]) -> HomingSection
         "DynamicHelp::add",
         CLEAR_FAULT_WIDGET_PATH,
         "-text",
-        "Clear the retained controller fault through LinuxCNC E-stop Reset",
+        "Acknowledge retained Mesa errors, check communication, then request LinuxCNC E-stop Reset",
     )
 
     # Optional catalog validation and the homing layout run only after the

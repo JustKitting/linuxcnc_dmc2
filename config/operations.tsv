@@ -5,7 +5,7 @@ machine.estop-reset	control	Reset E-stop	linuxcnc.task-state	estop-reset	base-to
 machine.on	control	Machine On	linuxcnc.task-state	on	base-toolbar	state-change	running-session;estop-clear	.toolbar.machine_power
 machine.off	control	Machine Off	linuxcnc.task-state	off	base-toolbar	state-change	running-session	.toolbar.machine_power
 machine.abort	control	Abort	linuxcnc.abort	-	base-toolbar	motion-stop;spindle-stop	running-session	.toolbar.program_stop
-controller.clear-fault	control	Clear Fault	linuxcnc.task-state	estop-reset	base-toolbar	fault-clear;state-change	running-session;physical-estop-released	.toolbar.dmc2_clear_fault
+controller.clear-fault	control	Clear Fault	dmc2.clear-fault	mesa-and-estop-reset	base-toolbar	fault-clear;state-change	running-session;physical-estop-released	.toolbar.dmc2_clear_fault
 controller.pendant-mode	ui	Pendant Mode	axis-ui	pendant-mode-enable	base-toolbar	operator-control	running-session	.toolbar.dmc2_pendant_mode
 application.launch	ui	DMC2 LinuxCNC	desktop-entry	packaging/dmc2-linuxcnc.desktop	system-applications	session-launch	desktop-session	applications:DMC2 LinuxCNC
 machine.home-all	control	Home All	linuxcnc.home-all	-	manual-tab-homing	axis-motion	running-session;estop-clear;machine-on;interpreter-idle	.pane.top.tabs.fmanual.dmc2_homing.home_all

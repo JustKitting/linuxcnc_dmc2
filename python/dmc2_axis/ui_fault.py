@@ -100,8 +100,8 @@ class AxisUiFaultKind(Enum):
     )
     CLEAR_FAULT_UI_COMMAND_FAILED = AxisUiFaultContract(
         "CLEAR_FAULT_UI_COMMAND_FAILED",
-        RecoveryClassCode.RELAUNCH_APPLICATION,
-        "correct the named LinuxCNC command-channel cause and retry the visible Clear Fault control",
+        RecoveryClassCode.CLEAR_CONTROLLER,
+        "resolve the reported recovery condition and retry the visible Clear Fault control; Abort, E-stop, and Pendant Mode remain accessible",
     )
     PENDANT_MODE_UI_TRANSITION_FAILED = AxisUiFaultContract(
         "PENDANT_MODE_UI_TRANSITION_FAILED",

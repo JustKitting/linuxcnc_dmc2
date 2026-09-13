@@ -130,8 +130,8 @@ RECOVERY_OPERATION_CONTRACTS = {
     RecoveryOperationCode.CLEAR_FAULT: RecoveryUiOperationContract(
         "Clear Fault",
         "control",
-        "linuxcnc.task-state",
-        "estop-reset",
+        "dmc2.clear-fault",
+        "mesa-and-estop-reset",
         "base-toolbar",
         ("fault-clear", "state-change"),
         ("running-session", "physical-estop-released"),

@@ -73,6 +73,7 @@ dependencies = [
 name = "dmc2ctl"
 version = "0.1.0"
 dependencies = [
+ "dmc2-core",
  "dmc2-diagnostics",
  "dmc2-hal-sys",
 ]
