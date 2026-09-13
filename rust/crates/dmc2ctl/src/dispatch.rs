@@ -88,13 +88,13 @@ pub fn execute_control(
     backend: &mut impl ControlBackend,
     physical_estop_pressed: Option<bool>,
 ) -> Result<Receipt, DispatchError> {
+    if operation.driver == "dmc2.clear-fault" && operation.target == "mesa-and-estop-reset" {
+        return crate::fault_clear::execute(backend).map_err(DispatchError::FaultClear);
+    }
     require_kind(operation, OperationKind::Control)?;
     let status = backend.status()?;
     check_prerequisites(operation, &status, physical_estop_pressed)?;
     match (operation.driver.as_str(), operation.target.as_str()) {
-        ("dmc2.clear-fault", "mesa-and-estop-reset") => {
-            crate::fault_clear::execute(backend).map_err(DispatchError::FaultClear)
-        }
         ("linuxcnc.task-state", "estop") => {
             backend.set_state(MachineState::Estop).map_err(Into::into)
         }

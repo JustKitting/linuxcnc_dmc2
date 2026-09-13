@@ -10,11 +10,19 @@ pub(super) unsafe extern "C" fn update_component(argument: *mut c_void, period: 
     let state = unsafe { &mut *argument.cast::<ComponentState>() };
     let pins = unsafe { &*state.pins };
     let period_ns = period as u64;
-    let advance_error = state.motion_commands.advance(period_ns).err();
+    let mut inputs = unsafe { runtime_inputs(state, pins, state.motion_commands.ready()) };
+    // Operator recovery preempts the motion channel before it can consume or
+    // reject any ordinary command this cycle.
+    let advance_error = if inputs.clear_fault_request != state.runtime.clear_fault_ack() {
+        state.motion_commands.force_stop_immediate();
+        None
+    } else {
+        state.motion_commands.advance(period_ns).err()
+    };
     if unsafe { super::hal::manual_probe_contact(pins) } {
         state.runtime.observe_manual_probe_stop();
     }
-    let inputs = unsafe { runtime_inputs(state, pins, state.motion_commands.ready()) };
+    inputs.motion_command_ready = state.motion_commands.ready();
     if let Some(error) = advance_error {
         state.runtime.fail(error.fault_code());
         state.motion_commands.force_stop_immediate();

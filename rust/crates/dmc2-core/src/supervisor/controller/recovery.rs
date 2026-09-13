@@ -69,9 +69,6 @@ impl LinuxCncPendantSupervisor {
     }
 
     pub(super) fn accept_linuxcnc_estop_reset(&mut self, inputs: &SupervisorInputs) {
-        if inputs.machine.any_homing() {
-            return;
-        }
         self.begin_linuxcnc_estop_reset(inputs);
     }
 
@@ -79,6 +76,13 @@ impl LinuxCncPendantSupervisor {
         if inputs.link.estop_pressed {
             if let Some(sample) = inputs.packet {
                 self.engage_estop(sample);
+            }
+            return;
+        }
+        if self.recovery_power_phase == Some(RecoveryPowerPhase::AwaitUiReset) {
+            self.external_enable = false;
+            if inputs.linuxcnc_estop_reset_rising {
+                self.begin_linuxcnc_estop_reset(inputs);
             }
             return;
         }
@@ -304,7 +308,8 @@ mod tests {
         let mut frame = inputs(sample(1, false), false, true, false);
         supervisor.update(1_000_000, frame);
         supervisor.fail(FaultCode::UnexpectedLimit);
-        assert!(supervisor.clear_latched_fault());
+        supervisor.clear_latched_fault();
+        assert!(supervisor.fault().is_none());
         frame.raw_limits = raw;
         frame.safety_limits = safety;
         supervisor.begin_linuxcnc_estop_reset(&frame);

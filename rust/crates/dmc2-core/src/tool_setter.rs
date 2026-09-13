@@ -44,12 +44,23 @@ pub struct ToolSetter {
 }
 
 impl ToolSetter {
+    /// Accept the global operator command independently of sampled input state.
+    pub fn clear_fault(&mut self) {
+        self.latched = false;
+    }
+
     pub fn update(&mut self, input: Inputs) -> Outputs {
         // An early/held acknowledgement is never queued for later recovery.
-        let acknowledge = (input.clear_setter && !self.clear_setter_held)
-            || (input.clear_fault && !self.clear_fault_held);
+        let acknowledge = input.clear_setter && !self.clear_setter_held;
+        let clear_fault = input.clear_fault && !self.clear_fault_held;
         self.clear_setter_held = input.clear_setter;
         self.clear_fault_held = input.clear_fault;
+        // Global Clear Fault always clears retained state, even with a stale
+        // task/homing snapshot. A currently open overtravel circuit below is
+        // still an actual input; acknowledgement cannot make it closed.
+        if clear_fault {
+            self.clear_fault();
+        }
         if let Some(sample) = input.circuits {
             self.last_sample = Some(sample);
             if !sample.overtravel_closed {
@@ -79,7 +90,7 @@ impl ToolSetter {
             latched: self.latched,
             // Do not resume a stopped program merely because IN2 closes again.
             // LinuxCNC feed-inhibit leaves manual withdrawal available.
-            feed_inhibit: self.latched || self.last_sample.is_none(),
+            feed_inhibit: self.latched || input.circuits.is_none(),
             abort_program: self.latched && input.program_active,
             status,
         }

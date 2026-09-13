@@ -7,11 +7,9 @@ use dmc2_core::startup::MESA_WATCHDOG_STABLE_NS;
 use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
 use crate::dispatch::STATUS_POLL_PERIOD;
-use crate::hal::{self, DriverReset, HalError};
+use crate::hal::{self, DriverReset, HalError, COMMAND_TIMEOUT};
 use crate::native::{ControlBackend, MachineState, NativeError, Receipt};
 
-// Same operator-command deadline as native/control_client.cc COMMAND_TIMEOUT.
-const COMMAND_TIMEOUT: Duration = Duration::from_secs(5);
 const MESA_STABLE: Duration = Duration::from_nanos(MESA_WATCHDOG_STABLE_NS);
 
 #[derive(Clone, Copy, Debug)]
@@ -38,48 +36,57 @@ impl MesaState {
 }
 
 #[derive(Clone, Copy, Debug)]
+pub struct ClearRequest(u32);
+
+impl ClearRequest {
+    fn current(self) -> Result<(), FaultClearError> {
+        if hal::read_u32(hal::CLEAR_REQUEST_PIN)? != self.0 {
+            return Err(FaultClearError::Superseded);
+        }
+        Ok(())
+    }
+
+    fn await_ack(self) -> Result<(), FaultClearError> {
+        let deadline = Instant::now() + COMMAND_TIMEOUT;
+        loop {
+            self.current()?;
+            if hal::read_u32(hal::CLEAR_ACK_PIN)? == self.0 {
+                println!(
+                    "CLEAR_FAULT request={} observed=realtime-clear-acknowledged",
+                    self.0
+                );
+                return Ok(());
+            }
+            if Instant::now() >= deadline {
+                return Err(FaultClearError::Timeout(
+                    RecoveryStage::RealtimeAcknowledgement,
+                ));
+            }
+            thread::sleep(STATUS_POLL_PERIOD);
+        }
+    }
+}
+
+pub fn submit() -> Result<ClearRequest, FaultClearError> {
+    let request = ClearRequest(hal::submit_clear()?);
+    println!(
+        "CLEAR_FAULT request={} submitted=operator-priority-clear",
+        request.0
+    );
+    Ok(request)
+}
+
+#[derive(Clone, Copy, Debug)]
 pub enum RecoveryStage {
+    RealtimeAcknowledgement,
     DriverCommunication,
     ControllerAcknowledgement,
 }
 
-fn require_stopped(
-    backend: &mut impl ControlBackend,
-    expected_command: i32,
-) -> Result<(), FaultClearError> {
-    let status = backend.status()?;
-    if status.echo_serial_number != expected_command {
-        return Err(FaultClearError::Superseded);
-    }
-    if status.machine_state != MachineState::Estop
-        || !status.interpreter_idle()
-        || status.homing_mask != 0
-        || status.spindle_speed != 0.0
-        || status.spindle_direction != 0
-        || hal::read_bit("motion.motion-enabled")?
-        || hal::read_bit("dmc2-pendant-control.external-enable")?
-    {
-        return Err(FaultClearError::MustStop);
-    }
-    require_released_estop()
-}
-
-fn require_released_estop() -> Result<(), FaultClearError> {
-    if hal::read_bit(hal::PHYSICAL_PENDANT_ESTOP_PIN)? {
-        return Err(FaultClearError::PhysicalEstopPressed);
-    }
-    Ok(())
-}
-
-fn recover_driver(
-    backend: &mut impl ControlBackend,
-    initial: MesaState,
-) -> Result<(), FaultClearError> {
-    let expected_command = backend.status()?.echo_serial_number;
-    require_stopped(backend, expected_command)?;
+fn recover_driver(request: ClearRequest, initial: MesaState) -> Result<(), FaultClearError> {
+    request.current()?;
     if initial.io_error {
-        // LinuxCNC 2.9.10 hm2_eth.c: record_soft_error latches llio.io_error.
-        // receive_queued_reads resets its accumulator after this manual clear.
+        // LinuxCNC 2.9.10 hm2_eth.c resets its accumulator on this manual ack.
         hal::acknowledge_driver(DriverReset::MesaIoError)?;
         println!("CLEAR_FAULT driver=mesa action=acknowledge-retained-io-error");
     }
@@ -87,9 +94,9 @@ fn recover_driver(
     let mut stable_since = None;
     let mut watchdog_acknowledged = false;
     loop {
-        require_stopped(backend, expected_command)?;
+        request.current()?;
         let state = MesaState::read()?;
-        // A failed attempt never keeps resetting a bad connection.
+        // Report a returning cause. Never repeatedly reset a failed connection.
         if state.io_error {
             return Err(FaultClearError::DriverFaultReturned);
         }
@@ -101,7 +108,6 @@ fn recover_driver(
         } else if state.healthy() {
             let since = stable_since.get_or_insert_with(Instant::now);
             if since.elapsed() >= MESA_STABLE {
-                require_stopped(backend, expected_command)?;
                 return Ok(());
             }
         } else {
@@ -115,28 +121,54 @@ fn recover_driver(
 }
 
 pub fn execute(backend: &mut impl ControlBackend) -> Result<Receipt, FaultClearError> {
-    let mesa = MesaState::read()?;
-    if mesa.io_error || mesa.packet_error_exceeded || mesa.watchdog {
-        recover_driver(backend, mesa)?;
+    let request = submit()?;
+    execute_requested(backend, request)
+}
+
+pub fn execute_requested(
+    backend: &mut impl ControlBackend,
+    request: ClearRequest,
+) -> Result<Receipt, FaultClearError> {
+    // Recovery causes the required stop; it never demands that a faulted task
+    // first become idle or lose its retained HOME_ABORT/homing flags.
+    request.current()?;
+    let abort = backend.abort();
+    let stop = backend.set_state(MachineState::Estop);
+    // An Abort error cannot suppress submission of the E-stop command.
+    if let Err(error) = abort {
+        eprintln!("OPERATOR_WARNING=Abort did not acknowledge: {error}. Clear Fault also submitted E-stop and is continuing recovery.");
     }
-    require_released_estop()?;
-    // Preserve the canonical LinuxCNC request consumed by the realtime
-    // controller, tool setter, and existing manual recovery paths.
-    // No Machine On, mode change, resume, homing, or motion is issued here.
+    let stop = stop?;
+    request.await_ack()?;
+    let mesa = MesaState::read()?;
+    if !mesa.healthy() {
+        recover_driver(request, mesa)?;
+    }
+    request.current()?;
+    if hal::read_bit(hal::PHYSICAL_PENDANT_ESTOP_PIN)? {
+        println!("OPERATOR_MESSAGE=Clear Fault was processed. The physical pendant E-stop remains pressed; release it and press Clear Fault to release E-stop. Pendant Mode remains selectable.");
+        return Ok(stop);
+    }
+    // This canonical reset also serves the existing pendant and setter paths.
+    // Machine On, resume, homing and motion remain separate operator commands.
     let receipt = backend.set_state(MachineState::EstopReset)?;
     let deadline = Instant::now() + COMMAND_TIMEOUT;
     loop {
+        request.current()?;
         let status = backend.status()?;
-        require_released_estop()?;
         let mesa = MesaState::read()?;
         if mesa.io_error || mesa.packet_error_exceeded || mesa.watchdog {
             return Err(FaultClearError::DriverFaultReturned);
+        }
+        if hal::read_bit(hal::PHYSICAL_PENDANT_ESTOP_PIN)? {
+            println!("OPERATOR_MESSAGE=Clear Fault was processed. The physical pendant E-stop is pressed; release it and use Clear Fault again. Pendant Mode remains selectable.");
+            return Ok(receipt);
         }
         if !hal::read_bit("dmc2-pendant-control.fault")?
             && status.machine_state != MachineState::Estop
             && !status.auxiliary_estop
         {
-            println!("CLEAR_FAULT observed=controller-latch-clear machine_state={}; Machine On and Pendant Mode remain operator controls", status.machine_state.name());
+            println!("OPERATOR_MESSAGE=Clear Fault was acknowledged and LinuxCNC reports E-stop reset. Use Machine On and Pendant Mode to resume manual control.");
             return Ok(receipt);
         }
         if Instant::now() >= deadline {
@@ -152,9 +184,7 @@ pub fn execute(backend: &mut impl ControlBackend) -> Result<Receipt, FaultClearE
 pub enum FaultClearError {
     Hal(HalError),
     Native(NativeError),
-    MustStop,
     Superseded,
-    PhysicalEstopPressed,
     DriverFaultReturned,
     Timeout(RecoveryStage),
 }
@@ -173,25 +203,17 @@ impl fmt::Display for FaultClearError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Hal(error) => error.fmt(f),
-            Self::Native(error) => error.fmt(f),
-            Self::MustStop => f.write_str("Mesa recovery needs LinuxCNC in E-stop, idle, not homing, with spindle and motion commands disabled. Use the visible Abort and E-stop controls, then retry Clear Fault."),
-            Self::Superseded => f.write_str("A newer LinuxCNC command superseded this Clear Fault request. No further reset was submitted. Press Clear Fault again when ready."),
-            Self::PhysicalEstopPressed => f.write_str("The physical pendant E-stop is pressed. Release it, then press Clear Fault again."),
-            Self::DriverFaultReturned => f.write_str("Mesa communication or watchdog fault returned during Clear Fault. The controller remains blocked. Restore the Mesa connection, then retry Clear Fault; this attempt will not reset it again."),
-            Self::Timeout(RecoveryStage::DriverCommunication) => f.write_str("Mesa did not report stable communication after the requested reset. Restore the Mesa connection, then retry Clear Fault. The controller latch was retained."),
-            Self::Timeout(RecoveryStage::ControllerAcknowledgement) => f.write_str("LinuxCNC has not acknowledged controller recovery. The retained fault details remain in the display. Release any named active input, use Abort if needed, and retry Clear Fault; Pendant Mode remains accessible."),
+            Self::Native(error) => write!(f, "Clear Fault was submitted to the realtime controller, but LinuxCNC task communication reported: {error}. Retry Clear Fault; use the visible CNC launcher to reopen the session if task communication remains unavailable."),
+            Self::Superseded => f.write_str("A newer Clear Fault request has replaced this attempt. The newer request now owns recovery."),
+            Self::DriverFaultReturned => f.write_str("Clear Fault was acknowledged, but Mesa reports a current communication or watchdog fault. Restore the Mesa connection and press Clear Fault again. The UI recovery controls remain available."),
+            Self::Timeout(RecoveryStage::RealtimeAcknowledgement) => f.write_str("The realtime controller has not acknowledged Clear Fault. LinuxCNC E-stop was submitted. Retry Clear Fault; if the realtime component remains unavailable, reopen the session with the visible CNC launcher."),
+            Self::Timeout(RecoveryStage::DriverCommunication) => f.write_str("Clear Fault was acknowledged, but Mesa has not reported stable communication after its acknowledgement. Restore the Mesa connection and press Clear Fault again."),
+            Self::Timeout(RecoveryStage::ControllerAcknowledgement) => f.write_str("The realtime controller accepted Clear Fault, but LinuxCNC has not reported E-stop reset. The display retains the current cause. Release any named active input and press Clear Fault again; Pendant Mode remains selectable."),
         }
     }
 }
 impl RecoveryClassified for FaultClearError {
     fn recovery_class(&self) -> RecoveryClass {
-        match self {
-            Self::Hal(error) => error.recovery_class(),
-            Self::Native(error) => error.recovery_class(),
-            Self::MustStop | Self::PhysicalEstopPressed => RecoveryClass::RestoreMachine,
-            Self::DriverFaultReturned | Self::Timeout(_) | Self::Superseded => {
-                RecoveryClass::ClearController
-            }
-        }
+        RecoveryClass::ClearController
     }
 }

@@ -62,6 +62,19 @@ fn run() -> Result<(), ApplicationError> {
             let mut session = Session::open(&nml_file)?;
             print_status(&session.status()?);
         }
+        Action::ClearFault => {
+            // This built-in bypasses the catalog and submits to realtime before
+            // opening task communication. Neither can veto the clear request.
+            let request = fault_clear::submit().map_err(DispatchError::FaultClear)?;
+            let mut session = Session::open(&nml_file)
+                .map_err(|error| DispatchError::FaultClear(error.into()))?;
+            let receipt = fault_clear::execute_requested(&mut session, request)
+                .map_err(DispatchError::FaultClear)?;
+            print_execution(
+                "controller.clear-fault",
+                &ExecutionOutcome::Control(receipt),
+            );
+        }
         Action::Execute(id) => {
             let catalog = Catalog::open(catalog_path)?;
             let operation = catalog.operation(&id)?;

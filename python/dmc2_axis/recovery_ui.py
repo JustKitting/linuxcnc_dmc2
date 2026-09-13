@@ -28,6 +28,7 @@ EMERGENCY_RELAUNCH_RECOVERY_TEXT = (
 
 
 ALWAYS_AVAILABLE_OPERATIONS = (
+    RecoveryOperationCode.ABORT,
     RecoveryOperationCode.ESTOP_RESET,
     RecoveryOperationCode.CLEAR_FAULT,
     RecoveryOperationCode.PENDANT_MODE,
@@ -133,8 +134,8 @@ RECOVERY_OPERATION_CONTRACTS = {
         "dmc2.clear-fault",
         "mesa-and-estop-reset",
         "base-toolbar",
-        ("fault-clear", "state-change"),
-        ("running-session", "physical-estop-released"),
+        ("fault-clear", "state-change", "motion-stop", "spindle-stop"),
+        ("running-session",),
         ".toolbar.dmc2_clear_fault",
     ),
     RecoveryOperationCode.PENDANT_MODE: RecoveryUiOperationContract(
@@ -288,7 +289,7 @@ def recovery_route_text(route: RecoveryRoute) -> str:
 
 
 def ensure_essential_recovery_controls(namespace: Mapping[str, object]) -> None:
-    """Keep the three state-independent recovery controls operator-accessible."""
+    """Keep every state-independent recovery control operator-accessible."""
     tk = namespace["root_window"].tk
     for operation_code in ALWAYS_AVAILABLE_OPERATIONS:
         target = RECOVERY_OPERATION_CONTRACTS[operation_code].ui_target

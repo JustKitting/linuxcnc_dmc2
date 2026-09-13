@@ -102,7 +102,7 @@ fn neither_open_circuit_allows_clear_and_each_ui_control_has_its_own_edge() {
 }
 
 #[test]
-fn missing_sample_is_not_an_open_contact_and_cannot_clear_a_latch() {
+fn missing_sample_keeps_feed_inhibited_but_never_rejects_global_clear() {
     let mut setter = ToolSetter::default();
     let mut input = released();
     input.circuits = None;
@@ -112,11 +112,34 @@ fn missing_sample_is_not_an_open_contact_and_cannot_clear_a_latch() {
     let mut input = released();
     input.circuits = None;
     let out = setter.update(input);
-    assert!(!out.latched && !out.contact && !out.feed_inhibit);
+    assert!(!out.latched && !out.contact && out.feed_inhibit);
     assert_eq!(out.status, Status::Unavailable);
     trip(&mut setter);
     let mut input = released();
     input.circuits = None;
     input.clear_fault = true;
+    let out = setter.update(input);
+    assert!(!out.latched);
+    assert!(out.feed_inhibit);
+    assert_eq!(out.status, Status::Unavailable);
+}
+
+#[test]
+fn direct_clear_is_independent_of_a_held_canonical_reset_and_stale_task() {
+    let mut setter = ToolSetter::default();
+    trip(&mut setter);
+    let mut input = released();
+    input.clear_fault = true;
+    setter.update(input);
+    let mut input = released();
+    input.clear_fault = true;
+    input.circuits.as_mut().unwrap().overtravel_closed = false;
     assert!(setter.update(input).latched);
+    setter.clear_fault();
+    let mut input = released();
+    input.clear_fault = true;
+    input.manual_idle_stationary = false;
+    let out = setter.update(input);
+    assert!(!out.latched);
+    assert_eq!(out.status, Status::Ready);
 }

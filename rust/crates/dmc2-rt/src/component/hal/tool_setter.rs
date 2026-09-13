@@ -40,6 +40,7 @@ struct State {
     policy: ToolSetter,
     task_freshness: Freshness,
     task: CachedTaskSnapshot,
+    clear_fault_request: u32,
 }
 
 pub(in crate::component) unsafe fn install(
@@ -65,6 +66,7 @@ pub(in crate::component) unsafe fn install(
                 policy: ToolSetter::default(),
                 task_freshness: Freshness::new(),
                 task: CachedTaskSnapshot::safe(),
+                clear_fault_request: 0,
             },
         );
         hal::HalCall::ExportFunct.classify(hal::hal_export_funct(
@@ -105,6 +107,12 @@ unsafe extern "C" fn update(arg: *mut c_void, period: c_long) {
             && !ptr::read_volatile(c.mesa_watchdog_has_bit);
         let interp_idle = state.task.machine.interp_idle;
         let coord_mode = ptr::read_volatile(c.motion_coord_mode);
+        let request = ptr::read_volatile(c.clear_fault_request);
+        let clear_requested = request != state.clear_fault_request;
+        if clear_requested {
+            state.policy.clear_fault();
+        }
+        state.clear_fault_request = request;
         let out = state.policy.update(Inputs {
             circuits: mesa_valid.then(|| Circuits {
                 contact_closed: ptr::read_volatile(pins.contact_closed),
@@ -127,7 +135,13 @@ unsafe extern "C" fn update(arg: *mut c_void, period: c_long) {
             (pins.contact, out.contact),
             (pins.overtravel, out.overtravel),
             (pins.latched, out.latched),
-            (pins.feed_inhibit, out.feed_inhibit),
+            // This function precedes controller.update and motion-controller.
+            // Hold feed on the request cycle and throughout the controller's
+            // disabled recovery state; clearing a latch cannot resume a task.
+            (
+                pins.feed_inhibit,
+                out.feed_inhibit || clear_requested || !ptr::read_volatile(c.external_enable),
+            ),
             (pins.abort_program, out.abort_program),
             (pins.unavailable, out.status == Status::Unavailable),
             (pins.ready, out.status == Status::Ready),
