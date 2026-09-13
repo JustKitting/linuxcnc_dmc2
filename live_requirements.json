@@ -186,8 +186,10 @@
       "linuxcnc_m4": "physical counterclockwise via H100 0200H=0002H"
     },
     "puck_height_mm": 19.40,
-    "puck_calibration_status": "Legacy puck only; new BTER setter height and location not calibrated",
+    "puck_calibration_status": "Superseded legacy puck; historical programs only, not the current BTER setter reference",
     "puck_reference_surface": "machine plate",
+    "tool_setter_reference": "config/metrology/tool-setter.json",
+    "tool_setter_reference_status": "User accepted on 2026-09-13: measured setter-top-to-plate height with source-nominal zero pretravel; measured contact XY retained separately from the unknown setter center",
     "current_cutter_marking": "10mm-60L"
   }
 }

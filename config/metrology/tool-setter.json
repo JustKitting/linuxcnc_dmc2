@@ -1,0 +1,84 @@
+{
+  "schema": "dmc2-tool-setter-reference-v1",
+  "status": "user_accepted_reference",
+  "accepted_date": "2026-09-13",
+  "operator_acceptance": "ok lets record that as our new tool setter system",
+  "equipment": {
+    "name": "BTER CNC normally closed tool setter",
+    "model": "MY20-20-2",
+    "product_url": "https://www.amazon.com/dp/B09V5RNGS2",
+    "wiring_and_recovery_record": "docs/tool-setter.md",
+    "contact_input": "Mesa IN0, normalized NC open = contact",
+    "overtravel_input": "Mesa IN2, normalized NC open = overtravel"
+  },
+  "reference": {
+    "units": "mm",
+    "accepted_height_above_plate_mm": 63.995466247558595,
+    "reference_surface": "Machine plate at the recorded plate sample site",
+    "height_formula": "median(setter-top XYZ-probe trigger Z) - median(plate XYZ-probe trigger Z) - nominal setter pretravel",
+    "nominal_setter_pretravel_mm": 0,
+    "pretravel_basis": "SOURCE-VERIFIED nominal design value, accepted by the user; not a direct IN0 switch-height measurement",
+    "pretravel_source": {
+      "publisher": "HMWTECH CO., LTD",
+      "url": "https://doc.diytrade.com/docdvr/1454255/51348984/1684722298.pdf#page=22",
+      "pdf_page": 22,
+      "section": "MY20-20-2 Product parameters",
+      "parameter": "Pretravel",
+      "published_value": "0"
+    }
+  },
+  "measurement_frame": {
+    "coordinate_frame": "LinuxCNC machine XYZ; trivkins joint.N.pos-fb",
+    "capture": "Mesa IN1 rising-edge servo sample; not a hardware trigger latch or a post-stop position",
+    "approach_direction": "physical DOWN / LinuxCNC -Z",
+    "x_directions": "physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X",
+    "probe_setup": "USER-OBSERVED ACTUAL: same XYZ probe, unchanged clamping depth and homed coordinate reference",
+    "offset_cancellation": "The unchanged probe/tool offset cancels in the Z difference; no additional ball-radius term is applied"
+  },
+  "setter_top_sample": {
+    "machine_x_mm": 274.1179066619873,
+    "machine_y_mm": 130.02257946777343,
+    "median_trigger_machine_z_mm": 99.144289260864265,
+    "trigger_z_spread_mm": 0.00853018188476,
+    "touch_count": 4,
+    "location_meaning": "Measured top contact point; the setter center has not been measured"
+  },
+  "plate_sample": {
+    "machine_x_mm": 288.7293769989014,
+    "machine_y_mm": 147.64695007324218,
+    "median_trigger_machine_z_mm": 35.14882301330567,
+    "trigger_z_spread_mm": 0.003966583251952,
+    "touch_count": 5
+  },
+  "evidence": {
+    "exact_touch_rows_and_calculation": "config/metrology/tool-setter-measurements-2026-09-13.json",
+    "recordings": [
+      {
+        "surface": "setter_top",
+        "archive": "config/metrology/recordings/probe-1789317770574733990-1027637-1.csv.gz",
+        "uncompressed_sha256": "2ec128344d6ced6403fc1d5e4e3cdfbd6be30c354e065329fc40839dab91580f"
+      },
+      {
+        "surface": "plate",
+        "archive": "config/metrology/recordings/probe-1789318065305904576-1027637-2.csv.gz",
+        "uncompressed_sha256": "07dcb8c62fe5b3ff11615bf0bb46804282620e3d850c2b9981c7307654ce65e2"
+      }
+    ],
+    "selection": "All recorded touches retained; median used for each surface; no rejected touches",
+    "recording_state": "No cycle gaps or recorded transport/controller faults; all positions valid and homed"
+  },
+  "scope": {
+    "height": "Accepted reference from the two sampled sites; no flat plate plane is inferred",
+    "direct_setter_switch_height_measurement_mm": null,
+    "setter_center_machine_xy_mm": null,
+    "tool_or_work_offsets_applied": false,
+    "record_does_not_authorize_motion": true
+  },
+  "legacy_puck": {
+    "status": "Superseded as the current tool-setter reference; retained only for historical programs",
+    "height_mm": 19.4,
+    "machine_x_mm": 288.125,
+    "machine_y_mm": 152.955,
+    "program_status": "Existing puck contact and tool-height test programs still contain their original puck geometry and OUT5 sequence; they do not consume this reference"
+  }
+}

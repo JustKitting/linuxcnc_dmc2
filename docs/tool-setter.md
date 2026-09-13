@@ -69,9 +69,67 @@ permission. Existing Abort, Clear Fault and Pendant Mode controls remain the
 operator recovery path. State-model tests do not establish physical stopping or
 operator-observed recovery; those require live observation.
 
-## Calibration boundary
+## Accepted tool-setter reference — 2026-09-13
 
-The stored legacy puck height and location are not measurements of this setter.
-This configuration does not change or establish tool-setter height, position,
-contact travel, overtravel distance or a tool offset. Existing tool-height
-programs still contain their prior calibration and are not run by this change.
+The user accepted this setter as the new tool-setter system. Its reference is
+stored in [tool-setter.json](../config/metrology/tool-setter.json), linked from
+`live_requirements.json`. The accepted height above the sampled machine plate
+is **63.995466247558595 mm**, using the measured height difference and nominal
+zero setter pretravel.
+
+USER-OBSERVED ACTUAL: both recordings used the same XYZ probe with unchanged
+clamping depth and homed coordinate reference. All contacts were downward
+(physical DOWN / LinuxCNC -Z). These are Mesa IN1 rising-edge servo samples of
+LinuxCNC machine XYZ feedback, not post-stop positions or hardware-latched
+coordinates. The unchanged probe/tool offset cancels in the difference; there
+is no additional ball-radius correction.
+
+| Surface | Machine X (mm) | Machine Y (mm) | Median trigger Z (mm) | Touches | Z spread (mm) |
+| --- | --- | --- | --- | --- | --- |
+| Setter top | 274.1179066619873 | 130.02257946777343 | 99.144289260864265 | 4 | 0.00853018188476 |
+| Plate sample | 288.7293769989014 | 147.64695007324218 | 35.14882301330567 | 5 | 0.003966583251952 |
+
+The calculation retains every touch:
+
+```text
+median(setter top) - median(plate) - nominal setter pretravel
+= 99.144289260864265 - 35.14882301330567 - 0
+= 63.995466247558595 mm
+```
+
+SOURCE-VERIFIED: the HMWTECH MY20-20-2 Product parameters table on
+[PDF page 22](https://doc.diytrade.com/docdvr/1454255/51348984/1684722298.pdf#page=22)
+lists `Pretravel: 0`. This is the user-accepted nominal correction; the recordings
+measure XYZ-probe IN1 contact, not the setter's own IN0 switching height. No
+stroke, force or other motion setting is taken from that catalog entry.
+
+The setter XY is a measured top contact point, not a measured center. The plate
+sample is at the separate XY shown above; this record does not establish a flat
+plate plane or a new absolute physical surface Z. X direction labels remain
+physical RIGHT / LinuxCNC -X and physical LEFT / LinuxCNC +X. The coordinates
+are retained measurements, not motion instructions.
+
+### Retained source evidence
+
+[Exact touch rows and operands](../config/metrology/tool-setter-measurements-2026-09-13.json)
+preserve the analysis readback. Both complete recordings, including movement
+samples, are archived losslessly in the repository:
+
+| Recording | Uncompressed SHA-256 |
+| --- | --- |
+| [Setter top](../config/metrology/recordings/probe-1789317770574733990-1027637-1.csv.gz) | `2ec128344d6ced6403fc1d5e4e3cdfbd6be30c354e065329fc40839dab91580f` |
+| [Plate](../config/metrology/recordings/probe-1789318065305904576-1027637-2.csv.gz) | `07dcb8c62fe5b3ff11615bf0bb46804282620e3d850c2b9981c7307654ce65e2` |
+
+All rows report valid homed positions, with no cycle gaps or recorded
+transport/controller fault flags. The contemporaneous LinuxCNC journal reports
+`Probe tripped during a coordinate jog` at the manual contacts.
+
+### Historical programs and offsets
+
+The old 19.4 mm puck reference at machine X 288.125 / Y 152.955 is superseded
+for this setter and retained as historical data. Existing `PUCK_*` INI entries,
+`puck-contact-no-motion-test.ngc`, `tool-height-first-test.ngc` and
+`tool-height-homing-style-test.ngc` still describe the old puck and OUT5 sequence;
+they do not consume the new reference. Recording this calibration applies no
+tool-table or work-coordinate offset and changes no motion, wiring or recovery
+behavior.
