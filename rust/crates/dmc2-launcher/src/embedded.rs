@@ -52,6 +52,7 @@ pub const FILES: &[File] = &[
     project_file!("live/hal/status_latches.hal"),
     project_file!("live/hal/status_postgui.hal"),
     project_file!("live/hal/probe_mode.hal"),
+    project_file!("live/hal/tool_setter.hal"),
     project_file!("live/ui/status_panel.xml"),
     project_file!("live/nc_files/dmc2_abort.ngc"),
     project_file!("live/nc_files/find-circle-center.ngc"),

@@ -17,6 +17,7 @@ hal::realtime_hal_pin_catalog! {
         mode: bit in => "dmc2-probe.mode-request";
         record: bit in => "dmc2-probe.record-request";
         contact: bit in => "dmc2-probe.contact";
+        selected_contact: bit in => "dmc2-probe.selected-contact";
         all_homed: bit in => "dmc2-probe.all-homed";
         selected: bit out => "dmc2-probe.manual-selected";
         jog_contact: bit out => "dmc2-probe.jog-contact";
@@ -39,6 +40,7 @@ struct State {
     dropped: u32,
     pending_off: bool,
     gap: bool,
+    previous_selected_contact: bool,
 }
 
 pub(in crate::component) unsafe fn install(
@@ -69,6 +71,7 @@ pub(in crate::component) unsafe fn install(
                 dropped: 0,
                 pending_off: false,
                 gap: false,
+                previous_selected_contact: false,
             },
         );
     }
@@ -188,10 +191,19 @@ unsafe extern "C" fn capture(arg: *mut c_void, period: c_long) {
             frame.flags |= flag::VELOCITY_VALID;
         }
         ptr::write_volatile(pins.recording, recording);
+        // Retire a manual jog stopped by either selected contact, including
+        // the tool setter outside XYZ Probe Mode. Recorder touches stay XYZ.
+        let selected_contact = ptr::read_volatile(pins.selected_contact);
         ptr::write_volatile(
             pins.jog_contact,
-            frame.has(flag::TOUCH) && frame.has(flag::SELECTED),
+            selected_contact
+                && !state.previous_selected_contact
+                && frame.has(flag::MANUAL)
+                && frame.has(flag::IDLE)
+                && !frame.has(flag::COORD)
+                && !frame.has(flag::HOMING),
         );
+        state.previous_selected_contact = selected_contact;
     }
     state.pending_off |= !mode && state.previous.has(flag::MODE);
     if mode || state.pending_off {

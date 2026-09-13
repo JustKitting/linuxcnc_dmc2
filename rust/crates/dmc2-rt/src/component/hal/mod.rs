@@ -1,5 +1,6 @@
 mod pins;
 pub(super) mod probe;
+pub(super) mod tool_setter;
 mod transport;
 
 pub(super) use pins::{register_pins, Pins};

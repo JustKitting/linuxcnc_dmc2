@@ -2,7 +2,7 @@
 # Loaded only by dmc2.ini. Do not source from halrun.
 
 loadrt [KINS]KINEMATICS
-loadrt [EMCMOT]EMCMOT base_period_nsec=[EMCMOT]BASE_PERIOD servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS num_spindles=[TRAJ]SPINDLES num_dio=6
+loadrt [EMCMOT]EMCMOT base_period_nsec=[EMCMOT]BASE_PERIOD servo_period_nsec=[EMCMOT]SERVO_PERIOD num_joints=[KINS]JOINTS num_spindles=[TRAJ]SPINDLES num_dio=7
 
 loadrt hostmot2
 loadrt hm2_eth board_ip=[DMC2]MESA_IP config="num_encoders=0 num_stepgens=3 num_pwmgens=0 num_3pwmgens=0 num_inmuxs=1 num_pktuarts=1"
@@ -10,7 +10,7 @@ loadrt hm2_modbus ports="hm2_7i95.0.pktuart.0" mbccbs="../../h100_modbus/maps/li
 loadrt h100_spindle
 loadrt dmc2_rt
 
-loadrt flipflop names=dmc2-safety-limit-x,dmc2-safety-limit-y,dmc2-safety-limit-z,dmc2-display-limit-x,dmc2-display-limit-y,dmc2-display-limit-z,dmc2-display-puck,dmc2-display-probe
+loadrt flipflop names=dmc2-safety-limit-x,dmc2-safety-limit-y,dmc2-safety-limit-z,dmc2-display-limit-x,dmc2-display-limit-y,dmc2-display-limit-z,dmc2-display-puck,dmc2-display-probe,dmc2-display-overtravel
 loadrt watchdog num_inputs=1
 loadrt and2 names=dmc2-controller-watchdog-and,dmc2-own-toward-block-m0,dmc2-own-toward-block-m1,dmc2-own-toward-block-m2,dmc2-command-blocked-m0,dmc2-command-blocked-m1,dmc2-command-blocked-m2,dmc2-hard-limit-x-enabled,dmc2-hard-limit-y-enabled,dmc2-hard-limit-z-enabled,dmc2-probe-power-gate,dmc2-probe-select-in0,dmc2-probe-select-in1
 loadrt or2 names=dmc2-other-limit-block-m0,dmc2-other-limit-block-m1,dmc2-other-limit-block-m2,dmc2-blocked-m0,dmc2-blocked-m1,dmc2-blocked-m2,dmc2-jog-stop-01,dmc2-jog-stop-all,dmc2-jog-stop-immediate-all,dmc2-limit-recovery-owned,dmc2-manual-probe-select-or,dmc2-selected-probe-or
@@ -31,6 +31,7 @@ addf dmc2-safety-limit-z servo-thread
 # generated-count status signals. It also adds its count converters here,
 # after the Mesa read and before motion.
 source hal/mesa_status_sources.hal
+source hal/tool_setter.hal
 
 # The compiled Rust policy executes in the LinuxCNC servo thread after the
 # current Mesa inputs, generated counts, and safety latches are available and

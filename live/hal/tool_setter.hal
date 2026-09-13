@@ -1,0 +1,17 @@
+# BTER MY20-20-2, NC contact and independent NC overtravel circuit.
+# USER-OBSERVED ACTUAL: contact IN0; overtravel IN2; fixed +5 V commons.
+# Released/closed = raw TRUE. Rust exports open/triggered = TRUE.
+# See docs/tool-setter.md for wiring evidence and operator recovery.
+net dmc2-tool-setter-contact-closed hm2_7i95.0.inmux.00.raw-input-00 => dmc2-tool-setter.contact-closed
+net dmc2-tool-setter-overtravel-closed hm2_7i95.0.inmux.00.raw-input-02 => dmc2-tool-setter.overtravel-closed
+# Preserve the existing tool-contact signal name used by selectors and G-code.
+net dmc2-puck-live <= dmc2-tool-setter.contact
+net dmc2-tool-setter-overtravel dmc2-tool-setter.overtravel => motion.digital-in-06
+net dmc2-tool-setter-latched <= dmc2-tool-setter.latched
+
+# Feed inhibit applies to G-code, not manual jogs. Hold it until explicit UI
+# acknowledgement after release in Manual/idle. Abort discards the old program;
+# releasing the switch must not restart it. No reset, enable or backoff here.
+net dmc2-tool-setter-feed-inhibit dmc2-tool-setter.feed-inhibit => motion.feed-inhibit
+net dmc2-tool-setter-abort dmc2-tool-setter.abort-program => halui.program.stop
+addf dmc2-tool-setter.update servo-thread

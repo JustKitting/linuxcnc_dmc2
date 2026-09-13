@@ -173,9 +173,10 @@
     "x": {"joint": 0, "stepgen": 1, "positive_physical": "left", "negative_physical": "right", "limit": "IN11 left"},
     "y": {"joint": 1, "stepgen": 0, "positive_physical": "forward", "negative_physical": "backward", "limit": "IN9 forward"},
     "z": {"joint": 2, "stepgen": 2, "positive_physical": "up", "negative_physical": "down", "limit": "IN10 up"},
-    "puck_contact": "IN0",
-    "dmc2_continuity_probe": "IN1",
-    "probe_power_switch": "OUT5",
+    "tool_setter_contact": "IN0; NC closed=raw true, contact/open=normalized true",
+    "tool_setter_overtravel": "IN2; NC closed=raw true, overtravel/open=normalized true; retained program stop, operator clear",
+    "xyz_touch_probe": "IN1; fixed +5 V supply",
+    "legacy_program_output": "OUT5; not the fixed probe or setter supply",
     "spindle_direction": {
       "view": "top-down from spindle/head toward tool and workpiece",
       "h100_0200_0001": "generic operation only; not accepted as a direction-safe command",
@@ -185,6 +186,7 @@
       "linuxcnc_m4": "physical counterclockwise via H100 0200H=0002H"
     },
     "puck_height_mm": 19.40,
+    "puck_calibration_status": "Legacy puck only; new BTER setter height and location not calibrated",
     "puck_reference_surface": "machine plate",
     "current_cutter_marking": "10mm-60L"
   }

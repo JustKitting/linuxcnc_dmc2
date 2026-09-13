@@ -415,7 +415,7 @@ fn commit_task_snapshot(
     }
 }
 
-unsafe fn refresh_task_snapshot(pins: &Pins, cached: &mut CachedTaskSnapshot) {
+pub(super) unsafe fn refresh_task_snapshot(pins: &Pins, cached: &mut CachedTaskSnapshot) {
     let first = unsafe { generation(pins.task_snapshot_generation) };
     if first & 1 != 0 {
         return;

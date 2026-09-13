@@ -1,6 +1,6 @@
 # Realtime display/event latches. These are deliberately separate from every
 # motion-safety latch. Clearing them changes only the GUI history indicators.
-# The caller must load these five named flipflop instances before sourcing
+# The caller must load these six named flipflop instances before sourcing
 # this fragment; the live configuration loads them in the same module instance
 # as its three separate safety-event latches.
 
@@ -9,15 +9,18 @@ addf dmc2-display-limit-y servo-thread
 addf dmc2-display-limit-z servo-thread
 addf dmc2-display-puck servo-thread
 addf dmc2-display-probe servo-thread
+addf dmc2-display-overtravel servo-thread
 
 net dmc2-limit-x-live => dmc2-display-limit-x.set
 net dmc2-limit-y-live => dmc2-display-limit-y.set
 net dmc2-limit-z-live => dmc2-display-limit-z.set
 net dmc2-puck-live    => dmc2-display-puck.set
 net dmc2-probe-live   => dmc2-display-probe.set
+net dmc2-tool-setter-overtravel => dmc2-display-overtravel.set
 
 net dmc2-limit-x-latched <= dmc2-display-limit-x.out
 net dmc2-limit-y-latched <= dmc2-display-limit-y.out
 net dmc2-limit-z-latched <= dmc2-display-limit-z.out
 net dmc2-puck-latched    <= dmc2-display-puck.out
 net dmc2-probe-latched   <= dmc2-display-probe.out
+net dmc2-overtravel-seen <= dmc2-display-overtravel.out

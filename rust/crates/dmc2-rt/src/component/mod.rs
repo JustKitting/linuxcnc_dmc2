@@ -196,6 +196,7 @@ pub extern "C" fn rtapi_app_main() -> c_int {
         linuxcnc_hal::HalCall::ExportFunct.classify(exported)?;
         unsafe {
             hal::probe::install(component_id, pins)?;
+            hal::tool_setter::install(component_id, pins)?;
         }
         linuxcnc_hal::HalCall::Ready.classify(unsafe { linuxcnc_hal::hal_ready(component_id) })?;
         Ok(())

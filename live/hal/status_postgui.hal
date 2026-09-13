@@ -60,6 +60,15 @@ net dmc2-puck-live       => pyvcp.puck-live
 net dmc2-probe-live      => pyvcp.probe-live
 net dmc2-puck-latched    => pyvcp.puck-latched
 net dmc2-probe-latched   => pyvcp.probe-latched
+net dmc2-tool-setter-overtravel => pyvcp.overtravel-live
+net dmc2-overtravel-seen => pyvcp.overtravel-seen
+net dmc2-tool-setter-unavailable dmc2-tool-setter.unavailable => pyvcp.setter-unavailable
+net dmc2-tool-setter-ready dmc2-tool-setter.ready => pyvcp.setter-ready
+net dmc2-tool-setter-contact-open dmc2-tool-setter.contact-open => pyvcp.setter-contact-open
+net dmc2-tool-setter-overtravel-open dmc2-tool-setter.overtravel-open => pyvcp.setter-overtravel-open
+net dmc2-tool-setter-needs-manual-idle dmc2-tool-setter.needs-manual-idle => pyvcp.setter-needs-manual-idle
+net dmc2-tool-setter-needs-acknowledgement dmc2-tool-setter.needs-acknowledgement => pyvcp.setter-needs-acknowledgement
+net dmc2-tool-setter-clear pyvcp.clear-tool-setter => dmc2-tool-setter.clear
 net dmc2-probe-power-enabled => pyvcp.probe-power-enabled
 
 # AXIS owns these user toggles. Mode off clears Record in the UI and the
@@ -76,8 +85,8 @@ net dmc2-probe-recording dmc2-probe.recording => axisui.probe-recording
 # Preserve the program-running gate for the original G-code OUT5 path.
 net dmc2-probe-program-running halui.program.is-running => dmc2-probe-power-gate.in1
 
-# Clearing these five latches has no effect on a safety latch or motion state.
-net dmc2-display-latch-reset pyvcp.clear-display-latches => dmc2-display-limit-x.reset dmc2-display-limit-y.reset dmc2-display-limit-z.reset dmc2-display-puck.reset dmc2-display-probe.reset
+# Clearing these six latches has no effect on the overtravel hold or motion.
+net dmc2-display-latch-reset pyvcp.clear-display-latches => dmc2-display-limit-x.reset dmc2-display-limit-y.reset dmc2-display-limit-z.reset dmc2-display-puck.reset dmc2-display-probe.reset dmc2-display-overtravel.reset
 
 # Nano link and selector status. No pin below is connected to motion here.
 net dmc2-pendant-connected        dmc2-pendant.connected        => pyvcp.pendant-connected

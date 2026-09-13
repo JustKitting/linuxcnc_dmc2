@@ -7,7 +7,7 @@
 #
 # USER-OBSERVED ACTUAL input mapping:
 #   X/left limit = IN11, Y/forward limit = IN9, Z/up limit = IN10
-#   puck contact = IN0, DMC2 continuity probe contact = IN1
+#   NC tool-setter contact = IN0, XYZ probe contact = IN1, NC overtravel = IN2
 #
 # SOURCE-VERIFIED board pin classes and terminal map:
 #   Mesa 7I95T manual, PDF pages 16-21 (printed pages 13-18),
@@ -22,7 +22,7 @@
 net dmc2-limit-x-live <= hm2_7i95.0.inmux.00.raw-input-11
 net dmc2-limit-y-live <= hm2_7i95.0.inmux.00.raw-input-09
 net dmc2-limit-z-live <= hm2_7i95.0.inmux.00.raw-input-10
-net dmc2-puck-live    <= hm2_7i95.0.inmux.00.raw-input-00
+# NC IN0 is normalized by hal/tool_setter.hal before selection and motion.
 net dmc2-probe-live   <= hm2_7i95.0.inmux.00.raw-input-01
 net dmc2-puck-live    => dmc2-probe-select-in0.in0 motion.digital-in-00
 net dmc2-probe-live   => dmc2-probe-select-in1.in0 dmc2-probe.contact
@@ -32,7 +32,7 @@ net dmc2-effective-probe-selected dmc2-manual-probe-select-or.out => dmc2-probe-
 net dmc2-probe-select-in0-enabled dmc2-probe-select-in0-enable.out => dmc2-probe-select-in0.in1
 net dmc2-selected-probe-in0 dmc2-probe-select-in0.out => dmc2-selected-probe-or.in0
 net dmc2-selected-probe-in1 dmc2-probe-select-in1.out => dmc2-selected-probe-or.in1
-net dmc2-selected-probe-live dmc2-selected-probe-or.out => motion.probe-input
+net dmc2-selected-probe-live dmc2-selected-probe-or.out => motion.probe-input dmc2-probe.selected-contact
 
 # Existing G-code power request; no panel test or Probe Mode power switching.
 setp hm2_7i95.0.ssr.00.invert-05 false

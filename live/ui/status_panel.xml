@@ -191,18 +191,25 @@
           <label text='"SEEN"' font='("Helvetica", 10, "bold")'
                  width="7" anchor='"w"'/>
           <tablerow/>
-          <label text='"Puck / IN0"' font='("Helvetica", 10)'
+          <label text='"Tool setter / IN0"' font='("Helvetica", 10)'
                  width="17" anchor='"w"'/>
           <led halpin='"puck-live"' size="16"
                on_color='"green"' off_color='"gray35"'/>
           <led halpin='"puck-latched"' size="16"
                on_color='"orange"' off_color='"gray35"'/>
           <tablerow/>
-          <label text='"DMC2 probe / IN1"' font='("Helvetica", 10)'
+          <label text='"XYZ probe / IN1"' font='("Helvetica", 10)'
                  width="17" anchor='"w"'/>
           <led halpin='"probe-live"' size="16"
                on_color='"green"' off_color='"gray35"'/>
           <led halpin='"probe-latched"' size="16"
+               on_color='"orange"' off_color='"gray35"'/>
+          <tablerow/>
+          <label text='"Overtravel / IN2"' font='("Helvetica", 10)'
+                 width="17" anchor='"w"'/>
+          <led halpin='"overtravel-live"' size="16"
+               on_color='"red"' off_color='"gray35"'/>
+          <led halpin='"overtravel-seen"' size="16"
                on_color='"orange"' off_color='"gray35"'/>
           <tablerow/>
           <label text='"OUT5 program output"' font='("Helvetica", 10)'
@@ -213,6 +220,33 @@
         </table>
       </labelframe>
     </hbox>
+
+    <labelframe text="TOOL SETTER RECOVERY" font='("Helvetica", 10, "bold")'
+                padx="8" pady="5">
+      <table flexible_columns="[2]">
+        <tablesticky sticky="w"/>
+        <tablerow/>
+        <led halpin='"setter-ready"' size="16" on_color='"green"' off_color='"gray35"'/>
+        <label text='"Ready: both setter circuits closed"' font='("Helvetica", 10)' anchor='"w"'/>
+        <tablerow/>
+        <led halpin='"setter-unavailable"' size="16" on_color='"orange"' off_color='"gray35"'/>
+        <label text='"No valid Mesa input: restore link; use Clear Fault"' font='("Helvetica", 10)' anchor='"w"'/>
+        <tablerow/>
+        <led halpin='"setter-contact-open"' size="16" on_color='"orange"' off_color='"gray35"'/>
+        <label text='"Contact circuit open: release setter / restore circuit"' font='("Helvetica", 10)' anchor='"w"'/>
+        <tablerow/>
+        <led halpin='"setter-overtravel-open"' size="16" on_color='"red"' off_color='"gray35"'/>
+        <label text='"Overtravel circuit open: Abort, Pendant Mode, release"' font='("Helvetica", 10)' anchor='"w"'/>
+        <tablerow/>
+        <led halpin='"setter-needs-manual-idle"' size="16" on_color='"orange"' off_color='"gray35"'/>
+        <label text='"Overtravel retained: Abort, Pendant Mode; stop jogging"' font='("Helvetica", 10)' anchor='"w"'/>
+        <tablerow/>
+        <led halpin='"setter-needs-acknowledgement"' size="16" on_color='"orange"' off_color='"gray35"'/>
+        <label text='"Released: press CLEAR SETTER to remove program hold"' font='("Helvetica", 10)' anchor='"w"'/>
+      </table>
+      <button halpin='"clear-tool-setter"' text='"CLEAR SETTER"'
+              font='("Helvetica", 10, "bold")' padx="10" pady="2"/>
+    </labelframe>
 
     <labelframe text="DISPLAY HISTORY" font='("Helvetica", 10, "bold")'
                 padx="8" pady="5">
