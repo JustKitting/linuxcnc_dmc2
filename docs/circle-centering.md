@@ -16,11 +16,12 @@ signed axis direction; it is not a diameter. The reusable source reads
 `axisui.circle-search-mm` at entry; no per-run file is edited or generated.
 Invalid editing text clears `axisui.circle-parameters-valid`, so neither the
 pane nor a direct File Open/Run can silently use the preceding valid value.
-Coarse contact uses `coarse_feed_mm_min = 200`; the final
-measurement, release, return, and centering feed is `feed_mm_min = 50`.
-These are the endpoints of the probe's published **50–200 mm/min** range,
-not a separately manufacturer-designated optimum. This is a 4× first approach;
-5× the lower endpoint would exceed the published range. Sources:
+Initial search contact uses `coarse_feed_mm_min = 800`, the operator-requested
+4× increase from 200 mm/min. The final measurement, release, return, and centering
+feed stays at `feed_mm_min = 50`. The search-feed check accepts the requested
+800 mm/min maximum separately from the published **50–200 mm/min** probe feed
+range. The final measurement uses the published lower endpoint, not a separately
+manufacturer-designated optimum. Sources:
 [Amazon specification](https://www.amazon.com/dp/B0CC5BFFZW) and
 [manufacturer Main Specs](https://pgfuntransmission.com/product/npn-nc-cnc-3d-touch-probe-with-6-mm-shank-and-2-0-mm-tungsten-steel-ball-tip/).
 No separately guessed backoff distance is used.

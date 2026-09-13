@@ -25,8 +25,9 @@ o<cc_ui_parameters> if [#<_hal[axisui.circle-parameters-valid]> NE 1]
 o<cc_ui_parameters> endif
 #<search_mm> = #<_hal[axisui.circle-search-mm]>
 (SOURCE-VERIFIED published feed range: 50-200 mm/min; no separate optimum specified.)
-(PROPOSAL: published upper endpoint for coarse touch, lower endpoint for measurement.)
-#<coarse_feed_mm_min> = 200
+(USER-REQUESTED: initial search is four times the previous 200 mm/min.)
+(Measurement, release, return and centering keep the 50 mm/min feed.)
+#<coarse_feed_mm_min> = 800
 #<feed_mm_min> = 50
 (SOURCE-VERIFIED nominal 2.0 mm spherical ball; not the 6 mm shank.)
 #<ball_diameter_mm> = 2.0
@@ -37,8 +38,8 @@ o<cc_missing_settings> endif
 o<cc_feed_order> if [#<coarse_feed_mm_min> LE #<feed_mm_min>]
     (ABORT,The coarse feed must exceed the measurement feed. Review the two feeds and reopen the file; Pendant Mode remains available.)
 o<cc_feed_order> endif
-o<cc_feed_range> if [[#<feed_mm_min> LT 50] OR [#<coarse_feed_mm_min> GT 200]]
-    (ABORT,Circle feeds exceed the published 50-200 mm/min range. Review the feeds and reopen the file; Pendant Mode remains available.)
+o<cc_feed_range> if [[#<feed_mm_min> LT 50] OR [#<feed_mm_min> GT 200] OR [#<coarse_feed_mm_min> GT 800]]
+    (ABORT,Circle search feed exceeds 800 mm/min or measurement feed is outside 50-200 mm/min. Review the feeds and reopen the file; Pendant Mode remains available.)
 o<cc_feed_range> endif
 o<cc_spindle_on> if [#<_spindle_on> NE 0]
     (ABORT,Circle probing requires the spindle off. Use Spindle Stop, then File Open and Run again; Pendant Mode remains available.)
