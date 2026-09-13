@@ -80,6 +80,11 @@ pub struct RuntimeController {
 }
 
 impl RuntimeController {
+    /// Acknowledge LinuxCNC's already executed manual probe jog interruption.
+    pub fn observe_manual_probe_stop(&mut self) {
+        self.supervisor.observe_manual_probe_stop();
+    }
+
     pub const fn new() -> Self {
         Self {
             mesa_guard: MesaStartupGuard::new(),

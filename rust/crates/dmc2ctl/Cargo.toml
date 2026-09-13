@@ -10,5 +10,9 @@ build = "build.rs"
 name = "dmc2ctl"
 path = "src/main.rs"
 
+[[bin]]
+name = "dmc2-probe-capture"
+path = "src/probe_capture/main.rs"
+
 [dependencies]
 dmc2-diagnostics = { path = "../dmc2-diagnostics" }

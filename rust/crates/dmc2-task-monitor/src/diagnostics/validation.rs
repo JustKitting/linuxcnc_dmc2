@@ -81,27 +81,25 @@ pub(super) fn check_finite(report: &mut DiagnosticReport, source: impl Into<Stri
     }
 }
 
-pub(super) fn check_finite_f32_array(
+pub(super) fn check_finite_f32(
     report: &mut DiagnosticReport,
     source: impl Into<String>,
-    values: &[f32],
+    value: f32,
 ) {
     let source = source.into();
-    report.account(source.clone(), "finite_f32_array");
-    for (index, value) in values.iter().copied().enumerate() {
-        if !value.is_finite() {
-            issue(
-                report,
-                Severity::Error,
-                category::INVALID_VALUE,
-                format!("{source}[{index}]"),
-                "finite_f32",
-                u32::MAX,
-                i64::from(value.to_bits()),
-                None,
-                "LinuxCNC state-tag array contains a non-finite floating-point value",
-            );
-        }
+    report.account(source.clone(), "finite_f32");
+    if !value.is_finite() {
+        issue(
+            report,
+            Severity::Error,
+            category::INVALID_VALUE,
+            source,
+            "finite_f32",
+            u32::MAX,
+            i64::from(value.to_bits()),
+            None,
+            "LinuxCNC state-tag field contains a non-finite floating-point value",
+        );
     }
 }
 

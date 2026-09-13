@@ -8,7 +8,6 @@ from enum import Enum
 
 from .recovery_ui import RecoveryUiNotice
 from .script_contract import (
-    CONSERVATIVE_PREREQUISITES,
     ScriptPrerequisite,
     same_machine_file,
 )
@@ -115,12 +114,14 @@ class AxisRunGuard:
                 return contract.prerequisites, contract.source.value
             if refresh:
                 return None
-        if refresh:
+        if loader is None:
             raise RuntimeError(
                 "Script loader is unavailable; Run and Step remain blocked. "
                 "Use the independent recovery controls and relaunch the matching application."
             )
-        return CONSERVATIVE_PREREQUISITES, "conservative-ui-fallback"
+        # No selected contract means no prerequisites can be established or
+        # used to clear a retained fault. File Open establishes the contract.
+        return None
 
     def _machine_requirements_satisfied(
         self,

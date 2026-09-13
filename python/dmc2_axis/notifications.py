@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
+from pathlib import Path
 
 from .constants import (
     AGGREGATED_ERROR_PREFIXES,
@@ -129,9 +130,6 @@ def install_axis_ui_policy(
         nonlocal checked_recovery_contract
         nonlocal recovery_contract_error_identity
         try:
-            run_guard = getattr(live_plotter, "_dmc2_axis_run_guard", None)
-            if run_guard is not None:
-                run_guard.reconcile()
             try:
                 ensure_essential_recovery_controls(namespace)
             except Exception as controls_error:
@@ -143,6 +141,9 @@ def install_axis_ui_policy(
                 )
             else:
                 essential_controls_notice.clear()
+            run_guard = getattr(live_plotter, "_dmc2_axis_run_guard", None)
+            if run_guard is not None:
+                run_guard.reconcile()
             prefetched_diagnostic = None
             diagnostic_poll_failed = False
             try:
@@ -225,6 +226,19 @@ def install_axis_ui_policy(
                         message,
                         linuxcnc_module,
                     )
+                    probe_binding = getattr(live_plotter, "_dmc2_probe_mode", None)
+                    if (
+                        probe_binding is not None
+                        and bool(probe_binding.comp["probe-mode"])
+                        and bool(probe_binding.comp["probe-selected"])
+                        and message.strip() in (
+                            "Probe tripped during a joint jog.",
+                            "Probe tripped during a coordinate jog.",
+                        )
+                    ):
+                        # Rust delivers the retained contact sample as the info
+                        # bubble; preserve the raw LinuxCNC event in its journal.
+                        suppressed = True
                     print(
                         "DMC2_LINUXCNC_ERROR_CHANNEL "
                         f"sequence={event.sequence} kind={kind} name={name} "
@@ -499,3 +513,6 @@ def install_axis_ui_policy(
     live_plotter._dmc2_active_diagnostic_widgets = active_diagnostic_widgets
     live_plotter._dmc2_recovery_contract = lambda: checked_recovery_contract
     live_plotter._dmc2_ui_policy_installed = True
+    # Keep diagnostics/recovery installed if optional repaint setup raises.
+    notifications.tk.call("source", str(Path(__file__).with_name("notification_paint.tcl")))
+    notifications.tk.call("::dmc2::notification_paint::install", str(notifications))

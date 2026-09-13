@@ -1,5 +1,6 @@
 use std::ffi::OsString;
 use std::io::Write;
+use std::time::Duration;
 
 use crate::cli::Mode;
 use crate::deployment;
@@ -15,11 +16,24 @@ pub const REALTIME_ENVIRONMENT_NAME: &str = "LINUXCNC_FORCE_REALTIME";
 pub const REALTIME_ENVIRONMENT_VALUE: &str = "1";
 pub const PYTHON_BYTECODE_ENVIRONMENT_NAME: &str = "PYTHONDONTWRITEBYTECODE";
 pub const PYTHON_BYTECODE_ENVIRONMENT_VALUE: &str = "1";
+pub const BOOT_RETRY_DELAY: Duration = Duration::from_secs(5);
+const MESA_REGISTRATION_EAGAIN: &[u8] =
+    b"hm2_eth: rtapi_app_main: Resource temporarily unavailable (-11)";
+const MESA_REGISTRATION_FAILED: &[u8] = b"board fails HM2 registration";
+
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum PersistentPolicy {
+    SingleAttempt,
+    BootRetryMesaRegistrationOnce,
+}
 
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Action {
     Validate,
-    Persistent(CommandSpec),
+    Persistent {
+        command: CommandSpec,
+        policy: PersistentPolicy,
+    },
     Replace(CommandSpec),
 }
 
@@ -44,7 +58,19 @@ pub fn prepare(platform: &dyn Platform, layout: &Layout, mode: Mode) -> Result<P
             let tools = validation::validate_live_inputs(platform, layout)?;
             owner::prepare_exclusive_start(platform)?;
             deployment::synchronize_system_artifacts(platform, layout)?;
-            Action::Persistent(persistent_command(platform, layout, tools.linuxcnc)?)
+            Action::Persistent {
+                command: persistent_command(platform, layout, tools.linuxcnc)?,
+                policy: PersistentPolicy::SingleAttempt,
+            }
+        }
+        Mode::BootRetryMesaRegistrationOnce => {
+            let tools = validation::validate_live_inputs(platform, layout)?;
+            owner::prepare_exclusive_start(platform)?;
+            deployment::synchronize_system_artifacts(platform, layout)?;
+            Action::Persistent {
+                command: persistent_command(platform, layout, tools.linuxcnc)?,
+                policy: PersistentPolicy::BootRetryMesaRegistrationOnce,
+            }
         }
     };
     Ok(Plan { action })
@@ -64,53 +90,87 @@ pub fn execute(platform: &dyn Platform, plan: Plan, output: &mut dyn Write) -> R
             .map_err(|error| Error::os("write launcher output", "/dev/stdout".into(), error))?;
             Ok(0)
         }
-        Action::Persistent(command) => {
-            let completed = validation::run(platform, &command)?;
-            if completed.status != Some(0) {
-                let (failure_report, failure_report_read_error) =
-                    match platform.read_file(std::path::Path::new(FAILURE_REPORT_PATH)) {
-                        Ok(report) => (report, None),
-                        Err(error) => (Vec::new(), Some(error.to_string())),
-                    };
-                return Err(Error::LinuxCncSessionFailed {
-                    program: command.program,
-                    status: completed.status,
-                    stdout: completed.stdout,
-                    stderr: completed.stderr,
-                    failure_report_path: FAILURE_REPORT_PATH.into(),
-                    failure_report,
-                    failure_report_read_error,
-                });
-            }
-            if !completed.stderr.is_empty() {
-                return Err(Error::ProcessFailed {
-                    program: command.program.clone(),
-                    status: completed.status,
-                    stdout: completed.stdout,
-                    stderr: completed.stderr,
-                });
-            }
-            output
-                .write_all(&completed.stdout)
-                .map_err(|error| Error::os("write service output", "/dev/stdout".into(), error))?;
-            if !completed.stdout.is_empty() && !completed.stdout.ends_with(b"\n") {
-                output.write_all(b"\n").map_err(|error| {
+        Action::Persistent { command, policy } => {
+            let mut retry_available = policy == PersistentPolicy::BootRetryMesaRegistrationOnce;
+            loop {
+                let completed = validation::run(platform, &command)?;
+                if completed.status != Some(0) {
+                    let (failure_report, failure_report_read_error) =
+                        match platform.read_file(std::path::Path::new(FAILURE_REPORT_PATH)) {
+                            Ok(report) => (report, None),
+                            Err(error) => (Vec::new(), Some(error.to_string())),
+                        };
+                    if retry_available
+                        && retryable_mesa_registration_failure(&completed, &failure_report)
+                    {
+                        retry_available = false;
+                        writeln!(
+                        output,
+                        "BOOT MESA REGISTRATION RETRY: the first session exited with the exact initial HostMot2 -11 registration failure; waiting {} seconds, confirming exclusive ownership, and retrying once",
+                        BOOT_RETRY_DELAY.as_secs(),
+                    )
+                    .map_err(|error| {
+                        Error::os("write launcher output", "/dev/stdout".into(), error)
+                    })?;
+                        std::thread::sleep(BOOT_RETRY_DELAY);
+                        owner::prepare_exclusive_start(platform)?;
+                        continue;
+                    }
+                    return Err(Error::LinuxCncSessionFailed {
+                        program: command.program,
+                        status: completed.status,
+                        stdout: completed.stdout,
+                        stderr: completed.stderr,
+                        failure_report_path: FAILURE_REPORT_PATH.into(),
+                        failure_report,
+                        failure_report_read_error,
+                    });
+                }
+                if !completed.stderr.is_empty() {
+                    return Err(Error::ProcessFailed {
+                        program: command.program.clone(),
+                        status: completed.status,
+                        stdout: completed.stdout,
+                        stderr: completed.stderr,
+                    });
+                }
+                output.write_all(&completed.stdout).map_err(|error| {
                     Error::os("write service output", "/dev/stdout".into(), error)
                 })?;
+                if !completed.stdout.is_empty() && !completed.stdout.ends_with(b"\n") {
+                    output.write_all(b"\n").map_err(|error| {
+                        Error::os("write service output", "/dev/stdout".into(), error)
+                    })?;
+                }
+                writeln!(
+                    output,
+                    "PERSISTENT LIVE SESSION EXITED CLEANLY: {}.service",
+                    PERSISTENT_UNIT
+                )
+                .map_err(|error| Error::os("write launcher output", "/dev/stdout".into(), error))?;
+                return Ok(0);
             }
-            writeln!(
-                output,
-                "PERSISTENT LIVE SESSION EXITED CLEANLY: {}.service",
-                PERSISTENT_UNIT
-            )
-            .map_err(|error| Error::os("write launcher output", "/dev/stdout".into(), error))?;
-            Ok(0)
         }
         Action::Replace(command) => match platform.replace_process(&command) {
             Ok(()) => Err(Error::ExecReturned),
             Err(error) => Err(Error::os("replace process", command.program, error)),
         },
     }
+}
+
+fn retryable_mesa_registration_failure(
+    completed: &crate::platform::ProcessOutput,
+    failure_report: &[u8],
+) -> bool {
+    completed.status == Some(255)
+        && completed.stdout.is_empty()
+        && completed.stderr.is_empty()
+        && failure_report
+            .windows(MESA_REGISTRATION_EAGAIN.len())
+            .any(|window| window == MESA_REGISTRATION_EAGAIN)
+        && failure_report
+            .windows(MESA_REGISTRATION_FAILED.len())
+            .any(|window| window == MESA_REGISTRATION_FAILED)
 }
 
 fn direct_command(layout: &Layout, linuxcnc: std::path::PathBuf) -> CommandSpec {
@@ -269,5 +329,22 @@ mod tests {
         assert!(command
             .arguments
             .contains(&OsString::from("--service-type=exec")));
+    }
+
+    #[test]
+    fn boot_retry_requires_the_exact_mesa_registration_failure() {
+        let matching = crate::platform::ProcessOutput {
+            status: Some(255),
+            stdout: Vec::new(),
+            stderr: Vec::new(),
+        };
+        let report = b"hm2_eth: rtapi_app_main: Resource temporarily unavailable (-11)\nboard fails HM2 registration\n";
+        assert!(retryable_mesa_registration_failure(&matching, report));
+
+        let other_report = b"hm2_eth: rtapi_app_main: Resource temporarily unavailable (-11)\n";
+        assert!(!retryable_mesa_registration_failure(
+            &matching,
+            other_report
+        ));
     }
 }

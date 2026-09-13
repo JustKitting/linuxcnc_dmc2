@@ -31,6 +31,12 @@ class AxisUiFaultContract:
 class AxisUiFaultKind(Enum):
     """Every AXIS-local exception that may cross an operator boundary."""
 
+    PROBE_MODE_UI_INSTALL_FAILED = AxisUiFaultContract(
+        "PROBE_MODE_UI_INSTALL_FAILED",
+        RecoveryClassCode.RELAUNCH_APPLICATION,
+        "correct the named Probe Mode UI cause and relaunch DMC2; Clear Fault and Pendant Mode remain independent",
+    )
+
     BASE_RECOVERY_CONTROLS_INSTALL_FAILED = AxisUiFaultContract(
         "BASE_RECOVERY_CONTROLS_INSTALL_FAILED",
         RecoveryClassCode.RELAUNCH_APPLICATION,

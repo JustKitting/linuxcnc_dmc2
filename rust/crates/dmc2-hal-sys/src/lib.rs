@@ -11,6 +11,7 @@ include!(concat!(env!("OUT_DIR"), "/hal_bindings.rs"));
 mod abi;
 mod catalog;
 mod pin;
+pub mod probe_stream;
 mod registration_error;
 mod return_code;
 

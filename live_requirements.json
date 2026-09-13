@@ -127,15 +127,15 @@
       "id": "probe_contact_motion_behavior",
       "blocking": false,
       "status": "implemented_offline",
-      "value": "The shared no-motion OUT5 connectivity test monitors puck IN0 and DMC2 side-probe IN1 and removes power on either contact; puck IN0 is connected to motion.probe-input plus motion.digital-in-00; the first explicitly approved moving test probes only Z at 0.1 mm/s from recorded X/Y and returns to machine Z home after contact; IN1 remains status-only for motion",
-      "reason": "The general panel test validates either contact in a separate no-motion run, while tool-height-first-test.ngc is the deliberately slow first live G38.2 validation and does not alter coordinates or the tool table."
+      "value": "Operator-enabled Probe Mode selects mounted XYZ probe IN1 during Manual/idle operation. Rust captures servo-cycle machine coordinates and motion details; LinuxCNC retains its manual-contact jog stop. Record buffers samples in memory and writes only on Record off or Probe Mode off.",
+      "reason": "Replaces the obsolete connectivity-test section. G-code P1 selection remains independent; no G38 stale coordinates, old side-probe calibration or radius offsets are substituted for the captured samples. Live acceptance remains pending."
     },
     {
       "id": "probe_power_operation_policy",
       "blocking": false,
       "status": "implemented_offline",
       "value": "M64/M65 P0 request OUT5 through a realtime program-running gate; motion.digital-in-01 reports the gate state; normal completion, timeout, and ON_ABORT_COMMAND clear the request",
-      "reason": "The no-motion panel test has an exact 300-second maximum window and removes OUT5 immediately on IN0 or IN1 contact. The moving first test enables OUT5 only after its operator gate and removes it before the Z-home return; the abort handler remains the fallback cleanup."
+      "reason": "The mounted XYZ probe is USER-OBSERVED ACTUAL fixed +5 V powered. Probe Mode performs no power switching. The obsolete panel test is removed; the existing G-code P0 program-running gate remains."
     },
     {
       "id": "motor_alarm_input_mapping_and_polarity",

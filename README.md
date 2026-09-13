@@ -526,6 +526,15 @@ LinuxCNC 2.9.10's legacy automatic probe also requires the absent
 setuid (`root:root`, mode `4755`) or LinuxCNC will deliberately fall back to
 POSIX non-realtime scheduling.
 
+The XFCE login autostart entry is
+`packaging/dmc2-linuxcnc-autostart.desktop`. It uses the same standard launcher
+and persistent service path. Boot startup may retry exactly once after five
+seconds only when the completed first session's retained report contains both
+the initial HostMot2 `Resource temporarily unavailable (-11)` error and
+`board fails HM2 registration`. Every other launch failure remains terminal,
+and the ordinary Applications entry never retries. Neither path homes, clears
+a fault, selects a control mode, or commands motion.
+
 The compiled launcher runs LinuxCNC beneath `dmc2-session-supervisor`, a Linux
 child subreaper, while the live INI/HAL configuration places
 `dmc2-process-supervisor` directly around `milltask`, I/O, HALUI, AXIS, and the

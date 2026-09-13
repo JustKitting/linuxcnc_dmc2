@@ -13,6 +13,7 @@ const HAL_SOURCES: &[&str] = &[
     "live/hal/mesa_status_sources.hal",
     "live/hal/status_latches.hal",
     "live/hal/status_postgui.hal",
+    "live/hal/probe_mode.hal",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]

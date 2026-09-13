@@ -144,6 +144,7 @@ pub(in crate::application) fn run(args: Arguments) -> Result<(), NativeRuntimeEr
             .ok_or(NativeRuntimeError::MissingRequiredPath(
                 RequiredRuntimePath::DiagnosticJournal,
             ))?;
+    crate::application::probe::start();
     let hal = HalPublisher::new(&args.component, &diagnostic_journal_path, codes)?;
     let now = Instant::now();
     let mut runtime = RuntimeCoordinator::new(

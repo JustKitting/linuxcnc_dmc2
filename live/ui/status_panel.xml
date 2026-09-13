@@ -204,7 +204,7 @@
           <led halpin='"probe-latched"' size="16"
                on_color='"orange"' off_color='"gray35"'/>
           <tablerow/>
-          <label text='"OUT5 probe power"' font='("Helvetica", 10)'
+          <label text='"OUT5 program output"' font='("Helvetica", 10)'
                  width="17" anchor='"w"'/>
           <led halpin='"probe-power-enabled"' size="16"
                on_color='"yellow"' off_color='"gray35"'/>
@@ -213,30 +213,8 @@
       </labelframe>
     </hbox>
 
-    <labelframe text="CONTACT CONNECTIVITY - NO MOTION"
-                font='("Helvetica", 10, "bold")' padx="8" pady="5">
-      <hbox>
-        <boxexpand expand="no"/>
-        <boxfill fill="none"/>
-        <boxanchor anchor="w"/>
-        <button halpin='"contact-test-start"' text='"START TEST"'
-                font='("Helvetica", 10, "bold")' width="12" padx="8" pady="2"/>
-        <label text='"    "' font='("Helvetica", 10)' width="4" anchor='"w"'/>
-        <button halpin='"contact-test-stop"' text='"STOP TEST"'
-                font='("Helvetica", 10, "bold")' width="12" padx="8" pady="2"/>
-        <label text='"      "' font='("Helvetica", 10)' width="6" anchor='"w"'/>
-        <label text='"ACTIVE"' font='("Helvetica", 10, "bold")'
-               width="8" anchor='"w"'/>
-        <led halpin='"contact-test-active"' size="16"
-             on_color='"yellow"' off_color='"gray35"'/>
-        <label text='"      "' font='("Helvetica", 10)' width="6" anchor='"w"'/>
-        <label text='"Seconds left"' font='("Helvetica", 10)'
-               width="12" anchor='"w"'/>
-        <number halpin='"contact-test-time-left"' format='"6.1f"'
-                font='("Helvetica", 10, "bold")' width="8" anchor='"w"'/>
-        <label text='"      PASS = IN0 or IN1 SEEN"' font='("Helvetica", 10, "bold")'
-               width="29" anchor='"w"'/>
-      </hbox>
+    <labelframe text="PROBE MODE" font='("Helvetica", 10, "bold")' padx="8" pady="5">
+      <label text='"Probe controls starting..."' font='("Helvetica", 10)' anchor='"w"'/>
     </labelframe>
 
     <labelframe text="DISPLAY HISTORY" font='("Helvetica", 10, "bold")'

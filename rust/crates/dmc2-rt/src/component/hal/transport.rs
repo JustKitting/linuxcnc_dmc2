@@ -691,3 +691,7 @@ pub(in crate::component) unsafe fn publish_initial_safe(pins: &Pins) {
         }
     }
 }
+
+pub(in crate::component) unsafe fn manual_probe_contact(pins: &Pins) -> bool {
+    unsafe { read(pins.manual_probe_contact) }
+}

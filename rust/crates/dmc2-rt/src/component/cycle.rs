@@ -11,6 +11,9 @@ pub(super) unsafe extern "C" fn update_component(argument: *mut c_void, period: 
     let pins = unsafe { &*state.pins };
     let period_ns = period as u64;
     let advance_error = state.motion_commands.advance(period_ns).err();
+    if unsafe { super::hal::manual_probe_contact(pins) } {
+        state.runtime.observe_manual_probe_stop();
+    }
     let inputs = unsafe { runtime_inputs(state, pins, state.motion_commands.ready()) };
     if let Some(error) = advance_error {
         state.runtime.fail(error.fault_code());

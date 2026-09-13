@@ -401,7 +401,7 @@ impl LinuxCncPendantSupervisor {
         record.evidence.motor = motor;
         record.evidence.axis = active
             .map(|value| value.intent.axis)
-            .or_else(|| motor.map(axis_by_motor));
+            .or_else(|| motor.and_then(axis_by_motor));
         if let Some(active) = active {
             record.evidence.start_count = Some(active.start_count);
             record.evidence.target_count = Some(active.target_count);
@@ -576,11 +576,11 @@ const fn single_active(values: [bool; 3]) -> Option<usize> {
     }
 }
 
-const fn axis_by_motor(motor: usize) -> Axis {
+const fn axis_by_motor(motor: usize) -> Option<Axis> {
     match motor {
-        0 => Axis::Y,
-        1 => Axis::X,
-        2 => Axis::Z,
-        _ => Axis::X,
+        0 => Some(Axis::Y),
+        1 => Some(Axis::X),
+        2 => Some(Axis::Z),
+        _ => None,
     }
 }
