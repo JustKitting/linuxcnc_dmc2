@@ -1,0 +1,356 @@
+%
+(DMC2 SCRIPT 1)
+(DMC2 EFFECTS axis-motion;digital-output;coordinate-state;external-command)
+(DMC2 REQUIRES running-session;estop-clear;machine-on;interpreter-idle;all-homed)
+(DMC2 RECOVERY abort-task)
+(DMC2 END)
+(Gauge block: double-touch top, outward 1 mm grid, fit rotated footprint in Rust.)
+(Three side circuits at the same 1 mm stations and directions, 1 mm lower each time.)
+(Physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+(Unexpected outside-edge downward Z contact: save/read back, vertical return above measured top, cancel.)
+(No nominal block size or alignment is assumed. No tool or work offsets are changed.)
+(Abort never starts a motion. Clear Fault and Pendant Mode remain the operator recovery path.)
+
+o<gb_preview> if [#<_task> EQ 0]
+    (PREVIEW,stop)
+    M2
+o<gb_preview> endif
+o<gb_save> sub
+    M190 P5 Q#<_gb_sequence>
+    M66 P5 L0
+    #<_gb_sequence> = [#<_gb_sequence> + 1]
+o<gb_save> endsub
+
+o<gb_endpoints> sub
+    #<mx> = [#1 + #<_gb_ox>]
+    #<my> = [#2 + #<_gb_oy>]
+    #<mz> = [#3 + #<_gb_oz>]
+    #<bx> = [[#<mx> LE #<_ini[axis_x]min_limit>] OR [#<mx> GE #<_ini[axis_x]max_limit>]]
+    #<by> = [[#<my> LE #<_ini[axis_y]min_limit>] OR [#<my> GE #<_ini[axis_y]max_limit>]]
+    #<bz> = [[#<mz> LE #<_ini[axis_z]min_limit>] OR [#<mz> GE #<_ini[axis_z]max_limit>]]
+    o<gb_endpoint_limits> if [#<bx> OR #<by> OR #<bz>]
+        (ABORT,A requested block-scan endpoint reaches a configured travel boundary. No clipped or substitute move was issued. Abort then Pendant Mode.)
+    o<gb_endpoint_limits> endif
+    #<_gb_from_x> = #<_x>
+    #<_gb_from_y> = #<_y>
+    #<_gb_from_z> = #<_z>
+    #<_gb_to_x> = #1
+    #<_gb_to_y> = #2
+    #<_gb_to_z> = #3
+    #<_gb_feed> = #4
+o<gb_endpoints> endsub
+
+o<gb_touch> sub
+    o<gb_touch_active> if [#<_hal[motion.probe-input]> NE 0]
+        (ABORT,Probe remains active before a measuring approach. Abort then Pendant Mode; no new touch move was issued.)
+    o<gb_touch_active> endif
+    o<gb_endpoints> call [#<_gb_tx>] [#<_gb_ty>] [#<_gb_tz>] [#1]
+    #<_gb_stage> = #2
+    (X increasing: physical LEFT / LinuxCNC +X; decreasing: physical RIGHT / LinuxCNC -X. Top touches keep XY unchanged.)
+    G38.3 X#<_gb_tx> Y#<_gb_ty> Z#<_gb_tz> F#1
+    #<_gb_hit> = #5070
+    o<gb_touch_contact> if [#<_gb_hit> EQ 1]
+        #<_gb_contact_z> = #5063
+        o<gb_record> call [0]
+    o<gb_touch_contact> else
+        o<gb_fine_missing> if [#2 EQ 1]
+            o<gb_record> call [2]
+            (ABORT,CAPTURE FAILED - KEEP THE SETUP IN PLACE. The slow block re-touch had no contact. Coarse data is not an accepted measurement. Abort then Pendant Mode.)
+        o<gb_fine_missing> endif
+        o<gb_record> call [1]
+    o<gb_touch_contact> endif
+o<gb_touch> endsub
+
+o<gb_release_for_fine> sub
+    o<gb_release_side> if [#<_gb_phase> EQ 2]
+        (Reverse the side approach. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+        o<gb_release> call [#<_gb_ax>] [#<_gb_ay>] [#<_gb_tz>]
+    o<gb_release_side> else
+        (Release physical UP / LinuxCNC +Z; XY unchanged.)
+        o<gb_release> call [#<_x>] [#<_y>] [#<_gb_clear>]
+    o<gb_release_side> endif
+o<gb_release_for_fine> endsub
+
+o<gb_release> sub
+    o<gb_release_needed> if [#<_hal[motion.probe-input]> NE 0]
+        o<gb_endpoints> call [#1] [#2] [#3] [#<_gb_fine>]
+        #<_gb_stage> = -1
+        (X increasing: physical LEFT / LinuxCNC +X; decreasing: physical RIGHT / LinuxCNC -X. Vertical returns keep XY unchanged.)
+        G38.5 X#1 Y#2 Z#3 F#<_gb_fine>
+        #<released> = #5070
+        o<gb_record> call [2]
+        o<gb_not_released> if [[#<released> NE 1] OR [#<_hal[motion.probe-input]> NE 0]]
+            (ABORT,Probe did not release along its return path. Return to clearance could not be completed. Captures are retained; Abort then Pendant Mode.)
+        o<gb_not_released> endif
+    o<gb_release_needed> endif
+o<gb_release> endsub
+
+o<gb_retract> sub
+    (Return physical UP / LinuxCNC +Z only, to the measured top plus clearance.)
+    o<gb_release> call [#<_x>] [#<_y>] [#<_gb_clear>]
+    o<gb_guarded> call [#<_x>] [#<_y>] [#<_gb_clear>] [0]
+o<gb_retract> endsub
+
+o<gb_guarded> sub
+    o<gb_guarded_move> if [[#1 NE #<_x>] OR [#2 NE #<_y>] OR [#3 NE #<_z>]]
+        o<gb_guarded_active> if [#<_hal[motion.probe-input]> NE 0]
+            (ABORT,Probe is active before a transfer. Abort then Pendant Mode; no transfer was issued.)
+        o<gb_guarded_active> endif
+        o<gb_endpoints> call [#1] [#2] [#3] [#<_gb_coarse>]
+        #<_gb_stage> = -1
+        (X increasing: physical LEFT / LinuxCNC +X; decreasing: physical RIGHT / LinuxCNC -X. Outside-edge descents hold XY.)
+        G38.3 X#1 Y#2 Z#3 F#<_gb_coarse>
+        o<gb_guarded_hit> if [#5070 EQ 1]
+            (Exact trigger must be durably saved and read back BEFORE recovery.)
+            o<gb_record> call [3]
+            o<gb_guarded_z_recovery> if [#4 EQ 1]
+                o<gb_recover_z> call
+                (ABORT,Unexpected Z contact outside the measured block footprint. Trigger retained; probe returned vertically above the measured top. Scan cancelled. Abort then Pendant Mode.)
+            o<gb_guarded_z_recovery> endif
+            (ABORT,Unexpected contact during a transfer or upward return. Trigger retained; no further move was issued. Abort then Pendant Mode.)
+        o<gb_guarded_hit> else
+            o<gb_record> call [2]
+        o<gb_guarded_hit> endif
+    o<gb_guarded_move> endif
+o<gb_guarded> endsub
+
+o<gb_recover_z> sub
+    (User-requested recovery: UP / LinuxCNC +Z to above the measured block, then cancel.)
+    (No X/Y change. No recovery runs in the generic operator Abort hook.)
+    o<gb_recovery_upward> if [#<_gb_clear> LE #<_z>]
+        (ABORT,Unexpected Z contact has no higher retained clearance target. No substitute return was issued. Abort then Pendant Mode.)
+    o<gb_recovery_upward> endif
+    o<gb_release> call [#<_x>] [#<_y>] [#<_gb_clear>]
+    o<gb_recovery_remaining> if [#<_z> LT #<_gb_clear>]
+        o<gb_endpoints> call [#<_x>] [#<_y>] [#<_gb_clear>] [#<_gb_fine>]
+        G38.3 Z#<_gb_clear> F#<_gb_fine>
+        o<gb_recovery_obstructed> if [#5070 EQ 1]
+            o<gb_record> call [3]
+            (ABORT,The upward recovery encountered another contact before block clearance. Both contacts are retained; recovery stopped. Abort then Pendant Mode.)
+        o<gb_recovery_obstructed> endif
+    o<gb_recovery_remaining> endif
+    o<gb_record> call [5]
+    o<gb_recovery_height> if [ABS[#<_z> - #<_gb_clear>] GT [#<_gb_step_z> / 2]]
+        (ABORT,The reported recovery endpoint is not above the measured block. No further move was issued. Abort then Pendant Mode.)
+    o<gb_recovery_height> endif
+o<gb_recover_z> endsub
+
+o<gb_record> sub
+    (0 contact, 1 miss, 2 reported movement endpoint, 3 obstruction, 4 clearance ready, 5 recovery, 6 result.)
+    #<success> = 0
+    #<wx> = #<_x>
+    #<wy> = #<_y>
+    #<wz> = #<_z>
+    o<gb_record_trigger> if [[#1 EQ 0] OR [#1 EQ 3]]
+        #<success> = #5070
+        #<wx> = #5061
+        #<wy> = #5062
+        #<wz> = #5063
+    o<gb_record_trigger> endif
+    #<mx> = [#<wx> + #<_gb_ox>]
+    #<my> = [#<wy> + #<_gb_oy>]
+    #<mz> = [#<wz> + #<_gb_oz>]
+    (LOGOPEN,../tmp/output/block-request.txt)
+    (LOG,DMC2_BLOCK_RECORD_V1)
+    (LOG,sequence=%d#<_gb_sequence>)
+    o<gb_kind> if [#1 EQ 0]
+        (LOG,kind=touch)
+    o<gb_kind> elseif [#1 EQ 1]
+        (LOG,kind=miss)
+    o<gb_kind> elseif [#1 EQ 2]
+        (LOG,kind=travel)
+    o<gb_kind> elseif [#1 EQ 3]
+        (LOG,kind=obstruction)
+    o<gb_kind> elseif [#1 EQ 4]
+        (LOG,kind=ready)
+    o<gb_kind> elseif [#1 EQ 5]
+        (LOG,kind=recovery)
+    o<gb_kind> elseif [#1 EQ 6]
+        (LOG,kind=result)
+    o<gb_kind> endif
+    (LOG,sample=%d#<_gb_sample>)
+    (LOG,phase=%d#<_gb_phase>)
+    (LOG,column=%d#<_gb_column>)
+    (LOG,row=%d#<_gb_row>)
+    (LOG,edge=%d#<_gb_edge>)
+    (LOG,layer=%d#<_gb_layer>)
+    (LOG,stage=%d#<_gb_stage>)
+    (LOG,success=%d#<success>)
+    (LOG,work_x=%.9f#<wx>)
+    (LOG,work_y=%.9f#<wy>)
+    (LOG,work_z=%.9f#<wz>)
+    (LOG,machine_x=%.9f#<mx>)
+    (LOG,machine_y=%.9f#<my>)
+    (LOG,machine_z=%.9f#<mz>)
+    (LOG,from_x=%.9f#<_gb_from_x>)
+    (LOG,from_y=%.9f#<_gb_from_y>)
+    (LOG,from_z=%.9f#<_gb_from_z>)
+    (LOG,target_x=%.9f#<_gb_to_x>)
+    (LOG,target_y=%.9f#<_gb_to_y>)
+    (LOG,target_z=%.9f#<_gb_to_z>)
+    (LOG,feed=%.9f#<_gb_feed>)
+    (LOGCLOSE)
+    o<gb_save> call
+    o<gb_contact_readback> if [[#1 EQ 0] OR [#1 EQ 3]]
+        (DEBUG,Block trigger %.9f#<mx>,#<my>,#<mz> machine mm retained and read back in tmp/output/block.)
+    o<gb_contact_readback> endif
+o<gb_record> endsub
+
+o<gb_parameters> if [#<_hal[axisui.block-parameters-valid]> NE 1]
+    (ABORT,Gauge block settings are invalid. Correct the fields in Custom Scripts then Run. Pendant Mode remains available.)
+o<gb_parameters> endif
+o<gb_spindle> if [#<_spindle_on> NE 0]
+    (ABORT,The spindle must be stopped for a gauge block scan. Use Spindle Stop then Run; Pendant Mode remains available.)
+o<gb_spindle> endif
+M66 P3 L0
+o<gb_spindle_report> if [#5399 NE 0]
+    (ABORT,The spindle monitor reports running. Stop the spindle before a gauge block scan; Pendant Mode remains available.)
+o<gb_spindle_report> endif
+o<gb_rotation> if [#[5230 + [#5220 - 1] * 20] NE 0]
+    (ABORT,Use an unrotated work coordinate frame. The block itself may be rotated; no offsets have been changed.)
+o<gb_rotation> endif
+M70
+G21 G90 G94 G17 G40 G80 G61.1
+#<_gb_ox> = [#<_abs_x> - #<_x>]
+#<_gb_oy> = [#<_abs_y> - #<_y>]
+#<_gb_oz> = [#<_abs_z> - #<_z>]
+#<_gb_fine> = 50
+#<_gb_coarse> = 200
+#<_gb_margin> = #<_hal[axisui.block-clearance-mm]>
+#<_gb_step_z> = [1 / ABS[#<_ini[joint_2]scale>]]
+#<_gb_sequence> = 0
+#<_gb_sample> = 0
+#<_gb_phase> = 0
+#<_gb_column> = 0
+#<_gb_row> = 0
+#<_gb_edge> = -1
+#<_gb_layer> = 0
+#<_gb_stage> = -1
+#<_gb_clear> = #<_z>
+M64 P1
+M66 P5 L0
+o<gb_selected> if [#5399 NE 1]
+    (ABORT,XYZ probe selection was not reported. Abort then Pendant Mode; check the probe selection indication.)
+o<gb_selected> endif
+o<gb_initial_contact> if [#<_hal[motion.probe-input]> NE 0]
+    (ABORT,The probe is already touching. Abort then place it clear above the gauge block using Pendant Mode.)
+o<gb_initial_contact> endif
+M190 P4 Q0
+M66 P5 L0
+(LOGOPEN,../tmp/output/block-request.txt)
+(LOG,DMC2_BLOCK_RECORD_V1)
+(LOG,sequence=%d#<_gb_sequence>)
+(LOG,kind=start)
+(LOG,x=%.9f#<_x>)
+(LOG,y=%.9f#<_y>)
+(LOG,z=%.9f#<_z>)
+(LOG,offset_x=%.9f#<_gb_ox>)
+(LOG,offset_y=%.9f#<_gb_oy>)
+(LOG,offset_z=%.9f#<_gb_oz>)
+(LOG,x_min=%.9f#<_ini[axis_x]min_limit>)
+(LOG,x_max=%.9f#<_ini[axis_x]max_limit>)
+(LOG,y_min=%.9f#<_ini[axis_y]min_limit>)
+(LOG,y_max=%.9f#<_ini[axis_y]max_limit>)
+(LOG,z_min=%.9f#<_ini[axis_z]min_limit>)
+(LOG,z_max=%.9f#<_ini[axis_z]max_limit>)
+(LOG,search=%.9f#<_hal[axisui.block-search-mm]>)
+(LOG,grid=1)
+(LOG,drop=%.9f#<_hal[axisui.block-drop-mm]>)
+(LOG,clearance=%.9f#<_gb_margin>)
+(LOG,side_depth=%.9f#<_hal[axisui.block-side-depth-mm]>)
+(LOG,feed=%.9f#<_gb_fine>)
+(LOG,coarse_feed=%.9f#<_gb_coarse>)
+(LOG,ball_diameter=2)
+#<step_x> = [1 / ABS[#<_ini[joint_0]scale>]]
+#<step_y> = [1 / ABS[#<_ini[joint_1]scale>]]
+(LOG,step_x=%.9f#<step_x>)
+(LOG,step_y=%.9f#<step_y>)
+(LOG,step_z=%.9f#<_gb_step_z>)
+(LOGCLOSE)
+o<gb_save> call
+
+o<gb_scan> while [1]
+    M190 P6 Q#<_gb_sequence>
+    M66 P5 L0
+    o<gb_plan_fresh> if [#<_hal[axisui.block-plan-sequence]> NE #<_gb_sequence>]
+        (ABORT,The gauge block planner did not publish this capture sequence. Abort then Pendant Mode. No stale target will be used.)
+    o<gb_plan_fresh> endif
+    #<next_phase> = #<_hal[axisui.block-plan-phase]>
+    o<gb_finished> if [#<next_phase> EQ 3]
+        o<gb_scan> break
+    o<gb_finished> endif
+    #<_gb_phase> = #<next_phase>
+    #<_gb_sample> = #<_hal[axisui.block-plan-sample]>
+    #<_gb_column> = #<_hal[axisui.block-plan-column]>
+    #<_gb_row> = #<_hal[axisui.block-plan-row]>
+    #<_gb_edge> = #<_hal[axisui.block-plan-edge]>
+    #<_gb_layer> = #<_hal[axisui.block-plan-layer]>
+    #<_gb_ax> = #<_hal[axisui.block-plan-approach-x]>
+    #<_gb_ay> = #<_hal[axisui.block-plan-approach-y]>
+    #<_gb_tx> = #<_hal[axisui.block-plan-target-x]>
+    #<_gb_ty> = #<_hal[axisui.block-plan-target-y]>
+    #<_gb_tz> = #<_hal[axisui.block-plan-target-z]>
+    #<_gb_clear> = #<_hal[axisui.block-plan-clear-z]>
+    o<gb_plan_still_fresh> if [#<_hal[axisui.block-plan-sequence]> NE #<_gb_sequence>]
+        (ABORT,The block plan changed while being read. Abort then Pendant Mode; no new motion was issued.)
+    o<gb_plan_still_fresh> endif
+    o<gb_not_reference> if [#<_gb_phase> NE 0]
+        o<gb_transfer_height> if [ABS[#<_z> - #<_gb_clear>] GT [#<_gb_step_z> / 2]]
+            (ABORT,Probe is not at the retained clearance above the block. Abort then Pendant Mode; no lateral transfer was issued.)
+        o<gb_transfer_height> endif
+        (X increasing: physical LEFT / LinuxCNC +X; decreasing: physical RIGHT / LinuxCNC -X.)
+        o<gb_guarded> call [#<_gb_ax>] [#<_gb_ay>] [#<_gb_clear>] [0]
+    o<gb_not_reference> endif
+    o<gb_side_descent> if [#<_gb_phase> EQ 2]
+        (Outside-edge descent is Z only. Unexpected contact returns vertically above the measured block.)
+        o<gb_guarded> call [#<_x>] [#<_y>] [#<_gb_tz>] [1]
+    o<gb_side_descent> endif
+    (Top approach is -Z. Side X component: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+    o<gb_touch> call [#<_gb_coarse>] [0]
+    o<gb_coarse_hit> if [#<_gb_hit> EQ 1]
+        o<gb_release_for_fine> call
+        (Repeat identical target and direction at the fine touch feed.)
+        (Side X component: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+        o<gb_touch> call [#<_gb_fine>] [1]
+        o<gb_measured_top> if [#<_gb_phase> NE 2]
+            o<gb_new_clearance> if [[#<_gb_contact_z> + #<_gb_margin>] GT #<_gb_clear>]
+                #<_gb_clear> = [#<_gb_contact_z> + #<_gb_margin>]
+            o<gb_new_clearance> endif
+            o<gb_first_clearance> if [#<_gb_phase> EQ 0]
+                #<_gb_clear> = [#<_gb_contact_z> + #<_gb_margin>]
+            o<gb_first_clearance> endif
+        o<gb_measured_top> endif
+    o<gb_coarse_hit> else
+        o<gb_missing_reference> if [#<_gb_phase> EQ 0]
+            (ABORT,No block top contact within the initial search travel. No top plane was established. Abort then Pendant Mode.)
+        o<gb_missing_reference> endif
+        o<gb_missing_side> if [#<_gb_phase> EQ 2]
+            o<gb_retract> call
+            (ABORT,A planned side station had no contact. Returned above the measured top; the scan is cancelled. Abort then Pendant Mode.)
+        o<gb_missing_side> endif
+    o<gb_coarse_hit> endif
+    o<gb_side_withdraw> if [#<_gb_phase> EQ 2]
+        (Withdraw along the same side normal before lifting. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+        o<gb_release> call [#<_gb_ax>] [#<_gb_ay>] [#<_gb_tz>]
+        (X increasing: physical LEFT / LinuxCNC +X; decreasing: physical RIGHT / LinuxCNC -X.)
+        o<gb_guarded> call [#<_gb_ax>] [#<_gb_ay>] [#<_gb_tz>] [0]
+    o<gb_side_withdraw> endif
+    o<gb_retract> call
+    o<gb_endpoints> call [#<_x>] [#<_y>] [#<_z>] [#<_gb_fine>]
+    #<_gb_stage> = -1
+    o<gb_record> call [4]
+    (DEBUG,Gauge block sample %d#<_gb_sample> retained; phase %d#<_gb_phase>, circuit %d#<_gb_layer>. Probe at measured-top clearance.)
+o<gb_scan> endwhile
+M65 P1
+M66 P5 L0
+o<gb_selection_release> if [#5399 NE 0]
+    (ABORT,Scan ended but program probe selection did not clear. Use Abort then Pendant Mode; data is retained in tmp/output/block.)
+o<gb_selection_release> endif
+o<gb_endpoints> call [#<_x>] [#<_y>] [#<_z>] [#<_gb_fine>]
+#<_gb_stage> = -1
+o<gb_record> call [6]
+(DEBUG,Gauge block scan ended at top clearance. Exact contacts, movements and relative plane fits are in tmp/output/block.)
+M72
+M2
+
+%

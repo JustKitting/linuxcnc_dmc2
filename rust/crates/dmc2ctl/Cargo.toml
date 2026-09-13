@@ -16,3 +16,4 @@ path = "src/probe_capture/main.rs"
 
 [dependencies]
 dmc2-diagnostics = { path = "../dmc2-diagnostics" }
+dmc2-hal-sys = { path = "../dmc2-hal-sys" }

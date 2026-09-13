@@ -2,6 +2,18 @@
   "version": 1,
   "scripts": [
     {
+      "key": "block",
+      "operation": "program.measure-gauge-block",
+      "requires_beginning": true,
+      "description": "Start clear above the block. Discovers its rotated footprint on a 1 mm grid, then double-touches the same side stations on three circuits 1 mm apart. Unexpected outside-edge Z contact retracts above the measured top and cancels. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
+      "parameters": [
+        {"pin": "block-search-mm", "label": "Initial top search travel", "kind": "positive-mm", "default": "25", "increment": "1"},
+        {"pin": "block-clearance-mm", "label": "Clearance above measured top", "kind": "positive-mm", "default": "2", "increment": "1"},
+        {"pin": "block-drop-mm", "label": "Grid dip below first top", "kind": "positive-mm", "default": "1", "increment": "1"},
+        {"pin": "block-side-depth-mm", "label": "First side ball-centre depth", "kind": "positive-mm", "default": "1", "increment": "1"}
+      ]
+    },
+    {
       "key": "circle",
       "operation": "program.find-circle-center",
       "description": "Start clear inside the hole at probing height. XY only. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",

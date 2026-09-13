@@ -1,7 +1,7 @@
 use super::schema::{validate, Workflow};
 use std::fs::{self, File, OpenOptions};
 use std::io::{Read, Seek, SeekFrom, Write};
-use std::path::Path;
+use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
 fn io(context: &str, error: std::io::Error) -> String {
@@ -130,6 +130,9 @@ pub(super) fn commit(
     if workflow == Workflow::Surface && request.lines().any(|line| line == "kind=result") {
         super::surface::export(&path, true)?;
     }
+    if workflow == Workflow::Block && request.lines().any(|line| line == "kind=result") {
+        super::block::export(&path, true)?;
+    }
     fs::remove_file(output.join(workflow.request()))
         .map_err(|e| io("consuming the saved capture request", e))?;
     save_active(output, workflow, lines[0], sequence + 1)?;
@@ -138,6 +141,25 @@ pub(super) fn commit(
         path.display()
     );
     Ok(())
+}
+
+pub(super) fn active_path(
+    output: &Path,
+    workflow: Workflow,
+    expected: u64,
+) -> Result<PathBuf, String> {
+    let text = fs::read_to_string(output.join(workflow.active()))
+        .map_err(|e| io("reading active capture state", e))?;
+    let lines: Vec<_> = text.lines().collect();
+    if lines.len() != 2
+        || lines[1].parse::<u64>() != Ok(expected)
+        || !lines[0].starts_with(&format!("{}-", workflow.name()))
+        || !lines[0].ends_with(".txt")
+        || lines[0].contains(['/', '\\'])
+    {
+        return Err("The active capture ledger or sequence does not match this script. Reopen the script after Abort and Pendant Mode.".into());
+    }
+    Ok(output.join(workflow.name()).join(lines[0]))
 }
 
 fn exact_trigger(request: &str, xyz: [f64; 3]) -> Result<String, String> {

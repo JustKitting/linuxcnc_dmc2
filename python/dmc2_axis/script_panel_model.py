@@ -55,6 +55,7 @@ class PanelScript:
     operation: Operation
     description: str
     parameters: tuple[Parameter, ...]
+    requires_beginning: bool = False
 
     @property
     def valid_pin(self) -> str:
@@ -72,8 +73,11 @@ def read_panel_scripts(path: Path, operations: dict[str, Operation]) -> tuple[Pa
     keys: set[str] = set()
     pins: set[str] = set()
     for row in document["scripts"]:
-        if set(row) != {"key", "operation", "description", "parameters"}:
+        if set(row) - {"requires_beginning"} != {"key", "operation", "description", "parameters"}:
             raise ValueError(f"Invalid Custom Scripts entry in {path}")
+        requires_beginning = row.get("requires_beginning", False)
+        if type(requires_beginning) is not bool:
+            raise ValueError(f"Invalid beginning-of-program requirement in {path}")
         key = row["key"]
         if not re.fullmatch(r"[a-z][a-z0-9-]*", key) or key in keys:
             raise ValueError(f"Invalid or duplicate Custom Scripts key: {key!r}")
@@ -96,7 +100,7 @@ def read_panel_scripts(path: Path, operations: dict[str, Operation]) -> tuple[Pa
                 raise ValueError(f"Invalid default for {parameter.label}")
             pins.add(parameter.pin)
             parameters.append(parameter)
-        scripts.append(PanelScript(key, operation, row["description"], tuple(parameters)))
+        scripts.append(PanelScript(key, operation, row["description"], tuple(parameters), requires_beginning))
     if not scripts:
         raise ValueError("The Custom Scripts catalog is empty.")
     return tuple(scripts)

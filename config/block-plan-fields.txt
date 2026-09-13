@@ -1,0 +1,14 @@
+DMC2_BLOCK_PLAN_V1
+sequence
+phase
+sample
+column
+row
+edge
+layer
+approach-x
+approach-y
+target-x
+target-y
+target-z
+clear-z

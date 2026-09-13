@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 pub(super) enum Workflow {
     Circle,
     Surface,
+    Block,
 }
 
 impl Workflow {
@@ -11,18 +12,21 @@ impl Workflow {
         match self {
             Self::Circle => "circle",
             Self::Surface => "surface",
+            Self::Block => "block",
         }
     }
     pub(super) fn magic(self) -> &'static str {
         match self {
             Self::Circle => "DMC2_CIRCLE_RECORD_V2",
             Self::Surface => "DMC2_SURFACE_RECORD_V1",
+            Self::Block => "DMC2_BLOCK_RECORD_V1",
         }
     }
     pub(super) fn ledger_magic(self) -> &'static str {
         match self {
             Self::Circle => "DMC2_CIRCLE_LEDGER_V2",
             Self::Surface => "DMC2_SURFACE_LEDGER_V1",
+            Self::Block => "DMC2_BLOCK_LEDGER_V1",
         }
     }
     pub(super) fn request(self) -> String {
@@ -190,6 +194,11 @@ pub(super) fn validate(workflow: Workflow, request: &str, sequence: u64) -> Resu
             "final_work_y",
             "final_work_z",
         ],
+        (Workflow::Block, "start") => super::block::START_FIELDS,
+        (
+            Workflow::Block,
+            "touch" | "miss" | "travel" | "obstruction" | "ready" | "recovery" | "result",
+        ) => super::block::EVENT_FIELDS,
         _ => return Err(format!("unknown capture record kind {kind}")),
     };
     if values.len() != required.len() {
@@ -211,9 +220,18 @@ pub(super) fn validate(workflow: Workflow, request: &str, sequence: u64) -> Resu
     if kind == "touch" && !matches!(values["stage"], "0" | "1") {
         return Err("touch stage must be coarse-location=0 or fine-measurement=1".into());
     }
+    if workflow == Workflow::Block {
+        super::block::validate_fields(kind, &values)?;
+    }
     for key in [
         "point", "row", "column", "rows", "columns", "points", "hits", "misses",
     ] {
+        // The adaptive block grid is signed around its starting cell. Its own
+        // schema validates full signed indices; fixed surface grids use -1 only
+        // for their reference measurement.
+        if workflow == Workflow::Block {
+            continue;
+        }
         if let Some(raw) = values.get(key) {
             let number = raw.parse::<f64>().unwrap();
             if number.fract() != 0.0 || number < -1.0 {

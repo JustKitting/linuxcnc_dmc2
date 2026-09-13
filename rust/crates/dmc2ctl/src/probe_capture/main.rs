@@ -1,5 +1,7 @@
-//! Synchronous M190 persistence gate for circle and surface probing.
+//! Synchronous M190 persistence and data-planning gate for probing scripts.
 //! No motion, command channel, reset, restart, or fault-clear capability.
+mod block;
+mod ledger;
 mod schema;
 mod storage;
 mod surface;
@@ -16,23 +18,34 @@ extern "C" {
 
 fn main() {
     let args: Vec<_> = env::args().skip(1).collect();
-    if args.first().map(String::as_str) == Some("--export-surface") {
+    if matches!(
+        args.first().map(String::as_str),
+        Some("--export-surface" | "--export-block")
+    ) {
         // Offline data export must never publish a live machine error.
         let result = if args.len() == 2 {
-            surface::export(std::path::Path::new(&args[1]), false)
+            if args[0] == "--export-block" {
+                block::export(std::path::Path::new(&args[1]), false)
+            } else {
+                surface::export(std::path::Path::new(&args[1]), false)
+            }
         } else {
-            Err("use --export-surface <retained-surface-ledger.txt>".into())
+            Err("use --export-surface or --export-block followed by a retained ledger path".into())
         };
         if let Err(error) = result {
-            eprintln!("Surface export failed; retained contacts were not changed: {error}");
+            eprintln!("Probe data export failed; retained contacts were not changed: {error}");
             std::process::exit(1);
         }
         return;
     }
     if let Err(error) = run() {
-        let message = format!(
+        let message = if args.first().and_then(|s| integer(s).ok()) == Some(6) {
+            format!("Gauge-block planning stopped: {error} Captures are retained. Use Abort, then Pendant Mode; correct the reported condition before a new Run.")
+        } else {
+            format!(
             "CAPTURE FAILED - KEEP THE SETUP IN PLACE. Abort, then Pendant Mode. Recording error: {error}"
-        );
+        )
+        };
         eprintln!("{message}");
         let nml = env::var("EMC2_NMLFILE")
             .unwrap_or_else(|_| "/usr/share/linuxcnc/linuxcnc.nml".to_owned());
@@ -52,7 +65,7 @@ fn main() {
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args == ["--help"] {
-        println!("dmc2-probe-capture is the synchronous M190 capture gate. Circle: P0 Q0 begins, P1 Q<sequence> saves. Surface: P2 Q0 begins, P3 Q<sequence> saves. Records are durably saved and read back. --export-surface <ledger> exports retained surface data without a machine connection. No machine commands are issued.");
+        println!("dmc2-probe-capture is the synchronous M190 capture gate. Circle: P0 Q0 begins, P1 Q<sequence> saves. Surface: P2 Q0 begins, P3 Q<sequence> saves. Block: P4 Q0 begins, P5 Q<sequence> saves, P6 Q<sequence> publishes the next retained-data plan. Records are durably saved and read back. --export-surface <ledger> and --export-block <ledger> export retained data without a machine connection. No machine commands are issued.");
         return Ok(());
     }
     if args.len() != 2 {
@@ -77,6 +90,12 @@ fn run() -> Result<(), String> {
         1 => storage::commit(&output, Workflow::Circle, sequence, trigger_position),
         2 if sequence == 0 => storage::begin(&output, Workflow::Surface),
         3 => storage::commit(&output, Workflow::Surface, sequence, trigger_position),
+        4 if sequence == 0 => {
+            block::invalidate()?;
+            storage::begin(&output, Workflow::Block)
+        }
+        5 => storage::commit(&output, Workflow::Block, sequence, trigger_position),
+        6 => block::publish_next(&output, sequence),
         _ => Err("unknown capture action; reopen the selected probing script".to_owned()),
     }
 }

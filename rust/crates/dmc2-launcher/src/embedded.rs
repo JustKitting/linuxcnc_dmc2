@@ -38,6 +38,7 @@ macro_rules! h100_file {
 pub const FILES: &[File] = &[
     project_file!("config/operations.tsv"),
     project_file!("config/script-panel.json"),
+    project_file!("config/block-plan-fields.txt"),
     project_file!("config/processes.tsv"),
     project_file!("config/linuxcnc-driver-overlays.tsv"),
     project_file!("packaging/dmc2-linuxcnc-autostart.desktop"),
@@ -55,6 +56,7 @@ pub const FILES: &[File] = &[
     project_file!("live/nc_files/dmc2_abort.ngc"),
     project_file!("live/nc_files/find-circle-center.ngc"),
     project_file!("live/nc_files/map-top-surface.ngc"),
+    project_file!("live/nc_files/measure-gauge-block.ngc"),
     project_file!("live/nc_files/go-to-home.ngc"),
     project_file!("scripts/install_native_module.sh"),
     project_file!("scripts/build_linuxcnc_driver_overlays.sh"),
@@ -64,6 +66,7 @@ pub const FILES: &[File] = &[
     project_file!("python/dmc2_axis/axis_user_command.py"),
     project_file!("python/dmc2_axis/base_controls.py"),
     project_file!("python/dmc2_axis/custom_scripts.py"),
+    project_file!("python/dmc2_axis/block_plan.py"),
     project_file!("python/dmc2_axis/script_panel_layout.py"),
     project_file!("python/dmc2_axis/script_panel_model.py"),
     project_file!("python/dmc2_axis/constants.py"),

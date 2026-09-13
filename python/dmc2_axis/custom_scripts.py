@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from .block_plan import create_block_plan_parameters
 
 from .constants import CUSTOM_SCRIPTS_CONTENT, GO_TO_HOME_OPERATION_ID, GO_TO_HOME_WIDGET_PATH, HOMING_STATE_POLL_MILLISECONDS, PROBE_SECTION_PATH
 from .operation_catalog import project_catalog_path, read_operations
@@ -45,6 +46,7 @@ class CustomScriptsBinding:
             self.paths[key] = path
             self.contracts[key] = inspector.inspect(path)
         hal = namespace["hal"]
+        create_block_plan_parameters(self.comp, hal, self.project / "config/block-plan-fields.txt")
         for script in self.scripts.values():
             self.preference_notices[script.key] = RecoveryUiNotice(namespace)
             self.publish_notices[script.key] = RecoveryUiNotice(namespace)
@@ -141,6 +143,8 @@ class CustomScriptsBinding:
         if self.locked:
             raise ValueError("A script submission is pending. Wait for it to stop or use the visible Abort control.")
         if key in self.scripts:
+            if self.scripts[key].requires_beginning and int(self.ns.get("program_start_line", 0)) != 0:
+                raise ValueError("This scan must establish a fresh top reference. Use its Run button in Custom Scripts to reopen it from the beginning.")
             self.apply_parameters(key)
             if issue := self.parameter_errors.get(key):
                 raise ValueError(issue + " Open Custom Scripts to correct it, then retry Run.")

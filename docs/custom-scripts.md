@@ -2,7 +2,7 @@
 
 The wider pendant pane contains **Pendant** and **Custom Scripts** tabs.
 The toolbar's existing **Pendant Mode** control shows that pane. Select
-**Hole centering** or **Surface map**, edit the parameter fields, and use that
+**Gauge block scan**, **Hole centering**, or **Surface map**, edit the parameter fields, and use that
 script's **Run** button. The +/− buttons increment a distance by 1 mm; the text
 fields accept decimals. Valid values are retained in stock AXIS preferences.
 
@@ -15,11 +15,17 @@ fields during a submitted program, including programs selected through normal
 File Open. Abort ends execution through the existing stock control; editing
 unlocks after LinuxCNC reports an idle, acknowledged command state.
 
-Both probing scripts retain their prior all-homed prerequisite, spindle-off
+The probing scripts use an all-homed prerequisite, spindle-off
 checks, travel-boundary checks, contact sequence, feeds, and M190 trigger
 capture. The panel reports unmet machine prerequisites before submission.
 It does not home, reset, clear a fault, move, or start a script merely because
 the tab is selected or a value is edited.
+
+The [gauge block scan](gauge-block-scanning.md) discovers a rotated block on a
+1 mm grid and measures the same side stations on three circuits 1 mm apart.
+An unexpected outside-edge Z contact is retained before vertical withdrawal
+above the measured top and cancellation. Its clearance field sets that return
+height; nominal block dimensions are not required.
 
 **Go to Home** is in this tab. It uses the established machine home and sets
 G61.1 exact-stop mode: the Z move finishes before X/Y starts, without blending
