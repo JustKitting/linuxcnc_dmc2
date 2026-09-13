@@ -13,36 +13,38 @@
 (Ends at the last grid point at clearance. No work-offset or tool-offset writes.)
 (Operator recovery uses Abort, Clear Fault and Pendant Mode. See ../../docs/surface-mapping.md.)
 
-(Required region offsets from the starting XY in signed LinuxCNC mm; zero span is UNSET.)
+o<sm_preview> if [#<_task> EQ 0]
+    (PREVIEW,stop)
+    M2
+o<sm_preview> endif
+o<sm_ui_parameters> if [#<_hal[axisui.surface-parameters-valid]> NE 1]
+    (ABORT,Surface parameters are invalid or unset. Open Custom Scripts and correct the indicated Surface map fields, then Run. Pendant Mode remains available.)
+o<sm_ui_parameters> endif
+(Snapshot the Custom Scripts fields. Region offsets start at the current XY.)
 (X offset positive = physical LEFT / LinuxCNC +X; negative = physical RIGHT / LinuxCNC -X.)
-#<x_min_offset_mm> = 0
-#<x_max_offset_mm> = 0
-#<y_min_offset_mm> = 0
-#<y_max_offset_mm> = 0
+#<x_min_offset_mm> = #<_hal[axisui.surface-x-min-mm]>
+#<x_max_offset_mm> = #<_hal[axisui.surface-x-max-mm]>
+#<y_min_offset_mm> = #<_hal[axisui.surface-y-min-mm]>
+#<y_max_offset_mm> = #<_hal[axisui.surface-y-max-mm]>
 (Required grid spacing and mounted usable reach. Zero is UNSET.)
-#<spacing_mm> = 0
+#<spacing_mm> = #<_hal[axisui.surface-spacing-mm]>
 (Usable reach is clearance from the ball bottom to the first interfering part over this region.)
 (The nominal stylus drawing is not a measurement of the mounted clearance.)
-#<usable_reach_mm> = 0
-(PROPOSAL - NOT ACTUAL: shallow layer requested by operator, with a few mm reserve.)
-#<max_drop_mm> = 3
-#<reference_search_mm> = 3
-#<clearance_mm> = 2
-#<reach_reserve_mm> = 2
+#<usable_reach_mm> = #<_hal[axisui.surface-usable-reach-mm]>
+#<max_drop_mm> = #<_hal[axisui.surface-max-drop-mm]>
+#<reference_search_mm> = #<_hal[axisui.surface-reference-search-mm]>
+#<clearance_mm> = #<_hal[axisui.surface-clearance-mm]>
+#<reach_reserve_mm> = #<_hal[axisui.surface-reach-reserve-mm]>
 (SOURCE-VERIFIED feed range endpoints. No separately specified optimum was found.)
 #<coarse_feed_mm_min> = 200
 #<fine_feed_mm_min> = 50
 #<ball_diameter_mm> = 2
 
-o<sm_preview> if [#<_task> EQ 0]
-    (PREVIEW,stop)
-    M2
-o<sm_preview> endif
 o<sm_region> if [[#<x_max_offset_mm> LE #<x_min_offset_mm>] OR [#<y_max_offset_mm> LE #<y_min_offset_mm>]]
-    (ABORT,Surface region is unset or reversed. Set its signed X/Y extents, then File Open again. Pendant Mode remains available.)
+    (ABORT,Surface region is unset or reversed. Set X/Y start and end offsets in Custom Scripts, then Run. Pendant Mode remains available.)
 o<sm_region> endif
 o<sm_settings> if [[#<spacing_mm> LE 0] OR [#<usable_reach_mm> LE 0]]
-    (ABORT,Set grid spacing and mounted usable probe reach, then File Open again. No motion was issued; Pendant Mode remains available.)
+    (ABORT,Set Grid spacing and Mounted usable reach in Custom Scripts, then Run. No motion was issued; Pendant Mode remains available.)
 o<sm_settings> endif
 o<sm_depth_positive> if [[#<max_drop_mm> LE 0] OR [#<reference_search_mm> LE 0] OR [#<clearance_mm> LE 0] OR [#<reach_reserve_mm> LE 0]]
     (ABORT,Search, drop, clearance and reach reserve must be positive. Review the settings and reopen the file; Pendant Mode remains available.)

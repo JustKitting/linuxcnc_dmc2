@@ -50,6 +50,7 @@ class AxisRunGuard:
         AxisUiFaultKind.PROGRAM_RUN_REQUIRES_HOMED_POSITION,
         AxisUiFaultKind.PROGRAM_RUN_SUBMISSION_FAILED,
         AxisUiFaultKind.PROGRAM_RUN_GUARD_EVALUATION_FAILED,
+        AxisUiFaultKind.PROGRAM_RUN_REQUIRES_SCRIPT_PARAMETERS,
     )
 
     def __init__(self, *, namespace, status, linuxcnc_module, stock_commands) -> None:
@@ -144,6 +145,18 @@ class AxisRunGuard:
         )
         return estop_clear and machine_on
 
+    def readiness_message(self, prerequisites, snapshot: RunStatus) -> str | None:
+        """Present the same Run prerequisites before a pane button is pressed."""
+        if not self._machine_requirements_satisfied(prerequisites, snapshot):
+            if snapshot.estop or snapshot.task_state == int(self.linuxcnc_module.STATE_ESTOP):
+                return "E-stop is active. Use the visible E-stop / Clear Fault controls."
+            return "Machine is off. Use the visible Machine On control."
+        if ScriptPrerequisite.INTERPRETER_IDLE in prerequisites and snapshot.interpreter_state != int(self.linuxcnc_module.INTERP_IDLE):
+            return "A program is active. Wait for it to stop or use Abort."
+        if ScriptPrerequisite.ALL_HOMED in prerequisites and not snapshot.all_homed:
+            return "Home All required in Manual Control. This script uses the established machine position."
+        return None
+
     def reconcile(self) -> None:
         """Clear retained run faults only after their typed transitions occur."""
         if not self.active_faults:
@@ -160,6 +173,9 @@ class AxisRunGuard:
 
         self._clear(AxisUiFaultKind.PROGRAM_RUN_STATUS_UNAVAILABLE)
         requested_path = self.namespace.get("loaded_file")
+        panel = getattr(self.namespace["live_plotter"], "_dmc2_custom_scripts", None)
+        if panel is not None and panel.parameter_issue(requested_path) is None:
+            self._clear(AxisUiFaultKind.PROGRAM_RUN_REQUIRES_SCRIPT_PARAMETERS)
         if same_machine_file(requested_path, snapshot.loaded_file):
             self._clear(AxisUiFaultKind.PROGRAM_RUN_REQUIRES_EXACT_LOADED_FILE)
         contract = self._prerequisites(requested_path)
@@ -281,6 +297,19 @@ class AxisRunGuard:
             return "break"
         self._clear(AxisUiFaultKind.PROGRAM_RUN_REQUIRES_HOMED_POSITION)
 
+        panel = getattr(self.namespace["live_plotter"], "_dmc2_custom_scripts", None)
+        prepared = False
+        previous_serial = None
+        if panel is not None and snapshot.interpreter_state == int(self.linuxcnc_module.INTERP_IDLE):
+            try:
+                previous_serial = int(self.namespace["c"].serial)
+                prepared = panel.prepare_for_run(requested_path)
+            except Exception as error:
+                if prepared:
+                    panel.cancel_preparation()
+                self._present(kind=AxisUiFaultKind.PROGRAM_RUN_REQUIRES_SCRIPT_PARAMETERS, cause=error)
+                return "break"
+            self._clear(AxisUiFaultKind.PROGRAM_RUN_REQUIRES_SCRIPT_PARAMETERS)
         print(
             "DMC2_AXIS_RUN_REQUEST result=forwarded "
             f"control={request.value!r} "
@@ -296,6 +325,13 @@ class AxisRunGuard:
                 cause=error,
             )
             return "break"
+        finally:
+            if prepared and previous_serial is not None:
+                try:
+                    panel.finish_submission(previous_serial)
+                except Exception:
+                    panel.cancel_preparation()
+                    raise
         self._clear(AxisUiFaultKind.PROGRAM_RUN_SUBMISSION_FAILED)
         return result
 

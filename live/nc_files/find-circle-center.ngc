@@ -13,8 +13,17 @@
 (Operator recovery uses the existing Abort, Clear Fault and Pendant Mode controls.)
 (See ../../docs/circle-centering.md for capture, scoring and result definitions.)
 
-(Required search setting. Zero means UNSET and refuses all motion.)
-#<search_mm> = 0
+(Live probe results cannot be predicted by the AXIS preview interpreter.)
+o<cc_preview> if [#<_task> EQ 0]
+    (PREVIEW,stop)
+    M2
+o<cc_preview> endif
+
+(Snapshot the operator's Custom Scripts field; the source file is reusable.)
+o<cc_ui_parameters> if [#<_hal[axisui.circle-parameters-valid]> NE 1]
+    (ABORT,Hole centering parameters are invalid. Open Custom Scripts and correct Max travel per direction, then Run. Pendant Mode remains available.)
+o<cc_ui_parameters> endif
+#<search_mm> = #<_hal[axisui.circle-search-mm]>
 (SOURCE-VERIFIED published feed range: 50-200 mm/min; no separate optimum specified.)
 (PROPOSAL: published upper endpoint for coarse touch, lower endpoint for measurement.)
 #<coarse_feed_mm_min> = 200
@@ -22,13 +31,8 @@
 (SOURCE-VERIFIED nominal 2.0 mm spherical ball; not the 6 mm shank.)
 #<ball_diameter_mm> = 2.0
 
-(Live probe results cannot be predicted by the AXIS preview interpreter.)
-o<cc_preview> if [#<_task> EQ 0]
-    (PREVIEW,stop)
-    M2
-o<cc_preview> endif
 o<cc_missing_settings> if [[#<search_mm> LE 0] OR [#<feed_mm_min> LE 0]]
-    (ABORT,Circle search is unset or feed is invalid. Set search_mm and review the feeds, then File Open again. Pendant Mode remains available.)
+    (ABORT,Circle search is unset or feed is invalid. Enter Max travel per direction in Custom Scripts, then Run. Pendant Mode remains available.)
 o<cc_missing_settings> endif
 o<cc_feed_order> if [#<coarse_feed_mm_min> LE #<feed_mm_min>]
     (ABORT,The coarse feed must exceed the measurement feed. Review the two feeds and reopen the file; Pendant Mode remains available.)
@@ -112,7 +116,7 @@ o<cc_loop> while [#<_cc_reason> EQ 0]
     #<bounds_x> = [[[#<_cc_x> + #<_cc_offset_x> - #<_cc_search>] LE #<_ini[axis_x]min_limit>] OR [[#<_cc_x> + #<_cc_offset_x> + #<_cc_search>] GE #<_ini[axis_x]max_limit>]]
     #<bounds_y> = [[[#<_cc_y> + #<_cc_offset_y> - #<_cc_search>] LE #<_ini[axis_y]min_limit>] OR [[#<_cc_y> + #<_cc_offset_y> + #<_cc_search>] GE #<_ini[axis_y]max_limit>]]
     o<cc_bounds> if [#<bounds_x> OR #<bounds_y>]
-        (ABORT,Circle search endpoints would reach a travel boundary. No search range was clipped or extended. Abort then Pendant Mode; revise search_mm and reopen.)
+        (ABORT,Circle search endpoints would reach a travel boundary. No search range was clipped or extended. Abort then Pendant Mode; revise Max travel per direction in Custom Scripts.)
     o<cc_bounds> endif
     #[#<history_next>] = ROUND[[#<_cc_x> - #<_cc_start_x>] / #<_cc_step_x>]
     #[#<history_next> + 1] = ROUND[[#<_cc_y> - #<_cc_start_y>] / #<_cc_step_y>]

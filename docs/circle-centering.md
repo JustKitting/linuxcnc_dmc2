@@ -7,11 +7,16 @@ symlink. There is no Python machine-control path or alternate launcher.
 
 ## Settings and entry
 
-Set `search_mm` at the top of the script for the particular
-opening before selecting it with **File → Open**. Its initial zero value means
-**unset**, and Run refuses motion. `search_mm` is the maximum distance of each
-contact approach from that pass's center, in each signed axis direction; it is
-not a diameter. Coarse contact uses `coarse_feed_mm_min = 200`; the final
+Open **Custom Scripts → Hole centering**, enter **Max travel / direction (mm)**,
+then press **Run Hole centering**. The +/− controls change the field by 1 mm;
+typing permits decimal values. The initial value is the operator's requested
+25 mm. AXIS preferences retain valid edits across sessions. The field is the
+maximum distance of each contact approach from that pass's center, in each
+signed axis direction; it is not a diameter. The reusable source reads
+`axisui.circle-search-mm` at entry; no per-run file is edited or generated.
+Invalid editing text clears `axisui.circle-parameters-valid`, so neither the
+pane nor a direct File Open/Run can silently use the preceding valid value.
+Coarse contact uses `coarse_feed_mm_min = 200`; the final
 measurement, release, return, and centering feed is `feed_mm_min = 50`.
 These are the endpoints of the probe's published **50–200 mm/min** range,
 not a separately manufacturer-designated optimum. This is a 4× first approach;
@@ -32,6 +37,10 @@ Build with `scripts/build_native.sh`. LinuxCNC discovers user M codes at task
 initialization, so **the new M190 becomes available on the next standard session
 launch/restart**. This implementation does not restart the current session.
 An unavailable M190 prevents program execution rather than bypassing capture.
+The pane shows unmet machine prerequisites before Run; it does not home or
+clear faults automatically. Parameter fields are held during an explicitly
+submitted run and unlock after LinuxCNC reports it stopped. The existing
+Abort, Clear Fault and Pendant Mode controls remain outside that field lock.
 
 ## Measurement sequence
 

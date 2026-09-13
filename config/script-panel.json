@@ -1,0 +1,30 @@
+{
+  "version": 1,
+  "scripts": [
+    {
+      "key": "circle",
+      "operation": "program.find-circle-center",
+      "description": "Start clear inside the hole at probing height. XY only. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
+      "parameters": [
+        {"pin": "circle-search-mm", "label": "Max travel / direction", "kind": "positive-mm", "default": "25", "increment": "1"}
+      ]
+    },
+    {
+      "key": "surface",
+      "operation": "program.map-top-surface",
+      "description": "Offsets start at the current XY. X positive: physical LEFT / LinuxCNC +X; X negative: physical RIGHT / LinuxCNC -X. Enter the mounted probe clearance before running.",
+      "parameters": [
+        {"pin": "surface-x-min-mm", "label": "X start offset", "kind": "signed-mm", "default": "0", "increment": "1"},
+        {"pin": "surface-x-max-mm", "label": "X end offset", "kind": "signed-mm", "default": "0", "increment": "1"},
+        {"pin": "surface-y-min-mm", "label": "Y start offset", "kind": "signed-mm", "default": "0", "increment": "1"},
+        {"pin": "surface-y-max-mm", "label": "Y end offset", "kind": "signed-mm", "default": "0", "increment": "1"},
+        {"pin": "surface-spacing-mm", "label": "Grid spacing", "kind": "positive-mm", "default": "0", "increment": "1"},
+        {"pin": "surface-usable-reach-mm", "label": "Mounted usable reach", "kind": "positive-mm", "default": "0", "increment": "1"},
+        {"pin": "surface-max-drop-mm", "label": "Maximum drop", "kind": "positive-mm", "default": "3", "increment": "1"},
+        {"pin": "surface-reference-search-mm", "label": "Reference search travel", "kind": "positive-mm", "default": "3", "increment": "1"},
+        {"pin": "surface-clearance-mm", "label": "Travel clearance", "kind": "positive-mm", "default": "2", "increment": "1"},
+        {"pin": "surface-reach-reserve-mm", "label": "Probe reach reserve", "kind": "positive-mm", "default": "2", "increment": "1"}
+      ]
+    }
+  ]
+}

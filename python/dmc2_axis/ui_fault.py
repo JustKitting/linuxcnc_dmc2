@@ -31,6 +31,27 @@ class AxisUiFaultContract:
 class AxisUiFaultKind(Enum):
     """Every AXIS-local exception that may cross an operator boundary."""
 
+    CUSTOM_SCRIPTS_INSTALL_FAILED = AxisUiFaultContract(
+        "CUSTOM_SCRIPTS_INSTALL_FAILED",
+        RecoveryClassCode.RELAUNCH_APPLICATION,
+        "correct the named Custom Scripts installation cause and relaunch DMC2; Abort, Clear Fault and Pendant Mode remain independent",
+    )
+    CUSTOM_SCRIPTS_REFRESH_FAILED = AxisUiFaultContract(
+        "CUSTOM_SCRIPTS_REFRESH_FAILED",
+        RecoveryClassCode.RECHECK_SOURCE,
+        "correct the named display or parameter cause; the pane retries its display without issuing machine commands; use Abort, Clear Fault or Pendant Mode at any time",
+    )
+    CUSTOM_SCRIPTS_PREFERENCES_FAILED = AxisUiFaultContract(
+        "CUSTOM_SCRIPTS_PREFERENCES_FAILED",
+        RecoveryClassCode.RECHECK_SOURCE,
+        "the parameter could not be saved for future sessions; correct the named file cause and edit the field again to retry; Pendant Mode remains available",
+    )
+    PROGRAM_RUN_REQUIRES_SCRIPT_PARAMETERS = AxisUiFaultContract(
+        "PROGRAM_RUN_REQUIRES_SCRIPT_PARAMETERS",
+        RecoveryClassCode.RECHECK_SOURCE,
+        "open Custom Scripts, correct the named parameter and retry Run; Abort, Clear Fault and Pendant Mode remain available",
+    )
+
     PROBE_MODE_UI_INSTALL_FAILED = AxisUiFaultContract(
         "PROBE_MODE_UI_INSTALL_FAILED",
         RecoveryClassCode.RELAUNCH_APPLICATION,

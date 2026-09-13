@@ -1,11 +1,13 @@
 # Shallow top surface mapping
 
 [`map-top-surface.ngc`](../live/nc_files/map-top-surface.ngc) is a parameterized
-script for **File → Open** through the existing typed DMC2 loader. It uses the
+script selected in **Custom Scripts → Surface map**. Enter the region,
+spacing and mounted usable reach in that pane, then use **Run Surface map**.
+The pane uses the existing typed DMC2 loader. Ordinary **File → Open** also
+uses the same pane values. It uses the
 standard compiled Rust M190 capture helper, also used by the circle routine.
 There is no new launcher, Python motion path, service, recovery latch, automatic
-restart or automatic fault clear. The file is an implementation proposal; it
-has not been run on the machine.
+restart or automatic fault clear. It has not been run on the machine.
 
 ## Region and reference
 
@@ -140,9 +142,9 @@ remains the existing visible recovery for a machine fault. Capture failures say
 The existing abort handler clears program probe selection. There is no new
 recovery gate or state that requires a hidden reset.
 
-Build through `scripts/build_native.sh`. The previously added M190 is discovered
-on the next standard LinuxCNC task launch; this work does not restart the current
-session or load/run the script. Offline arithmetic, persistence and export checks
+Build through `scripts/build_native.sh`. M190 and the parameter pins are installed
+on a standard LinuxCNC task launch. Loading the pane does not run the script.
+Offline arithmetic, persistence and export checks
 are assistant-arranged checks, not proof of machine behavior.
 
 The standalone interpreter checks exercised a stepped fixture with missed cells,

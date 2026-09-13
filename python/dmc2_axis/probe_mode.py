@@ -7,9 +7,10 @@ from pathlib import Path
 import socket
 import time
 
+from .constants import PROBE_SECTION_PATH
+
 REPLY_RETRY_SECONDS = 1.0
 POLL_MS = 50  # matches this profile's DISPLAY CYCLE_TIME
-SECTION = "PROBE MODE"
 
 
 class ProbeModeBinding:
@@ -67,38 +68,31 @@ class ProbeModeBinding:
         self.render()
 
     def install_widgets(self):
-        queue = ["."]
-        while queue:
-            path = queue.pop()
-            try:
-                label = str(self.tk.call(path, "cget", "-text"))
-            except self.ns["Tkinter"].TclError:
-                label = ""
-            if label == SECTION and str(self.tk.call("winfo", "class", path)) == "Labelframe":
-                self.section = path
-                break
-            queue.extend(self.tk.splitlist(self.tk.call("winfo", "children", path)))
-        if self.section is None:
-            return
+        if not int(self.tk.call("winfo", "exists", PROBE_SECTION_PATH)):
+            raise RuntimeError("Custom Scripts recorder section is unavailable; restore the named pane installation error")
+        self.section = PROBE_SECTION_PATH
         for child in self.tk.splitlist(self.tk.call("winfo", "children", self.section)):
             self.tk.call("destroy", child)
         bar = self.section + ".controls"
         self.tk.call("frame", bar)
         self.tk.call("pack", bar, "-anchor", "w", "-fill", "x")
-        for name, text, action in (
-            ("mode", "Probe Mode: OFF", self.toggle_mode),
-            ("record", "Record: OFF", self.toggle_record),
-            ("retry", "Retry Save", self.retry_save),
+        self.tk.call("grid", "columnconfigure", bar, 0, "-weight", 1)
+        self.tk.call("grid", "columnconfigure", bar, 1, "-weight", 1)
+        for name, text, action, row, column, span in (
+            ("mode", "Probe Mode: OFF", self.toggle_mode, 0, 0, 1),
+            ("record", "Record: OFF", self.toggle_record, 0, 1, 1),
+            ("retry", "Retry Save", self.retry_save, 1, 0, 2),
         ):
             path = bar + "." + name
             self.controls[name] = path
             self.tk.call("button", path, "-text", text, "-command", self.root.register(lambda command=action: self.invoke(command)), "-takefocus", 0)
-            self.tk.call("pack", path, "-side", "left", "-padx", 4)
+            self.tk.call("grid", path, "-row", row, "-column", column, "-columnspan", span, "-sticky", "ew", "-padx", 2)
         for name in ("status", "latest", "saved"):
             path = self.section + "." + name
             self.controls[name] = path
-            self.tk.call("label", path, "-text", "", "-anchor", "w", "-justify", "left", "-wraplength", 680)
+            self.tk.call("label", path, "-text", "", "-anchor", "w", "-justify", "left")
             self.tk.call("pack", path, "-anchor", "w", "-fill", "x")
+            self.tk.call("bind", path, "<Configure>", f"{path} configure -wraplength [expr {{max(1, %w - 8)}}]")
         self.render()
 
     def render(self):

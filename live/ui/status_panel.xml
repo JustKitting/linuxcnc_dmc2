@@ -213,10 +213,6 @@
       </labelframe>
     </hbox>
 
-    <labelframe text="PROBE MODE" font='("Helvetica", 10, "bold")' padx="8" pady="5">
-      <label text='"Probe controls starting..."' font='("Helvetica", 10)' anchor='"w"'/>
-    </labelframe>
-
     <labelframe text="DISPLAY HISTORY" font='("Helvetica", 10, "bold")'
                 padx="8" pady="5">
       <hbox>
