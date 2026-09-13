@@ -58,6 +58,7 @@ pub const FILES: &[File] = &[
     project_file!("live/nc_files/puck-contact-no-motion-test.ngc"),
     project_file!("live/nc_files/tool-height-first-test.ngc"),
     project_file!("live/nc_files/tool-height-homing-style-test.ngc"),
+    project_file!("live/nc_files/tool-setter-manual.ngc"),
     project_file!("live/nc_files/dmc2_tool_setter_ready.ngc"),
     project_file!("live/nc_files/dmc2_tool_setter_measure.ngc"),
     project_file!("config/metrology/tool-setter.json"),

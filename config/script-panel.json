@@ -2,6 +2,14 @@
   "version": 1,
   "scripts": [
     {
+      "key": "tool-setter",
+      "operation": "program.tool-setter-manual",
+      "description": "Position the tool above the setter. Searches downward at 800 mm/min, backs off until released at 50 mm/min, then re-touches at 50 mm/min. Saves both contacts and stops after the slow touch. Z only; travel starts at the position when Run is pressed.",
+      "parameters": [
+        {"pin": "tool-setter-search-mm", "label": "Max downward travel", "kind": "positive-mm", "default": "25", "increment": "1"}
+      ]
+    },
+    {
       "key": "block",
       "operation": "program.measure-gauge-block",
       "requires_beginning": true,
