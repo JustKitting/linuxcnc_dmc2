@@ -1,0 +1,34 @@
+o<dmc2_tool_setter_ready> sub
+    (Read-only sensor checks plus explicit selection of normalized BTER IN0.)
+    (P1 is a selector, not a power supply. OUT5 is not used.)
+    o<ts_ready_spindle_command> if [#<_spindle_on> NE 0]
+        (ABORT,Tool setting requires the spindle stopped. Use Spindle Stop then Run again; Pendant Mode remains available.)
+    o<ts_ready_spindle_command> endif
+    M66 P3 L0
+    o<ts_ready_spindle_feedback> if [#5399 NE 0]
+        (ABORT,The spindle monitor reports running. Use Spindle Stop before tool setting; Pendant Mode remains available.)
+    o<ts_ready_spindle_feedback> endif
+    M65 P1
+    M66 P5 L0
+    o<ts_ready_selection> if [#5399 NE 0]
+        (ABORT,Tool setter IN0 selection was not reported. Abort then Pendant Mode; check probe selection before a new Run.)
+    o<ts_ready_selection> endif
+    M66 P6 L0
+    o<ts_ready_overtravel> if [#5399 NE 0]
+        (ABORT,The tool setter overtravel circuit is open. Abort then Pendant Mode to release it; with both circuits closed use CLEAR SETTER or Clear Fault.)
+    o<ts_ready_overtravel> endif
+    o<ts_ready_latched> if [#<_hal[dmc2-tool-setter.latched]> NE 0]
+        (ABORT,Tool setter overtravel is retained. Abort then Pendant Mode; release both circuits and use CLEAR SETTER or Clear Fault before a new Run.)
+    o<ts_ready_latched> endif
+    o<ts_ready_unavailable> if [#<_hal[dmc2-tool-setter.feed-inhibit]> NE 0]
+        (ABORT,Tool setter data is unavailable. Abort then Pendant Mode; restore the reported Mesa connection and clear the displayed fault before a new Run.)
+    o<ts_ready_unavailable> endif
+    M66 P0 L0
+    o<ts_ready_contact> if [#5399 NE 0]
+        (ABORT,The tool setter contact circuit is open. Abort then Pendant Mode to release the pad or correct the contact circuit before a new Run.)
+    o<ts_ready_contact> endif
+    o<ts_ready_selected_contact> if [#<_hal[motion.probe-input]> NE 0]
+        (ABORT,The selected probe is active. Abort then Pendant Mode to establish a released setter before a new Run.)
+    o<ts_ready_selected_contact> endif
+o<dmc2_tool_setter_ready> endsub
+M2

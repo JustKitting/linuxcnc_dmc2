@@ -124,12 +124,71 @@ All rows report valid homed positions, with no cycle gaps or recorded
 transport/controller fault flags. The contemporaneous LinuxCNC journal reports
 `Probe tripped during a coordinate jog` at the manual contacts.
 
-### Historical programs and offsets
+## Programs using this reference
 
-The old 19.4 mm puck reference at machine X 288.125 / Y 152.955 is superseded
-for this setter and retained as historical data. Existing `PUCK_*` INI entries,
-`puck-contact-no-motion-test.ngc`, `tool-height-first-test.ngc` and
-`tool-height-homing-style-test.ngc` still describe the old puck and OUT5 sequence;
-they do not consume the new reference. Recording this calibration applies no
-tool-table or work-coordinate offset and changes no motion, wiring or recovery
-behavior.
+The three existing program paths and catalog IDs are retained. Their program
+contents now use the BTER NC contact and overtravel circuits, with no clip or
+OUT5 power cycle. The old 19.4 mm puck reference at machine X 288.125 / Y 152.955
+and the `PUCK_*` INI entries remain historical calibration evidence only.
+
+| Program | File | Sequence |
+| --- | --- | --- |
+| Tool Setter - Contact Check | [puck-contact-no-motion-test.ngc](../live/nc_files/puck-contact-no-motion-test.ngc) | No axis or spindle command. Observe an IN0 contact then release, with a 300-second timeout for each wait. |
+| Tool Height - Slow Touch | [tool-height-first-test.ngc](../live/nc_files/tool-height-first-test.ngc) | One operator confirmation, downward Z touch at the original 6 mm/min, durable measurement, then the original Z-home return. |
+| Tool Height - Double Touch | [tool-height-homing-style-test.ngc](../live/nc_files/tool-height-homing-style-test.ngc) | Start at machine Z home; confirm the manual pad press/release check, confirm measurement, touch at the original 300 mm/min, back off 1 mm above the trigger at 15 mm/min, re-touch at 15 mm/min, save the result, then return to Z home. |
+
+Use the normal File Open and Run controls. The programs declare their effects,
+prerequisites and Abort recovery to the typed script loader. Position the tool
+manually above the recorded contact XY before a height measurement. The
+existing 0.010 mm position guard remains; neither height program moves X or Y.
+All probe descents are physical DOWN / LinuxCNC -Z; the existing backoff and
+Z-home return are physical UP / LinuxCNC +Z. No probe feed or backoff value is
+changed by this conversion. These original feeds are not a claim that the
+manufacturer's rated repeatability has been established on the machine.
+
+Both height programs call the same
+[measurement implementation](../live/nc_files/dmc2_tool_setter_measure.ngc).
+The shared `[TOOL_SETTER]` section in [dmc2.ini](../live/dmc2.ini) supplies the
+accepted contact XY and height. The JSON reference and original recordings
+retain the calibration evidence. Machine Z home and the downward search floor
+come from the existing `[JOINT_2] HOME` and `[AXIS_Z] MIN_LIMIT` values.
+
+The shared [input checks](../live/nc_files/dmc2_tool_setter_ready.ngc) select
+normalized IN0 with P1 off, confirm selector feedback, and require both NC
+circuits released with no retained overtravel or unavailable setter data. IN2
+keeps its existing independent realtime stop and visible acknowledgement path.
+The scripts never acknowledge overtravel or reset, enable or resume the machine.
+
+### Coordinates and retained results
+
+The measurement cancels the installed tool compensation with G49 as the old
+programs did, snapshots the active work-to-machine translation in millimetres,
+and converts both the Z search target and the original G38 trigger. It rejects
+XY work-frame rotation. LinuxCNC defines `#5061..#5069` in the active work frame;
+the [G38 documentation](https://linuxcnc.org/docs/2.9/html/gcode/g-code.html#gcode:g38)
+describes the required conversion. No work or tool-table offset is written.
+The saved modal state is restored on normal return, after the spindle has been
+explicitly stopped; this cannot restore a previously running spindle.
+
+M190 P7 starts a unique ledger in `tmp/output/tool-setter/`; P8 commits each
+versioned record. The existing Rust capture path reads the original LinuxCNC
+G38 trigger, retains its exact floating-point bits, synchronizes the file and
+reads it back. An M66 barrier prevents subsequent backoff or return before that
+step. The ledger stores the reference, work translation, requested feeds,
+direction, each contact, the double-touch difference and the calculated result.
+
+```text
+machine_trigger_z = work_trigger_z + work_to_machine_z
+plate_contact_machine_z = machine_trigger_z - setter_height_above_plate
+tool_tip_height_at_home = machine_home_z - plate_contact_machine_z
+```
+
+The result uses the single slow touch or the final touch of the double sequence.
+It reports the installed tool tip's height above the sampled plate reference at
+machine Z home, not a newly applied tool-table length. Capture failure stops the
+program before any following motion and reports `CAPTURE FAILED - KEEP THE
+SETUP IN PLACE` with Abort and Pendant Mode recovery. Missing contact, failed
+release and retained overtravel also stop with the applicable UI recovery action.
+
+Build results, interpreter checks and retained synthetic data do not establish
+physical tool-setting behavior; that requires a separately requested machine run.

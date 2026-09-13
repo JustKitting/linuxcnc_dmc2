@@ -5,6 +5,7 @@ pub enum Workflow {
     Circle,
     Surface,
     Block,
+    ToolSetter,
 }
 
 impl Workflow {
@@ -13,6 +14,7 @@ impl Workflow {
             Self::Circle => "circle",
             Self::Surface => "surface",
             Self::Block => "block",
+            Self::ToolSetter => "tool-setter",
         }
     }
     pub fn magic(self) -> &'static str {
@@ -20,6 +22,7 @@ impl Workflow {
             Self::Circle => "DMC2_CIRCLE_RECORD_V2",
             Self::Surface => "DMC2_SURFACE_RECORD_V1",
             Self::Block => "DMC2_BLOCK_RECORD_V1",
+            Self::ToolSetter => "DMC2_TOOL_SETTER_RECORD_V1",
         }
     }
     pub fn ledger_magic(self) -> &'static str {
@@ -27,6 +30,7 @@ impl Workflow {
             Self::Circle => "DMC2_CIRCLE_LEDGER_V2",
             Self::Surface => "DMC2_SURFACE_LEDGER_V1",
             Self::Block => "DMC2_BLOCK_LEDGER_V1",
+            Self::ToolSetter => "DMC2_TOOL_SETTER_LEDGER_V1",
         }
     }
     pub fn request(self) -> String {
@@ -195,6 +199,45 @@ pub fn validate(workflow: Workflow, request: &str, sequence: u64) -> Result<(), 
             "final_work_z",
         ],
         (Workflow::Block, "start") => super::block_schema::START_FIELDS,
+        (Workflow::ToolSetter, "start") => &[
+            "style",
+            "setter_x",
+            "setter_y",
+            "setter_height",
+            "home_z",
+            "target_z",
+            "start_x",
+            "start_y",
+            "start_z",
+            "offset_x",
+            "offset_y",
+            "offset_z",
+            "first_feed",
+            "second_feed",
+            "backoff",
+            "backoff_feed",
+            "position_tolerance",
+        ],
+        (Workflow::ToolSetter, "touch") => &[
+            "stage",
+            "axis",
+            "direction",
+            "success",
+            "work_x",
+            "work_y",
+            "work_z",
+            "machine_x",
+            "machine_y",
+            "machine_z",
+            "feed",
+        ],
+        (Workflow::ToolSetter, "result") => &[
+            "touches",
+            "trigger_machine_z",
+            "plate_contact_machine_z",
+            "tool_tip_height_at_home",
+            "repeat_difference",
+        ],
         (
             Workflow::Block,
             "touch" | "miss" | "travel" | "obstruction" | "ready" | "recovery" | "result",
@@ -246,6 +289,36 @@ pub fn validate(workflow: Workflow, request: &str, sequence: u64) -> Result<(), 
         && (values["axis"] != "2" || values["direction"] != "-1")
     {
         return Err("surface samples must be downward Z contacts".into());
+    }
+    if workflow == Workflow::ToolSetter {
+        match kind {
+            "start" => {
+                if !matches!(values["style"], "1" | "2") {
+                    return Err("tool-setter style must be single touch=1 or double touch=2".into());
+                }
+                for key in [
+                    "setter_height",
+                    "first_feed",
+                    "second_feed",
+                    "backoff",
+                    "backoff_feed",
+                    "position_tolerance",
+                ] {
+                    if values[key].parse::<f64>().unwrap() <= 0.0 {
+                        return Err(format!(
+                            "tool-setter {key} must be positive; reopen the calibrated program"
+                        ));
+                    }
+                }
+            }
+            "touch" if values["axis"] != "2" || values["direction"] != "-1" => {
+                return Err("tool-setter measurements must be downward Z contacts".into());
+            }
+            "result" if !matches!(values["touches"], "1" | "2") => {
+                return Err("tool-setter result must retain one or two contacts".into());
+            }
+            _ => (),
+        }
     }
     Ok(())
 }

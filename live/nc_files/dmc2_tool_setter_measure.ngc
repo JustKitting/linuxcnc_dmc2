@@ -1,0 +1,196 @@
+o<dmc2_tool_setter_measure> sub
+    (One measurement implementation: #1=1 single slow touch, #1=2 double touch.)
+    (No X/Y moves. Physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+    (Only normalized IN0 contacts establish tool height; IN2 retains overtravel.)
+    o<ts_measure_style> if [[#1 NE 1] AND [#1 NE 2]]
+        (ABORT,Unknown tool-setting sequence. Reopen Slow Touch or Double Touch through File Open; Pendant Mode remains available.)
+    o<ts_measure_style> endif
+    o<ts_measure_homed> if [#<_hal[motion.is-all-homed]> NE 1]
+        (ABORT,Tool height needs a homed machine reference. Use Home All from the UI before a new Run; Pendant Mode remains available.)
+    o<ts_measure_homed> endif
+    (Preserve the existing explicit spindle stop; save only the stopped state.)
+    M5
+    o<dmc2_tool_setter_ready> call
+    o<ts_measure_rotation> if [#[5230 + [#5220 - 1] * 20] NE 0]
+        (ABORT,Tool height requires an unrotated work frame for trigger conversion. Select an unrotated frame and reopen the program; no offsets were changed.)
+    o<ts_measure_rotation> endif
+    M70
+    G21 G90 G94 G17 G40 G49 G80
+    #<_ts_style> = #1
+    #<_ts_x> = #<_ini[tool_setter]contact_machine_x>
+    #<_ts_y> = #<_ini[tool_setter]contact_machine_y>
+    #<_ts_height> = #<_ini[tool_setter]height_above_plate_mm>
+    #<_ts_home_z> = #<_ini[joint_2]home>
+    #<_ts_target_z> = #<_ini[axis_z]min_limit>
+    (Retain the original approved motion values and position tolerance.)
+    #<_ts_tolerance> = 0.010
+    #<_ts_backoff> = 1.0
+    #<_ts_backoff_feed> = 15.0
+    #<_ts_second_feed> = 15.0
+    o<ts_measure_first_feed> if [#<_ts_style> EQ 1]
+        #<_ts_first_feed> = 6.0
+    o<ts_measure_first_feed> else
+        #<_ts_first_feed> = 300.0
+    o<ts_measure_first_feed> endif
+    o<ts_measure_reference> if [[#<_ts_height> LE 0] OR [#<_ts_home_z> LE #<_ts_target_z>]]
+        (ABORT,The tool setter reference is invalid. Reopen the standard calibrated configuration; Abort and Pendant Mode remain available.)
+    o<ts_measure_reference> endif
+    o<ts_measure_reference_x> if [[#<_ts_x> LT #<_ini[axis_x]min_limit>] OR [#<_ts_x> GT #<_ini[axis_x]max_limit>]]
+        (ABORT,The recorded setter X is outside machine travel. Reopen the calibrated configuration; no X motion was issued.)
+    o<ts_measure_reference_x> endif
+    o<ts_measure_reference_y> if [[#<_ts_y> LT #<_ini[axis_y]min_limit>] OR [#<_ts_y> GT #<_ini[axis_y]max_limit>]]
+        (ABORT,The recorded setter Y is outside machine travel. Reopen the calibrated configuration; no Y motion was issued.)
+    o<ts_measure_reference_y> endif
+    o<ts_measure_position> call
+    (The single test retains one confirmation; the double test retains the manual contact check.)
+    o<ts_measure_connection> if [#<_ts_style> EQ 2]
+        (MSG,Double touch contact check: Resume, then press and release the setter pad. No axis move during this check.)
+        M0
+        o<ts_measure_position> call
+        o<dmc2_tool_setter_ready> call
+        M66 P0 L1 Q300.0
+        o<ts_measure_connection_timeout> if [#5399 LT 0]
+            (ABORT,No IN0 contact was reported in the manual check. Abort then Pendant Mode; check the setter contact indication before a new Run.)
+        o<ts_measure_connection_timeout> endif
+        (MSG,Setter contact reported. Release the pad to finish the manual check.)
+        M66 P0 L4 Q300.0
+        o<ts_measure_release_timeout> if [#5399 LT 0]
+            (ABORT,The setter contact did not release. Abort then Pendant Mode; release the pad or correct the contact circuit before a new Run.)
+        o<ts_measure_release_timeout> endif
+        o<dmc2_tool_setter_ready> call
+    o<ts_measure_connection> endif
+    (MSG,Tool height: confirm the tool is above the recorded setter contact point. Resume starts the selected Z-only measurement.)
+    M0
+    o<ts_measure_position> call
+    o<dmc2_tool_setter_ready> call
+    (Snapshot the unchanged work-to-machine translation after G49, in mm.)
+    #<_ts_offset_x> = [#<_abs_x> - #<_x>]
+    #<_ts_offset_y> = [#<_abs_y> - #<_y>]
+    #<_ts_offset_z> = [#<_abs_z> - #<_z>]
+    #<_ts_sequence> = 0
+    #<_ts_difference> = 0
+    #<_ts_touch_count> = 0
+    M190 P7 Q0
+    M66 P5 L0
+    (LOGOPEN,../tmp/output/tool-setter-request.txt)
+    (LOG,DMC2_TOOL_SETTER_RECORD_V1)
+    (LOG,sequence=%d#<_ts_sequence>)
+    (LOG,kind=start)
+    (LOG,style=%d#<_ts_style>)
+    (LOG,setter_x=%.9f#<_ts_x>)
+    (LOG,setter_y=%.9f#<_ts_y>)
+    (LOG,setter_height=%.9f#<_ts_height>)
+    (LOG,home_z=%.9f#<_ts_home_z>)
+    (LOG,target_z=%.9f#<_ts_target_z>)
+    (LOG,start_x=%.9f#<_abs_x>)
+    (LOG,start_y=%.9f#<_abs_y>)
+    (LOG,start_z=%.9f#<_abs_z>)
+    (LOG,offset_x=%.9f#<_ts_offset_x>)
+    (LOG,offset_y=%.9f#<_ts_offset_y>)
+    (LOG,offset_z=%.9f#<_ts_offset_z>)
+    (LOG,first_feed=%.9f#<_ts_first_feed>)
+    (LOG,second_feed=%.9f#<_ts_second_feed>)
+    (LOG,backoff=%.9f#<_ts_backoff>)
+    (LOG,backoff_feed=%.9f#<_ts_backoff_feed>)
+    (LOG,position_tolerance=%.9f#<_ts_tolerance>)
+    (LOGCLOSE)
+    o<ts_measure_save> call
+    (Stage 1 for the single measurement; stage 0 for the first double touch.)
+    #<first_stage> = [2 - #<_ts_style>]
+    o<ts_measure_touch> call [#<first_stage>] [#<_ts_first_feed>]
+    #<_ts_first_z> = #<_ts_trigger_machine_z>
+    o<ts_measure_second> if [#<_ts_style> EQ 2]
+        (The first trigger has been retained and read back before this upward move.)
+        #<backoff_machine_z> = [#<_ts_first_z> + #<_ts_backoff>]
+        o<ts_measure_backoff_bounds> if [#<backoff_machine_z> GT #<_ini[axis_z]max_limit>]
+            (ABORT,The retained trigger plus backoff exceeds Z travel. Abort then Pendant Mode; the first contact is saved and no backoff was issued.)
+        o<ts_measure_backoff_bounds> endif
+        (Physical UP / LinuxCNC +Z; retain the original trigger-relative backoff.)
+        G53 G1 Z#<backoff_machine_z> F#<_ts_backoff_feed>
+        M66 P0 L4 Q1.0
+        o<ts_measure_backoff_release> if [#5399 LT 0]
+            (ABORT,The setter stayed active after the 1 mm backoff. Abort then Pendant Mode to release it; the first trigger remains recorded.)
+        o<ts_measure_backoff_release> endif
+        o<dmc2_tool_setter_ready> call
+        o<ts_measure_touch> call [1] [#<_ts_second_feed>]
+        #<_ts_difference> = ABS[#<_ts_trigger_machine_z> - #<_ts_first_z>]
+    o<ts_measure_second> endif
+    #<_ts_plate_contact_z> = [#<_ts_trigger_machine_z> - #<_ts_height>]
+    #<_ts_tool_height_home> = [#<_ts_home_z> - #<_ts_plate_contact_z>]
+    (Retain the computed measurement before the original Z-home return.)
+    (LOGOPEN,../tmp/output/tool-setter-request.txt)
+    (LOG,DMC2_TOOL_SETTER_RECORD_V1)
+    (LOG,sequence=%d#<_ts_sequence>)
+    (LOG,kind=result)
+    (LOG,touches=%d#<_ts_touch_count>)
+    (LOG,trigger_machine_z=%.9f#<_ts_trigger_machine_z>)
+    (LOG,plate_contact_machine_z=%.9f#<_ts_plate_contact_z>)
+    (LOG,tool_tip_height_at_home=%.9f#<_ts_tool_height_home>)
+    (LOG,repeat_difference=%.9f#<_ts_difference>)
+    (LOGCLOSE)
+    o<ts_measure_save> call
+    (DEBUG,Tool setter measurement saved in tmp/output/tool-setter: machine trigger Z %.9f#<_ts_trigger_machine_z> mm)
+    (DEBUG,Derived plate-contact machine Z %.9f#<_ts_plate_contact_z> mm; tool tip above plate at Z home %.9f#<_ts_tool_height_home> mm)
+    (DEBUG,Contact count %d#<_ts_touch_count>; double-touch difference %.9f#<_ts_difference> mm; no tool or work offset applied)
+    (Physical UP / LinuxCNC +Z; original acceleration-limited return to Z home.)
+    G53 G0 Z#<_ts_home_z>
+    M66 P5 L0
+    M72
+o<dmc2_tool_setter_measure> endsub
+M2
+
+o<ts_measure_position> sub
+    M66 P5 L0
+    o<ts_measure_x_position> if [ABS[#<_abs_x> - #<_ts_x>] GT #<_ts_tolerance>]
+        (ABORT,Not at the recorded setter contact X. Use Pendant Mode to position manually at the reference XY, then reopen and Run; this program has no X move.)
+    o<ts_measure_x_position> endif
+    o<ts_measure_y_position> if [ABS[#<_abs_y> - #<_ts_y>] GT #<_ts_tolerance>]
+        (ABORT,Not at the recorded setter contact Y. Use Pendant Mode to position manually at the reference XY, then reopen and Run; this program has no Y move.)
+    o<ts_measure_y_position> endif
+    o<ts_measure_home_start> if [[#<_ts_style> EQ 2] AND [ABS[#<_abs_z> - #<_ts_home_z>] GT #<_ts_tolerance>]]
+        (ABORT,Double touch must start at the known machine Z home. Use Pendant Mode to position there before a new Run; no approach move was issued.)
+    o<ts_measure_home_start> endif
+    o<ts_measure_downward> if [[#<_abs_z> LE #<_ts_target_z>] OR [#<_abs_z> GT #<_ini[axis_z]max_limit>]]
+        (ABORT,The starting Z is outside the downward probe range. Use Pendant Mode to establish the starting position before a new Run.)
+    o<ts_measure_downward> endif
+o<ts_measure_position> endsub
+
+o<ts_measure_save> sub
+    M190 P8 Q#<_ts_sequence>
+    M66 P5 L0
+    #<_ts_sequence> = [#<_ts_sequence> + 1]
+o<ts_measure_save> endsub
+
+o<ts_measure_touch> sub
+    (Arguments: capture stage and original commanded feed in mm/min.)
+    (Physical DOWN / LinuxCNC -Z. Convert the machine floor into the active work frame.)
+    G38.2 Z[#<_ts_target_z> - #<_ts_offset_z>] F#2
+    o<ts_measure_capture_missing> if [#5070 NE 1]
+        (ABORT,CAPTURE FAILED - KEEP THE SETUP IN PLACE. No valid setter trigger was retained; Abort then Pendant Mode. No return move was issued.)
+    o<ts_measure_capture_missing> endif
+    #<trigger_x> = #5061
+    #<trigger_y> = #5062
+    #<trigger_z> = #5063
+    #<machine_x> = [#<trigger_x> + #<_ts_offset_x>]
+    #<machine_y> = [#<trigger_y> + #<_ts_offset_y>]
+    #<_ts_trigger_machine_z> = [#<trigger_z> + #<_ts_offset_z>]
+    (LOGOPEN,../tmp/output/tool-setter-request.txt)
+    (LOG,DMC2_TOOL_SETTER_RECORD_V1)
+    (LOG,sequence=%d#<_ts_sequence>)
+    (LOG,kind=touch)
+    (LOG,stage=%d#1)
+    (LOG,axis=2)
+    (LOG,direction=-1)
+    (LOG,success=%d#5070)
+    (LOG,work_x=%.9f#<trigger_x>)
+    (LOG,work_y=%.9f#<trigger_y>)
+    (LOG,work_z=%.9f#<trigger_z>)
+    (LOG,machine_x=%.9f#<machine_x>)
+    (LOG,machine_y=%.9f#<machine_y>)
+    (LOG,machine_z=%.9f#<_ts_trigger_machine_z>)
+    (LOG,feed=%.9f#2)
+    (LOGCLOSE)
+    o<ts_measure_save> call
+    #<_ts_touch_count> = [#<_ts_touch_count> + 1]
+    (DEBUG,Setter contact %d#<_ts_touch_count> saved and read back: machine Z %.9f#<_ts_trigger_machine_z> mm)
+o<ts_measure_touch> endsub

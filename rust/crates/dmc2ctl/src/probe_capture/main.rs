@@ -64,7 +64,7 @@ fn main() {
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args == ["--help"] {
-        println!("dmc2-probe-capture is the synchronous M190 capture gate. Circle: P0 Q0 begins, P1 Q<sequence> saves. Surface: P2 Q0 begins, P3 Q<sequence> saves. Block: P4 Q0 begins, P5 Q<sequence> saves, P6 Q<sequence> publishes the next retained-data plan. Records are durably saved and read back. --export-surface <ledger> and --export-block <ledger> export retained data without a machine connection. No machine commands are issued.");
+        println!("dmc2-probe-capture is the synchronous M190 capture gate. Circle: P0 Q0 begins, P1 Q<sequence> saves. Surface: P2 Q0 begins, P3 Q<sequence> saves. Block: P4 Q0 begins, P5 Q<sequence> saves, P6 Q<sequence> publishes the next retained-data plan. Tool setter: P7 Q0 begins, P8 Q<sequence> saves. Records are durably saved and read back. --export-surface <ledger> and --export-block <ledger> export retained data without a machine connection. No machine commands are issued.");
         return Ok(());
     }
     if args.len() != 2 {
@@ -95,6 +95,8 @@ fn run() -> Result<(), String> {
         }
         5 => storage::commit(&output, Workflow::Block, sequence, trigger_position),
         6 => block::publish_next(&output, sequence),
+        7 if sequence == 0 => storage::begin(&output, Workflow::ToolSetter),
+        8 => storage::commit(&output, Workflow::ToolSetter, sequence, trigger_position),
         _ => Err("unknown capture action; reopen the selected probing script".to_owned()),
     }
 }

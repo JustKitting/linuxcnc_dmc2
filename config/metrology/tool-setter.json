@@ -74,11 +74,20 @@
     "tool_or_work_offsets_applied": false,
     "record_does_not_authorize_motion": true
   },
+  "runtime_reference": {
+    "path": "live/dmc2.ini",
+    "section": "TOOL_SETTER",
+    "height_key": "HEIGHT_ABOVE_PLATE_MM",
+    "contact_x_key": "CONTACT_MACHINE_X",
+    "contact_y_key": "CONTACT_MACHINE_Y",
+    "consumer": "live/nc_files/dmc2_tool_setter_measure.ngc",
+    "meaning": "INI is the shared program configuration; this JSON and the archived recordings retain the accepted calibration evidence"
+  },
   "legacy_puck": {
-    "status": "Superseded as the current tool-setter reference; retained only for historical programs",
+    "status": "Superseded as the current tool-setter reference; historical calibration evidence only",
     "height_mm": 19.4,
     "machine_x_mm": 288.125,
     "machine_y_mm": 152.955,
-    "program_status": "Existing puck contact and tool-height test programs still contain their original puck geometry and OUT5 sequence; they do not consume this reference"
+    "program_status": "The existing contact, single-touch and double-touch entry points now use the BTER NC circuits and shared TOOL_SETTER calibration; filenames and catalog IDs are retained for compatibility"
   }
 }
