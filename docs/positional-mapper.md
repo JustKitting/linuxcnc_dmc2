@@ -352,11 +352,17 @@ machine run.
   retained fixture geometry; regenerate the selected operations and export the
   result for review. Avoid applying a transform both to the model and through a
   work offset. Target the actual FreeCAD release and document structure. Current
-  inputs missing: the user's native part/CAM document and installed FreeCAD
-  version. The present STL/ASC exchange is available; automatic Job updates are
-  not implemented. The CAD-side peer has offered STL/STEP/FCStd material for
-  `THREE_AXIS_GLUE_A`, a two-setup wood-cutting dice job. Its files and FreeCAD
-  version have not yet arrived on this host.
+  native part inputs now include the delivered `THREE_AXIS_GLUE_A` FCStd, STEP
+  and STL files, plus a hash-bound descriptor of frames, body roles and native
+  planar references. The CAD peer reports FreeCAD 1.1.1 with the LinuxCNC post;
+  its required `ocl`/`opencamlib` dependency for 3D Surface is missing. The peer
+  owns geometry and workstation CAM preparation. A native CAM Job document,
+  actual tooling/stock/fixture inputs and accepted physical setup placement
+  remain outstanding. The present STL/ASC exchange is available; automatic Job
+  updates are not implemented. OP1 must preserve `stage1_after`, including its
+  envelopes and backing; `stage1_targets` is finished-blank reference geometry.
+  The descriptor's OP1-to-OP2 flip is already applied to stage2 geometry and
+  must not be applied again during import.
 - [ ] **Generate and check continuation/location programs.** Use the retained
   setup, current stock, desired geometry and tool/holder/fixture data to prepare
   the next operation, with an explicit collision/clearance model and the normal
@@ -386,3 +392,24 @@ machine run.
   data, not measurements of the current setup. The correspondence authorizes
   file collaboration only, with no motion, probing, homing, energization,
   restart or machine-control changes.
+  All 71 delivered source sizes and hashes match the CNC-side readback. Message
+  003's descriptor hash also matches and binds 41 bodies and 158 planar
+  references. These are model-only features with unestablished probe access.
+  The standard Rust object mapper now retains 15 native/STEP/STL snapshots for
+  the raw stock, preserved OP1 material, finished references and OP2 input.
+  Their payloads match the delivered source bytes. Object ID
+  `cnc-polyhedral-dice` has planned `op1` and `op2` records; each remains
+  unregistered, without captures or placement candidates. The append-only
+  workflow reply and import receipt are in the job's
+  `coordination/cnc-to-cad/003-cnc-import-workflow.md` and
+  `003-cnc-object-import-receipt.json`. Supplement 004 supplied both combined
+  finished-blank STLs and 79 native planes per connected-stock body, including
+  five backing datum planes per setup. Exact triangle ranges match all original
+  source payloads. The combined meshes are imported under distinct OP1/OP2
+  revisions; the native plane metadata remains CAD reference data, not captured
+  contacts. `004-cnc-supplement-readback.json` retains the supplement hashes,
+  triangle-range comparison, Rust STL inspection and object-store readback;
+  `004-cnc-handoff-reply.md` acknowledges the transfer and accepted workflow.
+  Incoming source snapshots and local job records are kept outside code
+  publication; these file readbacks do not establish a physical setup or a
+  machining result.
