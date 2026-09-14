@@ -192,3 +192,50 @@ release and retained overtravel also stop with the applicable UI recovery action
 
 Build results, interpreter checks and retained synthetic data do not establish
 physical tool-setting behavior; that requires a separately requested machine run.
+
+## Plate-referenced Z tool offset
+
+The M190 capture implementation snapshots the standard INI and accepted BTER
+reference when a setter measurement begins. After the fine IN0 contact is
+durably saved and read back, Rust derives and saves the installed tool's offset:
+
+```text
+plate_referenced_tool_offset_z = exact_fine_trigger_machine_z - accepted_setter_height
+machine_z = desired_tool_tip_height_above_plate + plate_referenced_tool_offset_z
+```
+
+Each ledger has paired `.tool-offset.json` and `.tool-offset.ngc` files. The JSON
+retains the exact trigger and its floating-point bits, calibration operands,
+formula, normal-contact input, tool/setup scope, and whether the reference was
+snapshotted at measurement start or explicitly supplied for an older recording.
+The calibration files are saved alongside it. Existing files are preserved;
+different output cannot silently replace an earlier result.
+
+This is a plate-referenced Z compensation convention for the installed tool,
+not a physical tool length measured from a spindle gauge line. It does not
+identify a tool-table number or infer a flat plate plane from one sampled site.
+It is the same `plate_contact_machine_z` reported by the older height programs.
+Neither capture nor offline export executes an offset command.
+
+The paired program can be opened through normal File Open and Run. It declares
+coordinate-state effects and changes only Z tool compensation with
+[G43.1](https://linuxcnc.org/docs/2.9/html/gcode/g-code.html#gcode:g43.1).
+It requires the measured homed reference, a stopped spindle, G54 with zero Z
+translation, and no active G52/G92 Z translation. XY work origins are independent.
+It issues no axis travel. After explicit application, work Z0 represents the
+accepted sampled plate reference for that installed tool. Machining programs
+using a different part Z datum must include that datum translation once. Tool
+replacement or a change in clamping requires the corresponding fresh measurement.
+The script's recovery remains Abort then Pendant Mode; Clear Fault is never
+disabled or conditional on offset availability.
+
+For a historical recording without a reference snapshot, the installed Rust
+binary accepts a data-only export with explicit calibration provenance:
+
+```text
+native/bin/dmc2-probe-capture --export-tool-offset <ledger> live/dmc2.ini config/metrology/tool-setter.json
+```
+
+Later exports of that ledger omit the reference arguments and read its saved
+snapshot. Missing fine contact, invalid trigger bits, duplicate measurements, or
+an INI height that differs from the accepted BTER reference reject the export.
