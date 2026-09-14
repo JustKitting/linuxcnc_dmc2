@@ -226,3 +226,38 @@ No new AXIS pane is added here. The current pendant scripts remain the
 acquisition interface. These Rust file commands are the analysis interface and
 can later be called by a dedicated UI without moving fitting work into the
 motion-control path.
+
+## Recorded TODOs — 2026-09-14
+
+These items are pending. Recording them does not change the current acquisition
+program or authorize a machine run.
+
+- [ ] **Exponential edge bracketing, then binary refinement.** Replace the
+  initial long traversal and repeated direction reversals with the user's
+  growing search sequence: **1 mm, 2 mm, 4 mm, …**, bounded by the configured
+  maximum and retained plate edge. Keep the last contact/no-contact observations
+  that bracket the transition, then binary-search inside that bracket. Preserve
+  the existing first direction: physical RIGHT / LinuxCNC -X. Define the step
+  reference explicitly in the implementation so growing travel legs and
+  distances from the initial position cannot be confused.
+- [ ] **Growing local edge search with internal refinement.** Apply the same
+  coarse-growth/local-refinement principle to edge detection and rim following
+  instead of always advancing by fixed 1 mm increments. Retain the local contact
+  and tracing plane, grow the coarse search until it brackets the next boundary,
+  then refine within that interval. Continue following the outline from the last
+  contact. Keep coarse search scale separate from final refinement resolution;
+  preserve exact trigger capture, full probe-diameter backoff, plate bounds and
+  the approved speed/depth policy. X labels remain physical RIGHT / LinuxCNC -X
+  and physical LEFT / LinuxCNC +X.
+- [ ] **Reserve a bounded fine re-touch allowance.** The run ending at
+  16:56:48 EDT stopped at sample 77 with no fine trigger. Its original target
+  allowed only 0.009887915 mm beyond the coarse trigger, while an earlier paired
+  contact in the same run needed 0.020173821 mm. The full 2 mm backoff was
+  recorded. `mapper-run.ngc` currently reuses the coarse target for the fine
+  approach, so a coarse hit near that target can leave insufficient reach for
+  observed coarse/fine variation. Specify the fine endpoint allowance and its
+  bounds explicitly; retain the exact fine-capture requirement. Do not accept
+  the missed endpoint or coarse trigger as a fine measurement. Source ledger:
+  `tmp/output/mapper/mapper-1789419086126841028-1241227.txt`, records 405–409;
+  paired comparison: records 359 and 363. No new allowance or retry behavior
+  has been applied.
