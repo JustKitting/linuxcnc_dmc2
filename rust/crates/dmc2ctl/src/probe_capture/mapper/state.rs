@@ -1,5 +1,8 @@
 //! Validate capture/release/clearance transitions before planning another move.
-use super::super::ledger::{number, Fields};
+use super::super::{
+    ledger::{number, Fields},
+    schema::Workflow,
+};
 use super::model::{close, xyz, Phase, Request, Sample, Settings};
 
 enum Cycle<'a> {
@@ -31,30 +34,63 @@ pub fn samples(
             return Err("The scan was interrupted by an obstruction. Exact contacts remain in the ledger; start a new Run after operator recovery.".into());
         }
         let index = number(r, "sample")? as usize;
+        let phase = match number(r, "phase")? {
+            0.0 => Phase::Reference,
+            1.0 => Phase::Boundary,
+            2.0 => Phase::Grid,
+            3.0 => Phase::Verify,
+            4.0 => Phase::Rim,
+            5.0 => Phase::Finished,
+            _ => return Err("Invalid mapper phase.".into()),
+        };
+        if Workflow::Mapper.requires_exact_trigger(kind) {
+            if r.get("exact_source").map(String::as_str)
+                != Some("emcStatus.motion.traj.probedPosition;machine-mm")
+            {
+                return Err("Mapper contact lacks the original G38 trigger source.".into());
+            }
+            let work = xyz(r, "work_", "")?;
+            let machine = xyz(r, "machine_", "_exact")?;
+            if !(0..3).all(|i| close(work[i] + s.offset[i], machine[i])) {
+                return Err(
+                    "Mapper trigger coordinates disagree with the retained work frame.".into(),
+                );
+            }
+        }
         match kind {
+            "recontact" | "withdrawal-release" => {
+                let expected_sample = match cycle {
+                    Cycle::Coarse(coarse) if kind == "withdrawal-release" => number(coarse, "sample")? as usize,
+                    Cycle::Measured => samples.len() - 1,
+                    _ => return Err("A withdrawal event is outside a retained probing cycle; Abort then Pendant Mode.".into()),
+                };
+                let from = xyz(r, "from_", "")?;
+                let target = xyz(r, "target_", "")?;
+                s.bounds(from)?;
+                s.bounds(target)?;
+                if index != expected_sample
+                    || !close(target[2], s.origin[2])
+                    || !close(from[0], target[0])
+                    || !close(from[1], target[1])
+                    || target[2] <= from[2]
+                    || !(close(number(r, "feed")?, s.feeds[1])
+                        || close(number(r, "feed")?, s.feeds[2]))
+                {
+                    return Err("Withdrawal record does not match its sample, upward path, clearance or feed; Abort then Pendant Mode.".into());
+                }
+                // Withdrawal events retain their own exact positions. They do
+                // not replace the top/side measurement or advance the survey.
+            }
             "travel" => (),
             "touch" | "miss" => {
                 if index != samples.len() {
                     return Err("A mapper contact is duplicated or out of sequence.".into());
                 }
                 let stage = number(r, "stage")?;
-                if kind == "touch" {
-                    if r.get("exact_source").map(String::as_str)
-                        != Some("emcStatus.motion.traj.probedPosition;machine-mm")
-                    {
-                        return Err("Mapper contact lacks the original G38 trigger source.".into());
-                    }
-                    let work = xyz(r, "work_", "")?;
-                    let machine = xyz(r, "machine_", "_exact")?;
-                    if !(0..3).all(|i| close(work[i] + s.offset[i], machine[i])) {
-                        return Err(
-                            "Mapper trigger coordinates disagree with the retained work frame."
-                                .into(),
-                        );
-                    }
-                }
                 if kind == "touch" && stage == 0.0 {
-                    if !matches!(cycle, Cycle::Ready) || !close(number(r, "feed")?, s.feeds[0]) {
+                    if !matches!(cycle, Cycle::Ready)
+                        || !close(number(r, "feed")?, s.coarse_feed(phase))
+                    {
                         return Err(
                             "Coarse mapper contact is out of sequence or has the wrong feed."
                                 .into(),
@@ -73,14 +109,9 @@ pub fn samples(
                     (Cycle::Ready,"miss") if stage == 0.0 => (),
                     _ => return Err("A fine contact or coarse miss does not follow the required capture sequence.".into()),
                 }
-                let phase = match number(r, "phase")? {
-                    0.0 => Phase::Reference,
-                    1.0 => Phase::Boundary,
-                    2.0 => Phase::Grid,
-                    3.0 => Phase::Verify,
-                    4.0 => Phase::Rim,
-                    _ => return Err("Invalid measurement phase.".into()),
-                };
+                if phase == Phase::Finished {
+                    return Err("A finished plan cannot supply a measurement.".into());
+                }
                 let target = xyz(r, "target_", "")?;
                 s.bounds(target)?;
                 samples.push(Sample {

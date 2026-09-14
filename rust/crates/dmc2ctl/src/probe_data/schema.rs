@@ -37,6 +37,10 @@ impl Workflow {
             Self::Mapper => "DMC2_MAPPER_LEDGER_V1",
         }
     }
+    pub fn requires_exact_trigger(self, kind: &str) -> bool {
+        matches!(kind, "touch" | "obstruction")
+            || (self == Self::Mapper && matches!(kind, "recontact" | "withdrawal-release"))
+    }
     pub fn request(self) -> String {
         format!("{}-request.txt", self.name())
     }
@@ -205,7 +209,8 @@ pub fn validate(workflow: Workflow, request: &str, sequence: u64) -> Result<(), 
         (Workflow::Mapper, "start") => super::mapper_schema::START_FIELDS,
         (
             Workflow::Mapper,
-            "touch" | "miss" | "travel" | "obstruction" | "ready" | "recovery" | "result",
+            "touch" | "miss" | "travel" | "obstruction" | "ready" | "recovery" | "result"
+            | "recontact" | "withdrawal-release",
         ) => super::mapper_schema::EVENT_FIELDS,
         (Workflow::Block, "start") => super::block_schema::START_FIELDS,
         (Workflow::ToolSetter, "start") => &[
@@ -266,7 +271,7 @@ pub fn validate(workflow: Workflow, request: &str, sequence: u64) -> Result<(), 
             ));
         }
     }
-    if matches!(kind, "touch" | "obstruction") && values["success"].parse::<f64>() != Ok(1.0) {
+    if workflow.requires_exact_trigger(kind) && values["success"].parse::<f64>() != Ok(1.0) {
         return Err("G38 did not report a contact; no reconstructed position is accepted".into());
     }
     if kind == "touch" && !matches!(values["stage"], "0" | "1") {

@@ -1,5 +1,8 @@
 //! Export observed trigger envelopes and explicit partial/confirmed status.
-use super::super::ledger::{self, number};
+use super::super::{
+    ledger::{self, number},
+    schema::Workflow,
+};
 use super::{
     model::{xyz, Mode},
     read,
@@ -40,7 +43,7 @@ pub(crate) fn export(path: &Path, require_result: bool) -> Result<(), String> {
     }
     let mut csv = String::from("sequence,sample,phase,edge,stage,kind,position_source,machine_x_mm,machine_y_mm,machine_z_mm,from_work_x_mm,from_work_y_mm,from_work_z_mm,target_work_x_mm,target_work_y_mm,target_work_z_mm,feed_mm_min\n");
     for r in records.iter().skip(1) {
-        let trigger = matches!(r["kind"].as_str(), "touch" | "obstruction");
+        let trigger = Workflow::Mapper.requires_exact_trigger(&r["kind"]);
         let p = xyz(r, "machine_", if trigger { "_exact" } else { "" })?;
         csv.push_str(&format!(
             "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",

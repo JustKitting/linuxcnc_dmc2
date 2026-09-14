@@ -89,6 +89,7 @@ o<mp_loop> while [1]
     #<ty> = #<_hal[axisui.mapper-plan-target-y]>
     #<tz> = #<_hal[axisui.mapper-plan-target-z]>
     #<_mp_coarse> = #<_hal[axisui.mapper-plan-coarse-feed]>
+    #<_mp_downward> = #<_hal[axisui.mapper-plan-downward-feed]>
     #<_mp_fine> = #<_hal[axisui.mapper-plan-fine-feed]>
     #<_mp_travel> = #<_hal[axisui.mapper-plan-travel-feed]>
     o<mp_still_fresh> if [#<_hal[axisui.mapper-plan-sequence]> NE #<_mp_sequence>]
@@ -105,7 +106,7 @@ o<mp_loop> while [1]
     #<return_z> = #<_mp_clear>
     o<mp_side> if [#<_mp_phase> EQ 4]
         (Outside-edge descent holds XY; coarse probe feed, not clearance travel feed.)
-        o<mapper-move> call [#<_x>] [#<_y>] [#<tz>] [0] [#<_mp_coarse>]
+        o<mapper-move> call [#<_x>] [#<_y>] [#<tz>] [0] [#<_mp_downward>]
         #<return_z> = #<tz>
     o<mp_side> endif
     (Top -Z or inward side touch: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
@@ -118,10 +119,14 @@ o<mp_loop> while [1]
     o<mp_coarse_hit> endif
     (Withdraw on the same normal before lifting: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
     o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [1] [#<_mp_fine>]
-    (Complete the backoff: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
-    o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [0] [#<_mp_travel>]
-    (Return UP / LinuxCNC +Z, XY unchanged.)
-    o<mapper-move> call [#<_x>] [#<_y>] [#<_mp_clear>] [0] [#<_mp_travel>]
+    #<withdraw_action> = 4
+    o<mp_horizontal_backoff> if [#<_mp_phase> EQ 4]
+        #<withdraw_action> = 0
+    o<mp_horizontal_backoff> endif
+    (Complete the backoff: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X. Top backoff is UP / LinuxCNC +Z only.)
+    o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [#<withdraw_action>] [#<_mp_travel>]
+    (Return UP / LinuxCNC +Z, XY unchanged; retain recontacts and continue upward.)
+    o<mapper-move> call [#<_x>] [#<_y>] [#<_mp_clear>] [4] [#<_mp_travel>]
     o<mapper-record> call [4]
     (DEBUG,Mapper sample %d#<_mp_sample> retained; phase %d#<_mp_phase>. Returned to starting clearance.)
 o<mp_loop> endwhile

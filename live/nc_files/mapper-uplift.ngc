@@ -1,0 +1,46 @@
+o<mapper-uplift> sub
+(Arguments: existing starting-clearance Z, existing withdrawal feed.)
+(UP / LinuxCNC +Z only. No XY motion; X mapping remains physical RIGHT / LinuxCNC -X, physical LEFT / LinuxCNC +X.)
+o<mu_ceiling> if [ABS[#1 - #<_mp_clear>] GT [#<_mp_step_z> / 2]]
+    (ABORT,Upward withdrawal target differs from the established starting clearance. Abort then Pendant Mode.)
+o<mu_ceiling> endif
+#<target_z> = #1
+#<feed> = #2
+o<mu_loop> while [[#<target_z> - #<_z>] GT [#<_mp_step_z> / 2]]
+    #<_mp_fx> = #<_x>
+    #<_mp_fy> = #<_y>
+    #<_mp_fz> = #<_z>
+    #<_mp_tx> = #<_x>
+    #<_mp_ty> = #<_y>
+    #<_mp_tz> = #<target_z>
+    #<_mp_feed> = #<feed>
+    #<_mp_stage> = -1
+    #<previous_z> = #<_z>
+    o<mu_active> if [#<_hal[motion.probe-input]> NE 0]
+        (Continue UP / LinuxCNC +Z until release or the unchanged clearance target.)
+        G38.5 Z#<target_z> F#<feed>
+        #<detected> = #5070
+        o<mu_release> if [#<detected> EQ 1]
+            o<mapper-record> call [8]
+        o<mu_release> else
+            o<mapper-record> call [2]
+        o<mu_release> endif
+    o<mu_active> else
+        (Continue UP / LinuxCNC +Z; each detected recontact is captured before continuing.)
+        G38.3 Z#<target_z> F#<feed>
+        #<detected> = #5070
+        o<mu_recontact> if [#<detected> EQ 1]
+            o<mapper-record> call [7]
+        o<mu_recontact> else
+            o<mapper-record> call [2]
+        o<mu_recontact> endif
+    o<mu_active> endif
+    o<mu_progress> if [[#<_z> LE #<previous_z>] AND [[#<target_z> - #<_z>] GT [#<_mp_step_z> / 2]]]
+        (ABORT,Upward withdrawal made no reported Z progress. Captures retained; Abort then Pendant Mode.)
+    o<mu_progress> endif
+o<mu_loop> endwhile
+o<mu_still_active> if [#<_hal[motion.probe-input]> NE 0]
+    (ABORT,Upward withdrawal reached starting clearance but the probe remains triggered. No lateral move issued; Abort then Pendant Mode.)
+o<mu_still_active> endif
+o<mapper-uplift> endsub
+M2

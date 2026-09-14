@@ -37,7 +37,9 @@ set side ball-centre depth below the first top and clearance outside the fitted
 edge. They default to the existing block scan's 1 mm depth and 2 mm clearance.
 
 One runtime feed source, `config/mapper-feeds.txt`, sets 1500 mm/min clearance
-travel, 800 mm/min search and 50 mm/min fine re-touch/release. Each run snapshots
+travel, 800 mm/min horizontal search, 400 mm/min downward search and 50 mm/min
+fine re-touch/release. Downward search was halved at the operator's request.
+The versioned feed snapshot preserves older runs' original feeds. Each run snapshots
 its feed data and plate envelope before measurement. Subsequent config edits
 cannot alter an active run. Existing Surface map, Gauge block and Hole centering
 retain their own settings and behavior.
@@ -79,11 +81,18 @@ connection. Files from earlier runs are preserved.
 
 A plate-boundary contact is not an outside miss or a measured stock edge. A fine
 re-touch failure is not air. An input active without a G38 trigger stops with a
-capture error. Unexpected transfer contact is captured before stopping; the
-operator-requested exception is an unexpected downward Z contact outside an edge:
-after successful capture/readback, release vertically, return to starting
-clearance, and cancel. A blocked release or obstructed recovery stops visibly.
-Generic Abort adds no recovery motion.
+capture error. A planned upward withdrawal retains each detected G38 recontact
+and release and continues toward the same starting-clearance Z at its existing
+feed. These records do not become surface samples and do not cancel the scan.
+The loop adds no sideways move, deeper target, retry count, or new fault latch.
+It requires reported upward progress and a released input at the clearance
+endpoint before allowing the next lateral move.
+
+Unexpected horizontal transfer contact still stops after capture. An unexpected
+downward Z contact outside an edge retains its trigger, releases vertically,
+returns to starting clearance with the same upward-withdrawal handling, and
+cancels. A release that cannot clear by its endpoint stops visibly. Generic
+Abort adds no recovery motion.
 
 Error messages identify the condition and direct recovery through Abort and
 Pendant Mode. Each new Run creates a new ledger and invalidates old plan data.

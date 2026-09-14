@@ -13,7 +13,18 @@ pub(super) use report::export;
 use std::{fs, path::Path};
 
 const PLATE_FIELDS: &[&str] = &["x_min", "x_max", "y_min", "y_max", "ball_diameter"];
-const POLICY_FIELDS: &[&str] = &["coarse_feed", "fine_feed", "travel_feed"];
+fn policy(text: &str) -> Result<ledger::Fields, String> {
+    match text.lines().next() {
+        Some("DMC2_MAPPER_FEEDS_V1") => {
+            let mut fields = data(text, "DMC2_MAPPER_FEEDS_V1", &["coarse_feed", "fine_feed", "travel_feed"])?;
+            // Older recorded runs used the same coarse feed in Z and XY.
+            fields.insert("downward_feed".into(), fields["coarse_feed"].clone());
+            Ok(fields)
+        }
+        Some("DMC2_MAPPER_FEEDS_V2") => data(text, "DMC2_MAPPER_FEEDS_V2", &["coarse_feed", "downward_feed", "fine_feed", "travel_feed"]),
+        _ => Err("Mapper feed settings need a supported versioned header; correct config/mapper-feeds.txt before Run.".into()),
+    }
+}
 const PLAN_FIELDS: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../config/mapper-plan-fields.txt"
@@ -28,13 +39,13 @@ pub(super) fn begin(root: &Path, output: &Path) -> Result<(), String> {
     let plate = fs::read_to_string(root.join("config/metrology/plate-envelope.txt"))
         .map_err(|e| format!("Reading the retained plate envelope: {e}"))?;
     data(&plate, "DMC2_PLATE_ENVELOPE_V1", PLATE_FIELDS)?;
-    let policy = fs::read_to_string(root.join("config/mapper-feeds.txt"))
+    let feeds = fs::read_to_string(root.join("config/mapper-feeds.txt"))
         .map_err(|e| format!("Reading the mapper feed settings: {e}"))?;
-    data(&policy, "DMC2_MAPPER_FEEDS_V1", POLICY_FIELDS)?;
+    policy(&feeds)?;
     storage::begin(output, Workflow::Mapper)?;
     let path = storage::active_path(output, Workflow::Mapper, 0)?;
     ledger::publish(&path.with_extension("plate.txt"), plate.as_bytes())?;
-    ledger::publish(&path.with_extension("feeds.txt"), policy.as_bytes())
+    ledger::publish(&path.with_extension("feeds.txt"), feeds.as_bytes())
 }
 
 fn read(path: &Path) -> Result<(Vec<ledger::Fields>, Settings), String> {
@@ -51,11 +62,9 @@ fn read(path: &Path) -> Result<(Vec<ledger::Fields>, Settings), String> {
         "DMC2_PLATE_ENVELOPE_V1",
         PLATE_FIELDS,
     )?;
-    let policy = data(
+    let policy = policy(
         &fs::read_to_string(path.with_extension("feeds.txt"))
             .map_err(|e| format!("Reading this run's feed snapshot: {e}"))?,
-        "DMC2_MAPPER_FEEDS_V1",
-        POLICY_FIELDS,
     )?;
     let settings = Settings::read(start, &plate, &policy)?;
     Ok((records, settings))

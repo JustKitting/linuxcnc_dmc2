@@ -10,5 +10,6 @@ target-y
 target-z
 clear-z
 coarse-feed
+downward-feed
 fine-feed
 travel-feed

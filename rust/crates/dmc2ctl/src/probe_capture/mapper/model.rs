@@ -31,7 +31,8 @@ pub struct Settings {
     pub radius: f64,
     pub side_depth: f64,
     pub backoff: f64,
-    pub feeds: [f64; 3], // coarse, fine, travel, mm/min
+    pub feeds: [f64; 3], // horizontal coarse, fine, travel, mm/min
+    pub downward_feed: f64,
     pub step: [f64; 3],
 }
 
@@ -123,6 +124,7 @@ impl Settings {
             floor: origin[2] - n("drop")?,
             side_depth: n("side_depth")?,
             backoff: n("backoff")?,
+            downward_feed: number(policy, "downward_feed")?,
             feeds: [
                 number(policy, "coarse_feed")?,
                 number(policy, "fine_feed")?,
@@ -130,7 +132,11 @@ impl Settings {
             ],
         };
         let max_feed = n("max_feed")?;
-        for (name, feed) in ["search", "fine", "travel"].into_iter().zip(result.feeds) {
+        for (name, feed) in ["horizontal search", "fine", "travel"]
+            .into_iter()
+            .zip(result.feeds)
+            .chain([("downward search", result.downward_feed)])
+        {
             if feed <= 0.0 {
                 return Err(format!("Mapper {name} feed must be positive."));
             }
@@ -138,7 +144,7 @@ impl Settings {
                 return Err(format!("Mapper {name} feed {feed} mm/min exceeds the configured machine maximum {max_feed} mm/min."));
             }
         }
-        if result.feeds[1] > result.feeds[0] {
+        if result.feeds[1] > result.feeds[0].min(result.downward_feed) {
             return Err(
                 "The fine re-touch feed exceeds the search feed in this run's retained settings."
                     .into(),
@@ -156,6 +162,14 @@ impl Settings {
         result.bounds(origin)?;
         result.bounds([origin[0], origin[1], result.floor])?;
         Ok(result)
+    }
+
+    pub fn coarse_feed(&self, phase: Phase) -> f64 {
+        if phase == Phase::Rim {
+            self.feeds[0]
+        } else {
+            self.downward_feed
+        }
     }
 
     pub fn bounds(&self, p: [f64; 3]) -> Result<(), String> {
@@ -211,7 +225,8 @@ impl Request {
             ("target-y", self.target[1]),
             ("target-z", self.target[2]),
             ("clear-z", s.origin[2]),
-            ("coarse-feed", s.feeds[0]),
+            ("coarse-feed", s.coarse_feed(self.phase)),
+            ("downward-feed", s.downward_feed),
             ("fine-feed", s.feeds[1]),
             ("travel-feed", s.feeds[2]),
         ]

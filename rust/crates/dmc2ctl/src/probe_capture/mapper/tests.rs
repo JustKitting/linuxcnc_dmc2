@@ -18,6 +18,7 @@ fn fixture(mode: Mode) -> Settings {
         side_depth: 1.0,
         backoff: 2.0,
         feeds: [800.0, 50.0, 1500.0],
+        downward_feed: 400.0,
         step: [0.001; 3],
     }
 }

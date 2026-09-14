@@ -93,10 +93,10 @@ pub(super) fn commit(
         )
     })?;
     validate(workflow, &request, sequence)?;
-    let exact = if request
-        .lines()
-        .any(|line| matches!(line, "kind=touch" | "kind=obstruction"))
-    {
+    let exact = if request.lines().any(|line| {
+        line.strip_prefix("kind=")
+            .is_some_and(|kind| workflow.requires_exact_trigger(kind))
+    }) {
         exact_trigger(&request, trigger()?)?
     } else {
         String::new()

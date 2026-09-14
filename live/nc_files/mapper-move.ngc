@@ -1,5 +1,5 @@
 o<mapper-move> sub
-(Arguments XYZ, action: 0 guarded transfer, 1 release, 2 coarse touch, 3 fine touch; feed.)
+(Arguments XYZ; actions: 0 guarded transfer, 1 release, 2 coarse touch, 3 fine touch, 4 upward withdrawal; feed.)
 (X increasing: physical LEFT / LinuxCNC +X; decreasing: physical RIGHT / LinuxCNC -X.)
 #<_mp_fx> = #<_x>
 #<_mp_fy> = #<_y>
@@ -18,16 +18,35 @@ o<mm_limits> endif
 o<mm_floor> if [[#3 LT [#<_mp_floor> - 0.000000001]] OR [#3 GT [#<_mp_clear> + 0.000000001]]]
     (ABORT,Mapper target exceeds the original starting-Z descent envelope. Abort then Pendant Mode.)
 o<mm_floor> endif
+o<mm_uplift> if [#4 EQ 4]
+    o<mm_uplift_direction> if [[ABS[#1 - #<_x>] GT [0.5 / ABS[#<_ini[joint_0]scale>]]] OR [ABS[#2 - #<_y>] GT [0.5 / ABS[#<_ini[joint_1]scale>]]] OR [#3 LT [#<_z> - #<_mp_step_z> / 2]]]
+        (ABORT,Upward withdrawal requires unchanged XY and a nondecreasing Z target. Abort then Pendant Mode.)
+    o<mm_uplift_direction> endif
+    o<mapper-uplift> call [#3] [#5]
+    o<mapper-move> return
+o<mm_uplift> endif
 o<mm_release> if [#4 EQ 1]
-    o<mm_release_active> if [#<_hal[motion.probe-input]> NE 0]
+    #<up_release> = [[ABS[#1 - #<_x>] LE [0.5 / ABS[#<_ini[joint_0]scale>]]] AND [ABS[#2 - #<_y>] LE [0.5 / ABS[#<_ini[joint_1]scale>]]] AND [#3 GT #<_z>]]
+    o<mm_release_active> while [#<_hal[motion.probe-input]> NE 0]
+        #<_mp_fx> = #<_x>
+        #<_mp_fy> = #<_y>
+        #<_mp_fz> = #<_z>
+        #<previous_z> = #<_z>
         (Reverse the approach: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X; vertical release is +Z.)
         G38.5 X#1 Y#2 Z#3 F#5
         #<released> = #5070
-        o<mapper-record> call [2]
-        o<mm_release_failed> if [[#<released> NE 1] OR [#<_hal[motion.probe-input]> NE 0]]
+        o<mm_release_record> if [[#<up_release> EQ 1] AND [#<released> EQ 1]]
+            o<mapper-record> call [8]
+        o<mm_release_record> else
+            o<mapper-record> call [2]
+        o<mm_release_record> endif
+        o<mm_release_failed> if [[#<released> NE 1] OR [[#<up_release> EQ 0] AND [#<_hal[motion.probe-input]> NE 0]]]
             (ABORT,Probe did not release along its return path. Captures are retained. Abort then Pendant Mode.)
         o<mm_release_failed> endif
-    o<mm_release_active> endif
+        o<mm_release_progress> if [[#<up_release> EQ 1] AND [#<_hal[motion.probe-input]> NE 0] AND [[#<_z> LE #<previous_z>] OR [#<_z> GE #3]]]
+            (ABORT,Upward release is still triggered with no remaining reported travel. Captures retained; Abort then Pendant Mode.)
+        o<mm_release_progress> endif
+    o<mm_release_active> endwhile
 o<mm_release> else
     o<mm_active> if [#<_hal[motion.probe-input]> NE 0]
         (ABORT,Probe is active before a mapper approach or transfer. No new move was issued. Abort then Pendant Mode.)
@@ -46,7 +65,7 @@ o<mm_release> else
                     (User-requested outside-edge Z recovery: retain trigger first, release UP then return to starting clearance; cancel.)
                     (UP / LinuxCNC +Z only; XY unchanged.)
                     o<mapper-move> call [#<_x>] [#<_y>] [#<_mp_clear>] [1] [#<_mp_fine>]
-                    o<mapper-move> call [#<_x>] [#<_y>] [#<_mp_clear>] [0] [#<_mp_fine>]
+                    o<mapper-move> call [#<_x>] [#<_y>] [#<_mp_clear>] [4] [#<_mp_fine>]
                     o<mapper-record> call [5]
                     (ABORT,Unexpected outside-edge Z contact. Trigger retained and probe returned above the block to starting clearance. Scan cancelled; Abort then Pendant Mode.)
                 o<mm_outside_z> endif

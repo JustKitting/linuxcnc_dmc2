@@ -1,10 +1,10 @@
 o<mapper-record> sub
-(Shared durable record gate: 0 touch, 1 miss, 2 travel, 3 obstruction, 4 ready, 5 recovery, 6 result.)
+(Durable events: 0 touch, 1 miss, 2 travel, 3 obstruction, 4 ready, 5 recovery, 6 result, 7 recontact, 8 withdrawal release.)
 #<ok> = 0
 #<x> = #<_x>
 #<y> = #<_y>
 #<z> = #<_z>
-o<mr_trigger> if [[#1 EQ 0] OR [#1 EQ 3]]
+o<mr_trigger> if [[#1 EQ 0] OR [#1 EQ 3] OR [#1 EQ 7] OR [#1 EQ 8]]
     #<ok> = #5070
     #<x> = #5061
     #<y> = #5062
@@ -30,6 +30,10 @@ o<mr_kind> elseif [#1 EQ 5]
     (LOG,kind=recovery)
 o<mr_kind> elseif [#1 EQ 6]
     (LOG,kind=result)
+o<mr_kind> elseif [#1 EQ 7]
+    (LOG,kind=recontact)
+o<mr_kind> elseif [#1 EQ 8]
+    (LOG,kind=withdrawal-release)
 o<mr_kind> endif
 (LOG,sample=%d#<_mp_sample>)
 (LOG,phase=%d#<_mp_phase>)

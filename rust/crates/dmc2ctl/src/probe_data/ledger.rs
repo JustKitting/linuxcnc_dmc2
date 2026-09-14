@@ -57,7 +57,7 @@ pub fn records(text: &str, workflow: Workflow) -> Result<Vec<Fields>, String> {
                 return Err(format!("duplicate retained field {key}"));
             }
         }
-        if matches!(fields["kind"].as_str(), "touch" | "obstruction") {
+        if workflow.requires_exact_trigger(&fields["kind"]) {
             for axis in ["x", "y", "z"] {
                 let exact = number(&fields, &format!("machine_{axis}_exact"))?;
                 let bits = fields
