@@ -1,19 +1,24 @@
 //! ASCII/binary STL triangles. Explicit units; geometric normals from winding.
 use super::{super::Error, geometry::*};
 use std::collections::BTreeMap;
+mod spatial;
+#[cfg(test)]
+mod tests;
 #[derive(Clone, Copy)]
 pub struct Triangle {
     pub v: [V; 3],
     pub n: V,
 }
 pub struct Mesh {
-    pub triangles: Vec<Triangle>,
+    triangles: Vec<Triangle>,
+    spatial: spatial::Index,
     pub min: V,
     pub max: V,
     pub boundary_edges: usize,
     pub inconsistent_edges: usize,
     pub signed_volume: f64,
 }
+#[derive(Clone, Copy, Debug, PartialEq)]
 pub struct Nearest {
     pub triangle: usize,
     pub point: V,
@@ -29,7 +34,7 @@ impl Triangle {
         }
         Ok(Self {
             v,
-            n: scale(c, 1. / l),
+            n: c.map(|x| x / l),
         })
     }
     fn nearest(self, p: V) -> V {
@@ -72,6 +77,30 @@ impl Triangle {
             a,
             add(scale(ab, vb / denominator), scale(ac, vc / denominator)),
         )
+    }
+    fn closest(self, p: V, triangle: usize) -> Result<Nearest, Error> {
+        let point = self.nearest(p);
+        let delta = sub(p, point);
+        let distance = norm(delta);
+        if !finite(point) || !distance.is_finite() {
+            return Err(data(
+                "Closest-triangle calculation overflowed; check STL units and initial placement.",
+            ));
+        }
+        let sign = if dot(delta, self.n) < 0. { -1. } else { 1. };
+        let normal = if distance == 0. {
+            self.n
+        } else {
+            // Divide bounded components directly: the reciprocal of a valid
+            // subnormal distance can overflow even though its unit vector does not.
+            delta.map(|x| sign * (x / distance))
+        };
+        Ok(Nearest {
+            triangle,
+            point,
+            normal,
+            distance: sign * distance,
+        })
     }
 }
 fn data(s: impl Into<String>) -> Error {
@@ -214,6 +243,7 @@ impl Mesh {
             ));
         }
         Ok(Self {
+            spatial: spatial::Index::new(&triangles)?,
             triangles,
             min,
             max,
@@ -229,33 +259,7 @@ impl Mesh {
         Ok(())
     }
     pub fn nearest(&self, p: V) -> Result<Nearest, Error> {
-        let mut best = None;
-        for (i, t) in self.triangles.iter().enumerate() {
-            let q = t.nearest(p);
-            let delta = sub(p, q);
-            let distance = norm(delta);
-            if !finite(q) || !distance.is_finite() {
-                return Err(data("Closest-triangle calculation overflowed; check STL units and initial placement."));
-            }
-            if best
-                .as_ref()
-                .is_none_or(|b: &Nearest| distance < b.distance.abs())
-            {
-                let sign = if dot(delta, t.n) < 0. { -1. } else { 1. };
-                let normal = if distance == 0. {
-                    t.n
-                } else {
-                    scale(delta, sign / distance)
-                };
-                best = Some(Nearest {
-                    triangle: i,
-                    point: q,
-                    normal,
-                    distance: sign * distance,
-                });
-            }
-        }
-        best.ok_or_else(|| data("STL has no searchable geometry."))
+        self.spatial.nearest(&self.triangles, p)
     }
     pub fn json(&self) -> String {
         format!("{{\"triangles\":{},\"min_mm\":{},\"max_mm\":{},\"span_mm\":{},\"boundary_edges\":{},\"inconsistent_edges\":{},\"signed_volume_mm3\":{},\"self_intersections_checked\":false}}",self.triangles.len(),json(self.min),json(self.max),json(sub(self.max,self.min)),self.boundary_edges,self.inconsistent_edges,self.signed_volume)

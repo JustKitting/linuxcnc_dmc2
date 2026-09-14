@@ -332,11 +332,29 @@ machine run.
   transform the same design-space feature coordinates through its new pose.
 - [ ] **Improve registration and mesh handling where required.** Add usable
   initial alignment from identified features, expose competing symmetric
-  placements, and handle surface/mesh defects explicitly. Direct nearest-triangle
-  queries currently scale with every triangle for every selected contact and
-  iteration; add spatial indexing for representative large models without
-  changing contact provenance or fitting semantics. Mesh closure checks alone
-  do not establish absence of self-intersections.
+  placements, and handle surface/mesh defects explicitly. Nearest-triangle
+  lookup now uses an immutable, balanced bounding-box hierarchy in Rust,
+  retaining original triangle IDs and the lowest original ID for equal-distance
+  matches. Coordinate-gap bounds prune distant branches without a dimensional
+  search tolerance. The hierarchy is built once per loaded mesh; the retained
+  triangle vector cannot be mutated independently of it. Background on this
+  class of point/primitive queries: [CGAL AABB tree manual](https://doc.cgal.org/latest/AABB_tree/index.html).
+  The direct component normalization also avoids a reciprocal-overflow defect
+  exposed by a subnormal-distance query in the previous implementation.
+  Sixteen object-map numerical tests report passes. A separate comparison with
+  the saved previous source used 2,361 numerical queries derived from the
+  supplied CAD planes across five delivered meshes. It reported identical
+  nearest points, triangle IDs and signed distances; normal components differed
+  by at most 1.1102230246251565e-16 after the normalization correction. Combined
+  target query times were 0.849/0.810 seconds before and 0.040/0.042 seconds with
+  the index, excluding mesh loading. These are computational observations from
+  that comparison, not physical accuracy or universal performance claims.
+  The matched standard Rust binary is installed; the offline example returned
+  an unreviewed proposal and exported its files. Comparison inputs, outputs and
+  the previous binary are retained at
+  `/home/kit/cnc-backups/mapper-spatial-arbj4k3j`. Initial alignment, symmetry
+  handling and self-intersection analysis remain outstanding. Mesh closure
+  checks alone do not establish absence of self-intersections.
 - [ ] **Connect mapper results to the operator workflow.** Provide normal UI
   access to object/setup selection, retained captures, model revisions, analysis
   parameters, residual inspection and named-location export. Analysis must run
