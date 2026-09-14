@@ -25,6 +25,18 @@ class Parameter:
     kind: ParameterKind
     default: str
     increment: Decimal
+    default_reference: str | None = None
+
+    def initial_text(self, preferred: str) -> str:
+        if self.default_reference is None or self.kind is not ParameterKind.POSITIVE_MM:
+            return preferred
+        try:
+            unset = Decimal(preferred.strip()).is_zero()
+        except InvalidOperation:
+            # Preserve invalid text for the existing visible field validation.
+            return preferred
+        # A saved zero was an unset field, not an operator measurement.
+        return self.default if unset else preferred
 
     def parse(self, text: str) -> float:
         try:
@@ -67,8 +79,26 @@ class PanelScript:
 
 def read_panel_scripts(path: Path, operations: dict[str, Operation]) -> tuple[PanelScript, ...]:
     document = json.loads(path.read_text(encoding="utf-8"))
-    if set(document) != {"version", "scripts"} or document["version"] != 1:
+    if set(document) - {"defaults"} != {"version", "scripts"} or document["version"] != 1:
         raise ValueError(f"Unsupported Custom Scripts parameter catalog: {path}")
+    defaults: dict[str, str] = {}
+    definitions = document.get("defaults", {})
+    if not isinstance(definitions, dict):
+        raise ValueError(f"Custom Scripts shared defaults must be named definitions: {path}")
+    for reference, definition in definitions.items():
+        if not re.fullmatch(r"[a-z][a-z0-9-]*", reference):
+            raise ValueError(f"Invalid shared default name: {reference!r}")
+        if not isinstance(definition, dict) or set(definition) != {"value", "description", "source"}:
+            raise ValueError(f"Shared default {reference}: provide value, description and source in {path}")
+        if not all(isinstance(value, str) and value.strip() for value in definition.values()):
+            raise ValueError(f"Shared default {reference}: value, description and source must be nonempty text in {path}")
+        try:
+            initial = Decimal(definition["value"])
+        except InvalidOperation as error:
+            raise ValueError(f"Shared default {reference}: enter a numeric value in {path}") from error
+        if not initial.is_finite() or not math.isfinite(float(initial)):
+            raise ValueError(f"Shared default {reference}: enter a finite value in {path}")
+        defaults[reference] = definition["value"]
     scripts = []
     keys: set[str] = set()
     pins: set[str] = set()
@@ -89,7 +119,16 @@ def read_panel_scripts(path: Path, operations: dict[str, Operation]) -> tuple[Pa
         for field in row["parameters"]:
             if set(field) != {"pin", "label", "kind", "default", "increment"}:
                 raise ValueError(f"Invalid parameter definition for {operation.label}")
-            parameter = Parameter(field["pin"], field["label"], ParameterKind(field["kind"]), field["default"], Decimal(field["increment"]))
+            initial_text = field["default"]
+            reference = None
+            if isinstance(initial_text, dict) and set(initial_text) == {"reference"}:
+                reference = initial_text["reference"]
+                if not isinstance(reference, str) or reference not in defaults:
+                    raise ValueError(f"{field['label']}: unknown shared default {reference!r}; correct the reference in {path}")
+                initial_text = defaults[reference]
+            if not isinstance(initial_text, str):
+                raise ValueError(f"{field['label']}: default must be numeric text or a named reference in {path}")
+            parameter = Parameter(field["pin"], field["label"], ParameterKind(field["kind"]), initial_text, Decimal(field["increment"]), reference)
             if not re.fullmatch(r"[a-z][a-z0-9-]*", parameter.pin) or parameter.pin in pins:
                 raise ValueError(f"Invalid or duplicate parameter pin: {parameter.pin}")
             if not parameter.increment.is_finite() or parameter.increment <= 0:

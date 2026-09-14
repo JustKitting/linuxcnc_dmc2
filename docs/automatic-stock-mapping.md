@@ -22,9 +22,15 @@ Every target stays between the original starting Z and `starting Z - budget`.
 Starting Z is also the common clearance plane. The script never adds a second
 12.7 mm below the first contact. Place the start above the stock's high point.
 
-Enter the mounted usable reach in Scripts: ball bottom to the first part that
-could interfere with the stock. It is initially unset, as in Surface map. The
-budget plus the editable reach reserve must fit within this measured reach.
+Probe reach defaults to **22 mm** from the PGFUN probe's
+[new stylus specification](https://pgfuntransmission.com/wp-content/uploads/2024/11/6s-Nc.jpg),
+measured in the drawing from the seating shoulder to the ball bottom. This is an
+editable nominal specification default, as requested by the operator. Surface map,
+Automatic block map and Automatic rim trace share one definition in
+`config/script-panel.json`: `defaults.xyz-probe-reach-mm`. The existing 2 mm
+reserve leaves a 20 mm reach budget; the separate 12.7 mm descent default is unchanged.
+The descent budget plus the editable reserve must fit within the entered reach.
+Saved unset zero values inherit this default; explicit nonzero settings remain editable.
 Grid/station spacing defaults to the previously requested 1 mm; binary boundary
 resolution defaults to 0.1 mm. Both are editable. The rim options additionally
 set side ball-centre depth below the first top and clearance outside the fitted

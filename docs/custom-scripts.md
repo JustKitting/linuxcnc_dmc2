@@ -42,7 +42,12 @@ validation, so an invalid script field does not remove recorder-off controls.
 
 `config/operations.tsv` identifies the programs and their typed effects and
 prerequisites. `config/script-panel.json` defines the widget fields, HAL names,
-numeric kinds, defaults, and increments. Python implements the stock AXIS/Tk
-bindings only; the existing LinuxCNC programs and Rust capture/control path
+numeric kinds, defaults, and increments. A default may be numeric text or a typed
+`{"reference": "name"}` pointing to the catalog's `defaults` dictionary. Each
+shared default retains its value, description and source. The probe reach fields
+share `xyz-probe-reach-mm`, the PGFUN new stylus's 22 mm specification. A saved
+unset zero for a positive field using a shared default inherits that value on
+startup; nonzero preferences and invalid editing text are preserved for ordinary
+field validation. Python implements the stock AXIS/Tk bindings only; the existing LinuxCNC programs and Rust capture/control path
 retain machine execution and measurement ownership. The standard launcher
 includes these source inputs in its build-matching check.

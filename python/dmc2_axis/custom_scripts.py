@@ -57,7 +57,8 @@ class CustomScriptsBinding:
             for parameter in script.parameters:
                 self.comp.newpin(parameter.pin, hal.HAL_FLOAT, hal.HAL_OUT)
                 variable = namespace["Tkinter"].StringVar(master=self.root)
-                variable.set(namespace["ap"].getpref("dmc2_" + parameter.pin, parameter.default, str))
+                preferred = namespace["ap"].getpref("dmc2_" + parameter.pin, parameter.default, str)
+                variable.set(parameter.initial_text(preferred))
                 self.variables[parameter.pin] = variable
             self.widgets[script.key] = create_script_widgets(self, script)
             for parameter in script.parameters:

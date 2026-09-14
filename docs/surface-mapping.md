@@ -2,7 +2,8 @@
 
 [`map-top-surface.ngc`](../live/nc_files/map-top-surface.ngc) is a parameterized
 script selected in **Custom Scripts → Surface map**. Enter the region,
-spacing and mounted usable reach in that pane, then use **Run Surface map**.
+spacing in that pane, then use **Run Surface map**. Probe reach starts from the
+configured PGFUN specification and remains editable.
 The pane uses the existing typed DMC2 loader. Ordinary **File → Open** also
 uses the same pane values. It uses the
 standard compiled Rust M190 capture helper, also used by the circle routine.
@@ -19,8 +20,8 @@ Positive X is **physical LEFT / LinuxCNC +X**; negative X is **physical RIGHT /
 LinuxCNC -X**. `spacing_mm` is the grid interval. The final interval on an axis
 may be shorter to include the exact region endpoint; the region is never enlarged.
 
-The region, grid spacing and mounted usable reach are initially **unset**. Run
-rejects the file before motion until they are entered. No region or resolution
+The region and grid spacing are initially **unset**. Run rejects the file before
+motion until they are entered. Probe reach defaults to the PGFUN specification. No region or resolution
 has been inferred from the previously recorded plate edge. The existing plate
 reference does not yet establish the complete plate boundary or this object's
 extent.
@@ -34,7 +35,7 @@ sets the relative height origin. The proposed settings are:
 | `max_drop_mm` | 3 mm maximum depth below the measured reference for every grid point |
 | `clearance_mm` | 2 mm above the measured reference for every XY transfer |
 | `reach_reserve_mm` | 2 mm retained from the mounted usable reach |
-| `usable_reach_mm` | Unset; clearance from ball bottom to the first part that could interfere over this region |
+| `usable_reach_mm` | 22 mm nominal PGFUN new stylus length; editable shared specification default |
 | `coarse_feed_mm_min` | 200 mm/min for location and contact-sensitive clearance travel |
 | `fine_feed_mm_min` | 50 mm/min for measurement and release |
 
@@ -47,9 +48,12 @@ search floor spans 5 mm, of which 3 mm is below the reference.
 The manufacturer [dimension drawing](https://pgfuntransmission.com/wp-content/uploads/2024/11/6s-Nc.jpg)
 shows a **22 mm new stylus** measured from its seating shoulder to ball bottom,
 and **26 mm from body underside to ball bottom for the old stylus assembly**.
-Those are different dimension references. They do not establish this probe's
-installed clearance to its taper, collar, body or surrounding features, so they
-are not silently assigned to `usable_reach_mm`.
+At the operator's request, the new stylus's 22 mm specification supplies the
+editable reach default. It is stored once at `defaults.xyz-probe-reach-mm` in
+`config/script-panel.json` and shared with Automatic block map and Automatic rim
+trace. The 2 mm reserve remains separate, leaving 20 mm from that nominal reach.
+Saved unset zeros inherit the default; explicit nonzero settings are retained.
+This default records a product dimension, not a newly measured calibration.
 The [product specification](https://www.amazon.com/dp/B0CC5BFFZW) gives a nominal
 2 mm ball, feed range 50–200 mm/min and Z overtravel of 2 mm. Mechanical overtravel
 after contact is not an available depth to search through empty space.
