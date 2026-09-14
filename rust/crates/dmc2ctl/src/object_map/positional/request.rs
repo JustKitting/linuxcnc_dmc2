@@ -2,6 +2,7 @@
 use super::{
     super::{model::Id, record, Error},
     geometry::{Pose, V},
+    probe::Probe,
 };
 use std::collections::BTreeSet;
 pub const SCHEMA: &str = "DMC2_POSITIONAL_REQUEST_V1";
@@ -69,29 +70,11 @@ pub struct Selection {
     pub sequence: usize,
     pub usage: Use,
 }
-#[derive(Clone, Copy)]
-pub enum Calibration {
-    Nominal,
-    Calibrated,
-    Synthetic,
-}
-impl Calibration {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Nominal => "nominal",
-            Self::Calibrated => "calibrated",
-            Self::Synthetic => "synthetic",
-        }
-    }
-}
 pub struct Request {
     pub design: Id,
     pub model_role: String,
     pub units: f64,
-    pub calibration: Calibration,
-    pub radius: f64,
-    pub mount: V,
-    pub pretravel: f64,
+    pub probe: Probe,
     pub initial: Pose,
     pub planar: bool,
     pub iterations: usize,
@@ -135,22 +118,7 @@ impl Request {
             }
         };
         let units = positive("stl_mm_per_unit")?;
-        let radius = positive("ball_radius_mm")?;
-        let mount = vector(&f["trigger_to_ball_mm"], "trigger_to_ball_mm")?;
-        let pretravel = scalar(&f["pretravel_mm"], "pretravel_mm")?;
-        if pretravel < 0. {
-            return Err(Error::Input("pretravel_mm is a nonnegative distance along the recorded approach; it is subtracted from trigger position.".into()));
-        }
-        let calibration = match f["calibration_state"].as_str() {
-            "nominal" => Calibration::Nominal,
-            "calibrated" => Calibration::Calibrated,
-            "synthetic" => Calibration::Synthetic,
-            _ => {
-                return Err(Error::Input(
-                    "calibration_state must be nominal, calibrated or synthetic.".into(),
-                ))
-            }
-        };
+        let probe = Probe::read(&f)?;
         if !matches!(
             f["model_role"].as_str(),
             "finished-design" | "reference-stock"
@@ -158,11 +126,6 @@ impl Request {
             return Err(Error::Input(
                 "model_role must be finished-design or reference-stock.".into(),
             ));
-        }
-        for k in ["calibration_reference", "frame_reference"] {
-            if f[k] == "REQUIRED" {
-                return Err(Error::Input(format!("{k} must identify the calibration evidence and shared mounting/homing reference for these captures.")));
-            }
         }
         let planar = match f["solve"].as_str() {
             "translation-yaw" => true,
@@ -187,36 +150,7 @@ impl Request {
                     "max_iterations requires a positive integer computational budget.".into(),
                 )
             })?;
-        let mut selected = Vec::new();
-        let mut seen = BTreeSet::new();
-        let body = std::str::from_utf8(body)
-            .map_err(|e| Error::Data(format!("Contact selections are not UTF-8: {e}.")))?;
-        let mut lines = body.lines();
-        if !body.ends_with('\n') || lines.next() != Some("capture,sequence,use") {
-            return Err(Error::Data(
-                "Request must end with a terminated capture,sequence,use CSV table.".into(),
-            ));
-        }
-        for line in lines {
-            let row = line.split(',').collect::<Vec<_>>();
-            if row.len() != 3 {
-                return Err(Error::Data(format!(
-                    "Selection row must have three fields: {line:?}."
-                )));
-            }
-            let capture = Id::parse(row[0])?;
-            let sequence = row[1]
-                .parse::<usize>()
-                .map_err(|e| Error::Data(format!("Invalid contact sequence: {e}.")))?;
-            if !seen.insert((capture.as_str().to_string(), sequence)) {
-                return Err(Error::Data(format!("Repeated selection {}:{sequence}; one trigger cannot fit and independently check the same result.",capture.as_str())));
-            }
-            selected.push(Selection {
-                capture,
-                sequence,
-                usage: Use::parse(row[2])?,
-            });
-        }
+        let selected = read_selections(body)?;
         if selected.iter().filter(|s| s.usage == Use::Fit).count() < if planar { 4 } else { 6 } {
             return Err(Error::Input("Select enough independent fine contacts as fit rows for the requested pose; keep separate check rows and stock-face rows.".into()));
         }
@@ -224,10 +158,7 @@ impl Request {
             design: Id::parse(&f["design"])?,
             model_role: f["model_role"].clone(),
             units,
-            calibration,
-            radius,
-            mount,
-            pretravel,
+            probe,
             initial,
             planar,
             iterations,
@@ -239,4 +170,38 @@ impl Request {
             selected,
         })
     }
+}
+
+pub fn read_selections(body: &[u8]) -> Result<Vec<Selection>, Error> {
+    let mut selected = Vec::new();
+    let mut seen = BTreeSet::new();
+    let body = std::str::from_utf8(body)
+        .map_err(|e| Error::Data(format!("Contact selections are not UTF-8: {e}.")))?;
+    let mut lines = body.lines();
+    if !body.ends_with('\n') || lines.next() != Some("capture,sequence,use") {
+        return Err(Error::Data(
+            "Request must end with a terminated capture,sequence,use CSV table.".into(),
+        ));
+    }
+    for line in lines {
+        let row = line.split(',').collect::<Vec<_>>();
+        if row.len() != 3 {
+            return Err(Error::Data(format!(
+                "Selection row must have three fields: {line:?}."
+            )));
+        }
+        let capture = Id::parse(row[0])?;
+        let sequence = row[1]
+            .parse::<usize>()
+            .map_err(|e| Error::Data(format!("Invalid contact sequence: {e}.")))?;
+        if !seen.insert((capture.as_str().to_string(), sequence)) {
+            return Err(Error::Data(format!("Repeated selection {}:{sequence}; one trigger cannot fit and independently check the same result.",capture.as_str())));
+        }
+        selected.push(Selection {
+            capture,
+            sequence,
+            usage: Use::parse(row[2])?,
+        });
+    }
+    Ok(selected)
 }

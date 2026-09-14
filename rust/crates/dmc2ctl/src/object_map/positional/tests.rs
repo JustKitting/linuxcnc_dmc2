@@ -16,25 +16,10 @@ fn samples(req: &Request) -> Vec<fit::Sample> {
     let capture = super::super::capture::Capture::read(LEDGER).unwrap();
     req.selected
         .iter()
-        .map(|s| {
-            let c = capture
-                .contacts
-                .iter()
-                .find(|c| c.sequence == s.sequence)
-                .unwrap();
-            fit::Sample {
-                capture: s.capture.clone(),
-                sequence: s.sequence,
-                usage: s.usage,
-                state: capture.state,
-                trigger: c.trigger_mm,
-                center: sub(
-                    add(c.trigger_mm, req.mount),
-                    scale(c.direction, req.pretravel),
-                ),
-                approach: c.direction,
-                feed: c.commanded_feed_mm_min,
-            }
+        .map(|selected| {
+            req.probe
+                .measure(&selected.capture, &capture, selected)
+                .unwrap()
         })
         .collect()
 }

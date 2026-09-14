@@ -1,23 +1,11 @@
 //! Local sphere-to-triangle registration with retained residuals and explicit bounds.
+pub use super::probe::Sample;
 use super::{
-    super::{
-        model::{CaptureState, Id},
-        Error,
-    },
+    super::Error,
     geometry::*,
     mesh::{Mesh, Nearest},
     request::{Request, Use},
 };
-pub struct Sample {
-    pub capture: Id,
-    pub sequence: usize,
-    pub usage: Use,
-    pub state: CaptureState,
-    pub trigger: V,
-    pub center: V,
-    pub approach: V,
-    pub feed: f64,
-}
 pub struct Observation {
     pub center: V,
     pub near: Nearest,
@@ -101,7 +89,7 @@ fn observations(
 ) -> Result<Vec<Observation>, Error> {
     samples
         .iter()
-        .map(|s| observe(mesh, s, p, r.huber, r.radius))
+        .map(|s| observe(mesh, s, p, r.huber, r.probe.radius))
         .collect()
 }
 fn usable(samples: &[Sample], obs: &[Observation], r: &Request) -> bool {

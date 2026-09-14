@@ -90,9 +90,10 @@ class ObjectMapperBinding:
             return tuple(s["id"] for s in obj.get("setups", []))
         if kind is FieldKind.DESIGN:
             return tuple(d["revision"] for d in obj.get("design_revisions", []) if d["format"] == "stl")
-        if kind is FieldKind.ANALYSIS:
+        if kind in (FieldKind.ANALYSIS, FieldKind.CAPTURE):
             setup = next((s for s in obj.get("setups", []) if s["id"] == self.value("setup").get()), {})
-            return tuple(a["id"] for a in setup.get("analysis_candidates", []))
+            collection = "analysis_candidates" if kind is FieldKind.ANALYSIS else "captures"
+            return tuple(a["id"] for a in setup.get(collection, []))
         return ()
 
     def select(self):

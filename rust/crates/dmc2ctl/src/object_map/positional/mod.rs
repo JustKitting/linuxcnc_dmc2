@@ -2,8 +2,10 @@
 mod fit;
 mod geometry;
 mod mesh;
+mod probe;
 mod report;
 pub(super) mod request;
+pub(super) mod stock;
 #[cfg(test)]
 mod tests;
 use super::{
@@ -133,43 +135,11 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, path: &Path) -> Resu
         })?;
     let mesh = mesh::Mesh::read(&design.raw, req.units)?;
     let captures = store.captures(object, setup)?;
-    let mut samples = Vec::new();
-    let mut used = BTreeSet::new();
-    for selected in &req.selected {
-        let c = captures
-            .iter()
-            .find(|c| c.id == selected.capture)
-            .ok_or_else(|| {
-                Error::Data(format!(
-                    "Capture {} is absent from this setup.",
-                    selected.capture.as_str()
-                ))
-            })?;
-        if c.capture.state == CaptureState::Quarantined {
-            return Err(Error::Data(format!("Capture {} is quarantined. Preserve it for inspection; recapture the required geometry before fitting.",c.id.as_str())));
-        }
-        let contact=c.capture.contacts.iter().find(|p| p.sequence==selected.sequence && p.stage==Stage::Fine).ok_or_else(|| Error::Data(format!("{}:{} is not an original fine contact; endpoints, coarse touches, releases and misses cannot substitute.",c.id.as_str(),selected.sequence)))?;
-        let center = sub(
-            add(contact.trigger_mm, req.mount),
-            scale(contact.direction, req.pretravel),
-        );
-        if !finite(center) {
-            return Err(Error::Data(
-                "Probe correction overflowed; check the request calibration.".into(),
-            ));
-        }
-        samples.push(fit::Sample {
-            capture: c.id.clone(),
-            sequence: contact.sequence,
-            usage: selected.usage,
-            state: c.capture.state,
-            trigger: contact.trigger_mm,
-            center,
-            approach: contact.direction,
-            feed: contact.commanded_feed_mm_min,
-        });
-        used.insert(c.id.as_str());
-    }
+    let samples = req.probe.samples(&captures, &req.selected)?;
+    let used = samples
+        .iter()
+        .map(|s| s.capture.as_str())
+        .collect::<BTreeSet<_>>();
     let fitted = fit::run(&mesh, &samples, &req)?;
     let reports = report::build(&mesh, &samples, &fitted, &req)?;
     let stl = mesh.transformed_stl(fitted.model_to_machine)?;

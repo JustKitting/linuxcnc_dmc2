@@ -21,6 +21,7 @@ class FieldKind(Enum):
     SETUP = "setup"
     DESIGN = "design"
     ANALYSIS = "analysis"
+    CAPTURE = "capture"
     FILE = "file"
     DIRECTORY = "directory"
     NEW_PATH = "new-path"

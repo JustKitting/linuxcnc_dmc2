@@ -92,6 +92,8 @@ pub fn run(args: &[OsString], default_store: &Path) -> Result<String, Error> {
         ExportCaptures => exchange::export(&store, &id(0)?, &id(1)?, path(2)),
         Inspect => positional::inspect(path(0), text(&a[1])?),
         Prepare => positional::prepare(&store, &id(0)?, &id(1)?, &id(2)?),
+        PrepareStock => positional::stock::prepare(&store, &id(0)?, &id(1)?, &id(2)?),
+        FitStock => positional::stock::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3)),
         Fit => positional::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3)),
         ShowFit => positional::show(&store, &id(0)?, &id(1)?, &id(2)?),
         ExportFit => positional::export(&store, &id(0)?, &id(1)?, &id(2)?, path(3)),

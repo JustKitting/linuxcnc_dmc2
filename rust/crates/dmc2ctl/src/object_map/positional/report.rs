@@ -51,7 +51,7 @@ pub fn build(mesh: &Mesh, samples: &[Sample], fit: &Fit, r: &Request) -> Result<
             _ => 2,
         };
         residuals[group].push(o.residual);
-        let estimated = sub(o.center, scale(o.near.normal, r.radius));
+        let estimated = sub(o.center, scale(o.near.normal, r.probe.radius));
         let machine_center = fit.model_to_machine.point(o.center);
         let machine_surface = fit.model_to_machine.point(estimated);
         if !finite(machine_center) || !finite(machine_surface) {
@@ -83,7 +83,7 @@ pub fn build(mesh: &Mesh, samples: &[Sample], fit: &Fit, r: &Request) -> Result<
             if sign * approach[axis] >= 0. {
                 return Err(Error::Data(format!("Stock face {}:{} is labelled {} but the recorded approach points away from that outward normal. Correct the face assignment; no dimension was inferred.",s.capture.as_str(),s.sequence,s.usage.name())));
             }
-            faces[axis * 2 + usize::from(positive)].push(o.center[axis] - sign * r.radius);
+            faces[axis * 2 + usize::from(positive)].push(o.center[axis] - sign * r.probe.radius);
         }
     }
     let face_json = (0..6)
@@ -129,7 +129,7 @@ pub fn build(mesh: &Mesh, samples: &[Sample], fit: &Fit, r: &Request) -> Result<
             s.usage == Use::Check && (!o.facing || o.residual.abs() > r.correspondence)
         })
         .count();
-    let result=format!("{{\n\"schema\":\"dmc2.positional-analysis.v1\",\n\"state\":{},\n\"message\":{},\n\"cam_ready\":false,\n\"calibration_state\":{},\n\"model_role\":{},\n\"stl_mm_per_unit\":{},\n\"frame\":\"model-mm to LinuxCNC machine-mm\",\n\"model_to_machine\":{},\n\"iterations\":{},\n\"minimum_scaled_qr_pivot\":{},\n\"global_uniqueness_established\":false,\n\"uncertainty_mm\":null,\n\"contains_partial_capture\":{},\n\"fit_residuals\":{},\n\"independent_check_residuals\":{},\n\"independent_checks_outside_association\":{},\n\"other_residuals\":{},\n\"model_geometry\":{},\n\"stock_faces\":[{}],\n\"stock_face_separations_xyz_mm\":[{}],\n\"predicted_finished_model_span_mm\":{},\n\"unobserved_volume\":\"unknown\",\n\"reconstructed_stock\":null,\n\"correction_formula\":\"center_machine = original_trigger_machine + trigger_to_ball_mm - pretravel_mm * commanded_approach_unit; estimated_surface_model = inverse_pose(center_machine) - ball_radius_mm * nearest_surface_normal\",\n\"interpretation\":\"A local placement proposal. Normals and surface estimates depend on the STL and initial placement; signed residuals use local triangle winding, not a global solid-membership test. Huber weights retain every fitting row. Check rows do not affect the fit. Stock faces assume assigned planes parallel to the corresponding model axes; dimensions require both opposing faces. A model span is an ideal target prediction, not evidence of finished size. No offsets, CAM jobs, toolpaths or hardware states are changed.\"\n}}\n",quote(fit.outcome.name()),quote(fit.outcome.message()),quote(r.calibration.name()),quote(&r.model_role),r.units,fit.model_to_machine.json(),fit.iterations,fit.min_scaled_pivot,partial,stats(&residuals[0]),stats(&residuals[1]),mismatched_checks,stats(&residuals[2]),mesh.json(),face_json,dimensions,json(sub(mesh.max,mesh.min)));
+    let result=format!("{{\n\"schema\":\"dmc2.positional-analysis.v1\",\n\"state\":{},\n\"message\":{},\n\"cam_ready\":false,\n\"calibration_state\":{},\n\"model_role\":{},\n\"stl_mm_per_unit\":{},\n\"frame\":\"model-mm to LinuxCNC machine-mm\",\n\"model_to_machine\":{},\n\"iterations\":{},\n\"minimum_scaled_qr_pivot\":{},\n\"global_uniqueness_established\":false,\n\"uncertainty_mm\":null,\n\"contains_partial_capture\":{},\n\"fit_residuals\":{},\n\"independent_check_residuals\":{},\n\"independent_checks_outside_association\":{},\n\"other_residuals\":{},\n\"model_geometry\":{},\n\"stock_faces\":[{}],\n\"stock_face_separations_xyz_mm\":[{}],\n\"predicted_finished_model_span_mm\":{},\n\"unobserved_volume\":\"unknown\",\n\"reconstructed_stock\":null,\n\"correction_formula\":\"center_machine = original_trigger_machine + trigger_to_ball_mm - pretravel_mm * commanded_approach_unit; estimated_surface_model = inverse_pose(center_machine) - ball_radius_mm * nearest_surface_normal\",\n\"interpretation\":\"A local placement proposal. Normals and surface estimates depend on the STL and initial placement; signed residuals use local triangle winding, not a global solid-membership test. Huber weights retain every fitting row. Check rows do not affect the fit. Stock faces assume assigned planes parallel to the corresponding model axes; dimensions require both opposing faces. A model span is an ideal target prediction, not evidence of finished size. No offsets, CAM jobs, toolpaths or hardware states are changed.\"\n}}\n",quote(fit.outcome.name()),quote(fit.outcome.message()),quote(r.probe.calibration.name()),quote(&r.model_role),r.units,fit.model_to_machine.json(),fit.iterations,fit.min_scaled_pivot,partial,stats(&residuals[0]),stats(&residuals[1]),mismatched_checks,stats(&residuals[2]),mesh.json(),face_json,dimensions,json(sub(mesh.max,mesh.min)));
     // Reject arithmetic overflow in statistics instead of serializing invalid JSON.
     if result.contains(":inf") || result.contains(":NaN") || result.contains(":-inf") {
         return Err(Error::Data(

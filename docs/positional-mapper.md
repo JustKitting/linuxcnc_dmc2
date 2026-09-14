@@ -142,6 +142,61 @@ fitting and the stock-face roles for allowance measurements. If the whole object
 is raw stock, supply a suitable reference-stock model or first establish its
 reference features; do not fit all oversized faces to a finished-part mesh.
 
+## Estimate an irregular stock outline without a reference STL
+
+The standard binary and the Object Mapper operation catalog now provide:
+
+```sh
+native/bin/dmc2ctl object-map prepare-stock part first rim > /tmp/stock-request.txt
+native/bin/dmc2ctl object-map fit-stock part first stock-a /tmp/stock-request.txt
+native/bin/dmc2ctl object-map show-fit part first stock-a
+native/bin/dmc2ctl object-map export-fit part first stock-a /tmp/stock-a
+```
+
+`prepare-stock` reads the selected retained capture's original phase records.
+Fine outline-enter/advance contacts become ordered `fit` rows; the independent
+closing touch becomes `check`. Other fine observations remain `observe`. Failed
+captures remain quarantined. Additional captures can be selected explicitly
+when they share the declared reference. The request needs no nominal stock
+dimensions, STL correspondence, rectangle or fixed number of sides.
+
+Fill the generated `DMC2_STOCK_OUTLINE_REQUEST_V1` request through the existing
+request editor. Its calibration fields have the same definitions as the
+placement request above and use the same Rust correction path. Additional fields:
+
+| Field | Meaning |
+|---|---|
+| `closure` | `open` or `closed`: declared traversal topology, not evidence of seam agreement |
+| `surface_model` | `probe-centres`, or explicitly assumed `vertical-sides` |
+| `neighborhood_span_mm` | Maximum contact-arc distance in each direction used for a local tangent estimate |
+| `huber_mm` | Perpendicular residual at which local robust weights decrease |
+| `max_iterations` | Computational budget for each local iterative fit |
+| `convergence_mm` | Maximum local projection change for numerical convergence |
+| `max_gap_mm` | Maximum adjacent contact spacing admitted to local neighborhoods and check associations |
+| `max_z_span_mm` | Allowed height range for interpreting the observations as one XY slice |
+| `max_fit_residual_mm` | Residual requiring local refinement or investigation; it never deletes a measurement |
+
+The estimator performs iterative robust orthogonal regression along the ordered
+ball-centre contour. Each station retains its source contact, neighbors, signed
+residuals, weights and stopping reason. Shape is estimated locally. Coherent
+deviations can indicate curvature or missing detail and are retained. `check`
+and `observe` rows never drive the fit. Ball-radius correction follows the
+estimated surface normal, not an oblique probe approach; the XY correction is
+only emitted when `vertical-sides` was explicitly selected.
+
+The analysis bundle contains `stock-outline.machine-mm.json`, all source
+captures, the exact request, `residuals.csv`, the ball-centre cloud and
+`refinement-requests.json`. Measurement requirements identify gaps, unresolved
+local shape, failed numerical convergence, mixed heights, missing closure or
+checks, and unmeasured wall slope. These are requirements for acquisition, not
+machine commands. The tracer does not yet consume them automatically.
+
+Interpolated segments remain modeling assumptions. This slice does not establish
+a closed three-dimensional material volume, hidden concavities or wall slope.
+Self-intersection analysis, multi-height/top reconstruction and placement of the
+unchanged machining geometry inside measured material remain implementation
+work. The report retains `solid_stock: null` and `cam_ready: false`.
+
 ## Fit, inspect and repeat without editing control code
 
 ```sh
@@ -324,12 +379,27 @@ machine run.
   planes. Local plane or rectangle summaries must retain the actual outline,
   coherent deviations, concavities and original contact references. The current
   named-face calculation assumes model-axis-parallel planes and does not provide
-  this reconstruction. Represent observed, supported-empty and unknown regions;
+  this reconstruction. The standard `prepare-stock` / `fit-stock` path now
+  estimates an unrestricted ordered XY contour with iterative Huber regression,
+  explicit probe correction, original-contact references and withheld checks.
+  Its source is in `object_map/positional/stock`; the shared probe correction is
+  in `object_map/positional/probe.rs`. Twenty-two object-map numerical tests
+  report passes, including curved/indented contours, oblique approaches,
+  unsupported intervals and withheld contacts. These are computational results,
+  not physical stock evidence. Represent observed, supported-empty and unknown regions;
   retain explicit uncertainty/modeling assumptions instead of filling unobserved
   volume by implication. Keep predicted operation stock separate from measured
   stock. This takes priority over matched-plane initial alignment for the raw
   wood workflow; see the owner clarification in
   [the research and implementation note](probe-based-continuation.md#owner-clarification-oversized-wood-without-an-exact-stock-model).
+- [ ] **Close the acquisition/estimation loop.** Stock-outline analysis now
+  emits source-referenced requirements for gaps, unresolved local shape,
+  independent-check disagreement, mixed heights and unmeasured wall slope.
+  Consume those requirements through the typed acquisition planner with retained
+  bounds, exact trigger capture and operator recovery. Additional observation
+  selection and tracing must serve stock reconstruction and containment; they
+  are not separate end goals. No analysis requirement currently issues a probe
+  command. Keep the pending fine endpoint allowance separate from this work.
 - [ ] **Optimize machining placement inside measured stock.** Fit the unchanged
   required geometry into the stock estimate using the allowed translations and
   rotations. Account for material shortage and unknown coverage separately;

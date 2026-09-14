@@ -39,11 +39,19 @@ pub fn browse(path: &Path) -> Result<String, Error> {
     ))
 }
 fn draft(raw: &[u8]) -> Result<&str, Error> {
-    record::decode(
-        raw,
-        super::positional::request::SCHEMA,
-        super::positional::request::KEYS,
-    )?;
+    let schemas = [
+        (
+            super::positional::request::SCHEMA,
+            super::positional::request::KEYS,
+        ),
+        (
+            super::positional::stock::SCHEMA,
+            super::positional::stock::KEYS,
+        ),
+    ];
+    let (schema, keys) = schemas.iter().find(|(schema, _)| raw.starts_with(format!("{schema}\n").as_bytes()))
+        .ok_or_else(|| Error::Input("Unsupported analysis draft. Prepare a placement or stock-outline request through Object Mapper.".into()))?;
+    record::decode(raw, schema, keys)?;
     std::str::from_utf8(raw).map_err(|e| Error::Input(format!("Request text is not UTF-8: {e}.")))
 }
 pub fn load_request(path: &Path) -> Result<String, Error> {
@@ -52,5 +60,5 @@ pub fn load_request(path: &Path) -> Result<String, Error> {
 pub fn save_request(path: &Path, raw: &[u8]) -> Result<String, Error> {
     draft(raw)?;
     save(path, raw)?;
-    Ok(format!("{{\"request_file\":{},\"state\":\"draft-retained\",\"message\":\"Request text retained. Calculate placement validates calibration, settings and selected contacts.\"}}",quote(&path.display().to_string())))
+    Ok(format!("{{\"request_file\":{},\"state\":\"draft-retained\",\"message\":\"Request text retained. The selected analysis operation validates calibration, settings and selected contacts.\"}}",quote(&path.display().to_string())))
 }
