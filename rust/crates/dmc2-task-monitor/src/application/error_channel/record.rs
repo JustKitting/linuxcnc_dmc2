@@ -16,43 +16,6 @@ pub(in crate::application) enum ErrorSeverity {
     Info,
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-enum LinuxCncMessageKind {
-    NmlError,
-    NmlText,
-    NmlDisplay,
-    OperatorError,
-    OperatorText,
-    OperatorDisplay,
-    Unknown(i32),
-}
-
-impl LinuxCncMessageKind {
-    const fn from_message_type(message_type: i32) -> Self {
-        match message_type {
-            1 => Self::NmlError,
-            2 => Self::NmlText,
-            3 => Self::NmlDisplay,
-            11 => Self::OperatorError,
-            12 => Self::OperatorText,
-            13 => Self::OperatorDisplay,
-            raw => Self::Unknown(raw),
-        }
-    }
-}
-
-impl RecoveryClassified for LinuxCncMessageKind {
-    fn recovery_class(&self) -> RecoveryClass {
-        match self {
-            Self::NmlError | Self::OperatorError => RecoveryClass::AbortTask,
-            Self::NmlText | Self::NmlDisplay | Self::OperatorText | Self::OperatorDisplay => {
-                RecoveryClass::RecheckSource
-            }
-            Self::Unknown(_) => RecoveryClass::RelaunchApplication,
-        }
-    }
-}
-
 impl ErrorSeverity {
     pub(in crate::application) const fn journal_name(self) -> &'static str {
         match self {
@@ -215,8 +178,12 @@ impl ErrorMessageRecord {
         self.contract.is_some()
     }
 
+    pub(super) fn cause(&self) -> super::cause::NativeCause {
+        super::cause::NativeCause::classify(self.message_type, &self.text, self.known())
+    }
+
     pub(in crate::application) fn recovery_class(&self) -> RecoveryClass {
-        LinuxCncMessageKind::from_message_type(self.message_type).recovery_class()
+        self.cause().contract().recovery
     }
 }
 

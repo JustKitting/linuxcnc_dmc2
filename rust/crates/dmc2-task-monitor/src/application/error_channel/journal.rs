@@ -11,7 +11,7 @@ use crate::application::nml::{PollCodes, TransportStatus};
 use super::native::ERROR_OBJECT_CAPACITY;
 use super::record::ErrorMessageRecord;
 
-pub(super) const JOURNAL_SCHEMA_VERSION: u32 = 3;
+pub(super) const JOURNAL_SCHEMA_VERSION: u32 = 4;
 const HEADER_MARKER: &str = "DMC2_ERROR_JOURNAL";
 const EVENT_MARKER: &str = "DMC2_ERROR_EVENT";
 const FNV64_OFFSET_BASIS: u64 = 0xcbf29ce484222325;
@@ -180,6 +180,7 @@ fn header_line(codes: PollCodes) -> String {
 }
 
 fn encode_event(sequence: u64, transport: TransportStatus, record: &ErrorMessageRecord) -> Vec<u8> {
+    let source = record.cause().contract();
     let serial = record
         .serial_number
         .map_or_else(|| "-".to_owned(), |value| value.to_string());
@@ -205,6 +206,9 @@ fn encode_event(sequence: u64, transport: TransportStatus, record: &ErrorMessage
         encode_hex(&record.object[..record.object_size]),
         transport.nml_error.to_string(),
         transport.cms_status.to_string(),
+        source.identity.to_owned(),
+        encode_hex(source.cause.as_bytes()),
+        encode_hex(source.action.as_bytes()),
     ]
     .join("\t");
     let checksum = fnv64(prefix.as_bytes());

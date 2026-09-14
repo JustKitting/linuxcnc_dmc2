@@ -1,0 +1,68 @@
+{
+  "schema": "dmc2-tool-setter-reference-v1",
+  "status": "user_accepted_reference",
+  "accepted_date": "2026-09-13",
+  "operator_acceptance": "hmm so i would say there is a bit of play there in the button could be worth to split it just barely on this maybe make it 21.39 then well use that as the true plate base since the aluminum will give slightly etc. then we use that as the way to measure the true button height with its small play",
+  "equipment": {
+    "name": "BTER CNC normally closed tool setter",
+    "model": "MY20-20-2",
+    "product_url": "https://www.amazon.com/dp/B09V5RNGS2",
+    "wiring_and_recovery_record": "docs/tool-setter.md",
+    "contact_input": "Mesa IN0, normalized NC open = contact",
+    "overtravel_input": "Mesa IN2, normalized NC open = overtravel"
+  },
+  "reference": {
+    "units": "mm",
+    "accepted_height_above_plate_mm": 63.931167480468744,
+    "kind": "effective_normal_contact_height",
+    "reference_surface": "User-selected machine plate base for the tool used in the retained setter measurement",
+    "height_formula": "exact fine setter trigger machine Z - user-accepted plate-contact machine Z",
+    "fine_trigger_machine_z_mm": 85.32116748046874,
+    "fine_trigger_machine_z_f64_bits": "4055548e020c49ba",
+    "accepted_plate_contact_machine_z_mm": 21.39,
+    "fine_feed_mm_min": 50.0,
+    "compliance_basis": "USER-DIRECTED: use 21.39 mm to account for observed button play and the operator-selected plate-contact allowance; this effect is included in the effective height, with no second pretravel correction"
+  },
+  "measurement_frame": {
+    "coordinate_frame": "LinuxCNC machine XYZ, millimetres",
+    "capture": "emcStatus.motion.traj.probedPosition;machine-mm",
+    "approach_direction": "physical DOWN / LinuxCNC -Z",
+    "x_directions": "physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X",
+    "tool_scope": "Installed tool used for the retained setter measurement and the operator-selected plate base; no tool-table number assigned"
+  },
+  "evidence": {
+    "source_ledger": "config/metrology/tool-offsets/tool-setter-1789346395947653909-1102463.txt",
+    "source_ledger_sha256": "e9cf32daa2c12af83de8738d6f08647c66ef671c1e373e6caf79fa740eda0e7b",
+    "fine_record_sequence": 1,
+    "operator_reported_plate_contact_machine_z_mm": 21.405,
+    "operator_report_correction": "21.495 was corrected to 21.405 before the user selected 21.39 as the accepted base",
+    "operator_selected_plate_base_machine_z_mm": 21.39,
+    "prior_reference": "config/metrology/references/tool-setter-top-height-2026-09-13.json",
+    "prior_reference_status": "Superseded by the operator-selected plate-contact calibration; retained as historical XYZ-probe top-height evidence",
+    "prior_computed_plate_contact_machine_z_mm": 21.32570123291015,
+    "calibration_acceptance_does_not_measure_repeatability": true
+  },
+  "scope": {
+    "height": "Effective height at the normal IN0 contact using the retained fine touch and operator-accepted plate base",
+    "plate_base": "21.39 mm is the reference for this measured tool, not an invariant machine Z for every tool length",
+    "setter_center_machine_xy_mm": null,
+    "tool_or_work_offsets_applied": false,
+    "record_does_not_authorize_motion": true
+  },
+  "runtime_reference": {
+    "path": "live/dmc2.ini",
+    "section": "TOOL_SETTER",
+    "height_key": "HEIGHT_ABOVE_PLATE_MM",
+    "contact_x_key": "CONTACT_MACHINE_X",
+    "contact_y_key": "CONTACT_MACHINE_Y",
+    "consumer": "live/nc_files/dmc2_tool_setter_measure.ngc",
+    "meaning": "INI is the shared program configuration; this JSON and the archived recordings retain the accepted calibration evidence"
+  },
+  "legacy_puck": {
+    "status": "Superseded as the current tool-setter reference; historical calibration evidence only",
+    "height_mm": 19.4,
+    "machine_x_mm": 288.125,
+    "machine_y_mm": 152.955,
+    "program_status": "The existing contact, single-touch and double-touch entry points now use the BTER NC circuits and shared TOOL_SETTER calibration; filenames and catalog IDs are retained for compatibility"
+  }
+}

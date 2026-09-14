@@ -282,3 +282,49 @@ diff --git a/src/hal/drivers/mesa-hostmot2/hm2_eth.c b/src/hal/drivers/mesa-host
      }
  
      long read_timeout = board->hal ? board->hal->read_timeout : 1600000;
+
+--- a/src/hal/drivers/mesa-hostmot2/hm2_eth.c
++++ b/src/hal/drivers/mesa-hostmot2/hm2_eth.c
+@@ -923,7 +923,7 @@
+ 
+ static int hm2_eth_receive_queued_reads(hm2_lowlevel_io_t *this) {
+     hm2_eth_t *board = this->private;
+-    int recv, i = 0;
++    int recv, recv_errno = 0, i = 0;
+     rtapi_u8 tmp_buffer[board->queue_buff_size];
+     long long t1, t2;
+     t1 = rtapi_get_time();
+@@ -955,13 +955,20 @@
+ do_recv_packet:
+         errno = 0;
+         recv = eth_socket_recv(board->sockfd, (void*) &tmp_buffer, board->queue_buff_size, MSG_DONTWAIT);
++        recv_errno = recv < 0 ? errno : 0;
+         if(recv < 0) rtapi_delay(READ_PCK_DELAY_NS);
+         t2 = rtapi_get_time();
+         i++;
+     } while (recv != board->queue_buff_size && t2 < read_deadline);
+     if(recv != board->queue_buff_size) {
++        int expected_bytes = board->queue_buff_size;
+         hm2_eth_reset_queued_reads(board);
+-        if(!record_soft_error(board)) return 0;
++        if(!record_soft_error(board)) {
++            rtapi_print_msg(RTAPI_MSG_ERR, HM2_LLIO_NAME ": MESA_RECEIVE_INCOMPLETE board=%s recv=%d expected=%d errno=%d elapsed_ns=%lld budget_ns=%ld; use Clear Fault\n",
++                board->llio.name, recv, expected_bytes, recv_errno,
++                t2 - (long long)this->read_time, read_timeout);
++            return 0;
++        }
+         return -EAGAIN;
+     }
+ 
+@@ -982,6 +989,11 @@
+     // data read back from the board.
+     if(board->has_written_cnt && board->write_cnt != board->confirm_rw_cnt.write_cnt) {
+         result = record_soft_error(board);
++        if(!result) {
++            rtapi_print_msg(RTAPI_MSG_ERR, HM2_LLIO_NAME ": MESA_WRITE_UNCONFIRMED board=%s write_expected=%u write_received=%u read_expected=%u read_received=%u; use Clear Fault\n",
++                board->llio.name, board->write_cnt, board->confirm_rw_cnt.write_cnt,
++                board->read_cnt, board->confirm_rw_cnt.read_cnt);
++        }
+     } else {
+         decrement_soft_error(board);
+     }

@@ -1,4 +1,5 @@
 //! Save the calibration and export tool Z compensation without applying it.
+mod exchange;
 mod model;
 #[cfg(test)]
 mod tests;
@@ -26,23 +27,27 @@ impl SnapshotTiming {
 pub(super) fn snapshot(
     path: &Path,
     ini: &Path,
-    reference: &Path,
+    reference: Option<&Path>,
     timing: SnapshotTiming,
-) -> Result<(), String> {
+) -> Result<Calibration, String> {
     let ini = fs::read_to_string(ini).map_err(|e| format!("reading tool-setting INI: {e}"))?;
-    let reference = fs::read_to_string(reference)
-        .map_err(|e| format!("reading accepted setter reference: {e}"))?;
-    Calibration::read(&ini, &reference)?;
+    let calibration = Calibration::read(&ini).map_err(|e| e.to_string())?;
     publish(&path.with_extension("tool-reference.ini"), ini.as_bytes())?;
-    publish(
-        &path.with_extension("setter-reference.json"),
-        reference.as_bytes(),
-    )?;
+    if let Some(reference) = reference {
+        let bytes = fs::read(reference)
+            .map_err(|e| format!("reading historical setter provenance: {e}"))?;
+        publish(&path.with_extension("setter-reference.json"), &bytes)?;
+    }
     publish(
         &path.with_extension("tool-reference-timing.txt"),
         timing.name().as_bytes(),
     )?;
-    Ok(())
+    Ok(calibration)
+}
+
+pub(super) fn begin(path: &Path, ini: &Path) -> Result<(), String> {
+    let calibration = snapshot(path, ini, None, SnapshotTiming::BeforeContact)?;
+    exchange::publish(calibration)
 }
 
 pub(super) fn export(path: &Path) -> Result<(), String> {
@@ -59,8 +64,6 @@ pub(super) fn export(path: &Path) -> Result<(), String> {
         fs::read_to_string(path).map_err(|e| format!("reading retained tool contacts: {e}"))?;
     let ini = fs::read_to_string(path.with_extension("tool-reference.ini"))
         .map_err(|e| format!("reading saved calibration INI: {e}; historical exports need the explicit reference paths"))?;
-    let reference = fs::read_to_string(path.with_extension("setter-reference.json"))
-        .map_err(|e| format!("reading saved setter calibration: {e}"))?;
     let timing = fs::read_to_string(path.with_extension("tool-reference-timing.txt"))
         .map_err(|e| format!("reading calibration provenance: {e}"))?;
     if ![
@@ -71,13 +74,20 @@ pub(super) fn export(path: &Path) -> Result<(), String> {
     {
         return Err("saved calibration snapshot timing is unknown".into());
     }
-    let calibration = Calibration::read(&ini, &reference)?;
+    let calibration = Calibration::read(&ini).map_err(|e| e.to_string())?;
     let measurement = ToolOffset::from_ledger(&text, calibration)?;
     let result = path.with_extension("tool-offset.json");
     let program = path.with_extension("tool-offset.ngc");
     publish(
         &result,
-        measurement.json(id, calibration, &timing).as_bytes(),
+        measurement
+            .json(
+                id,
+                calibration,
+                &timing,
+                path.with_extension("setter-reference.json").is_file(),
+            )
+            .as_bytes(),
     )?;
     publish(&program, measurement.apply_program(id).as_bytes())?;
     println!("DMC2 tool offset saved and read back: {}\nplate_referenced_tool_offset_z_mm={}\napply_offset_file={}\noffset_applied=false", result.display(), measurement.offset_z_mm, program.display());

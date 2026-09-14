@@ -149,9 +149,6 @@ def install_axis_ui_policy(
         nonlocal recovery_contract_error_identity
         nonlocal reveal_diagnostics
         try:
-            error_notices[:] = [
-                notice for notice in error_notices if notice.is_visible(notifications)
-            ]
             try:
                 ensure_essential_recovery_controls(namespace)
             except Exception as controls_error:
@@ -163,6 +160,9 @@ def install_axis_ui_policy(
                 )
             else:
                 essential_controls_notice.clear()
+            error_notices[:] = [
+                notice for notice in error_notices if notice.is_visible(notifications)
+            ]
             run_guard = getattr(live_plotter, "_dmc2_axis_run_guard", None)
             if run_guard is not None:
                 run_guard.reconcile()
@@ -207,7 +207,8 @@ def install_axis_ui_policy(
                     break
                 try:
                     kind = int(event.message_type)
-                    message = str(event.display_text())
+                    message = event.text.decode("utf-8", errors="replace")
+                    presentation = str(event.display_text())
                 except Exception as malformed:
                     kind = AxisUiFaultKind.ERROR_JOURNAL_RECORD_PRESENTATION_FAILED
                     print(
@@ -273,7 +274,7 @@ def install_axis_ui_policy(
                     if not suppressed:
                         accepted = notifications.add(
                             severity,
-                            f"{message}\n{recovery_text}",
+                            f"{presentation}\n{recovery_text}",
                         )
                         if accepted is False:
                             raise RuntimeError(

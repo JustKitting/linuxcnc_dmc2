@@ -4,6 +4,7 @@ from __future__ import annotations
 
 from pathlib import Path
 from .block_plan import create_block_plan_parameters
+from .calibration_data import create_calibration_parameters
 
 from .constants import CUSTOM_SCRIPTS_CONTENT, GO_TO_HOME_OPERATION_ID, GO_TO_HOME_WIDGET_PATH, HOMING_STATE_POLL_MILLISECONDS, PROBE_SECTION_PATH
 from .operation_catalog import project_catalog_path, read_operations
@@ -47,6 +48,7 @@ class CustomScriptsBinding:
             self.contracts[key] = inspector.inspect(path)
         hal = namespace["hal"]
         create_block_plan_parameters(self.comp, hal, self.project / "config/block-plan-fields.txt")
+        create_calibration_parameters(self.comp, hal, self.project / "native/bin/dmc2-probe-capture")
         for script in self.scripts.values():
             self.preference_notices[script.key] = RecoveryUiNotice(namespace)
             self.publish_notices[script.key] = RecoveryUiNotice(namespace)

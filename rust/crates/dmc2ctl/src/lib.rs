@@ -1,3 +1,4 @@
-//! DMC2 retained measurement data. These modules have no machine command path.
+//! DMC2 runtime contracts and retained data; no machine command path.
+pub mod calibration;
 pub mod object_map;
 pub mod probe_data;

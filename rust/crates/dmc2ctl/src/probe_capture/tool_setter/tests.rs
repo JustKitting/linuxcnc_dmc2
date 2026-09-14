@@ -42,13 +42,15 @@ fn missing_fine_duplicate_and_corrupt_trigger_bits_are_rejected() {
 }
 
 #[test]
-fn runtime_height_must_match_the_accepted_reference() {
+fn calibration_has_one_runtime_source_and_rejects_ambiguous_values() {
     let ini = "[TOOL_SETTER]\nHEIGHT_ABOVE_PLATE_MM=64\n[JOINT_2]\nHOME=135\n";
-    assert!(Calibration::read(ini, "{\"accepted_height_above_plate_mm\":64}").is_ok());
-    assert!(Calibration::read(ini, "{\"accepted_height_above_plate_mm\":19.4}").is_err());
-    assert!(Calibration::read(
-        &ini.replace("=64", "=NaN"),
-        "{\"accepted_height_above_plate_mm\":64}"
-    )
-    .is_err());
+    assert_eq!(Calibration::read(ini).unwrap().height_mm, 64.0);
+    assert_eq!(
+        Calibration::read(&ini.replace("=64", "=63"))
+            .unwrap()
+            .height_mm,
+        63.0
+    );
+    assert!(Calibration::read(&ini.replace("=64", "=NaN")).is_err());
+    assert!(Calibration::read(&ini.replace("=64", "=64\nHEIGHT_ABOVE_PLATE_MM=63")).is_err());
 }

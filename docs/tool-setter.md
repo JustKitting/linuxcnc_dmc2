@@ -137,8 +137,9 @@ effective_setter_height = fine_trigger_machine_z - accepted_plate_contact_machin
 = 63.931167480468744 mm (stored f64)
 ```
 
-[The current reference](../config/metrology/tool-setter.json) and
-`[TOOL_SETTER] HEIGHT_ABOVE_PLATE_MM` now retain this effective trigger height.
+`[TOOL_SETTER] HEIGHT_ABOVE_PLATE_MM` in the selected INI is the single runtime
+height. [The acceptance record](../config/metrology/tool-setter.json) retains
+historical evidence, not a second value that must be edited to run a measurement.
 [The original coarse and fine contacts](../config/metrology/tool-offsets/tool-setter-1789346395947653909-1102463.txt)
 are archived unchanged, including the original trigger bits and 50 mm/min fine
 feed. Future tool measurements subtract this height from their own normal
@@ -218,8 +219,8 @@ physical tool-setting behavior; that requires a separately requested machine run
 
 ## Plate-referenced Z tool offset
 
-The M190 capture implementation snapshots the standard INI and accepted BTER
-reference when a setter measurement begins. After the fine IN0 contact is
+The M190 capture implementation snapshots the selected runtime INI
+when a setter measurement begins. After the fine IN0 contact is
 durably saved and read back, Rust derives and saves the installed tool's offset:
 
 ```text
@@ -256,9 +257,27 @@ For a historical recording without a reference snapshot, the installed Rust
 binary accepts a data-only export with explicit calibration provenance:
 
 ```text
-native/bin/dmc2-probe-capture --export-tool-offset <ledger> live/dmc2.ini config/metrology/tool-setter.json
+native/bin/dmc2-probe-capture --export-tool-offset <ledger> live/dmc2.ini
 ```
 
 Later exports of that ledger omit the reference arguments and read its saved
 snapshot. Missing fine contact, invalid trigger bits, duplicate measurements, or
-an INI height that differs from the accepted BTER reference reject the export.
+a missing, duplicate, nonfinite, or nonpositive INI height rejects the export.
+
+### Runtime calibration data flow
+
+M190 reads `INI_FILE_NAME` at the beginning of each tool-setting measurement.
+The Rust `Calibration` type validates the height and home Z, durably saves the
+exact INI beside the ledger, and publishes that snapshot into AXIS-owned data
+parameters. The shared height routine reads those parameters after its M190/M66
+barrier, avoiding LinuxCNC's cached named INI parameters for this calibration.
+The exporter reads the retained snapshot and the original fine trigger; changing
+the current INI cannot retroactively alter a retained measurement.
+
+AXIS gets the parameter declarations from the same Rust type through
+`dmc2-probe-capture --describe-calibration-data`. No script filename selects the
+calibration or export behavior. Program paths are resolved from the operation
+catalog at runtime and checked through the normal typed Open/Run path. The
+launcher does not embed calibration data or a second list of program filenames.
+A height edit needs no binary rebuild or application restart for the next
+measurement. Optional historical JSON snapshots are provenance only.

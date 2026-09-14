@@ -19,8 +19,14 @@ o<dmc2_tool_setter_measure> sub
     #<_ts_style> = #1
     #<_ts_x> = #<_ini[tool_setter]contact_machine_x>
     #<_ts_y> = #<_ini[tool_setter]contact_machine_y>
-    #<_ts_height> = #<_ini[tool_setter]height_above_plate_mm>
-    #<_ts_home_z> = #<_ini[joint_2]home>
+    (Fresh runtime calibration; M190 retains the same values used by export.)
+    M190 P7 Q0
+    M66 P5 L0
+    o<ts_calibration_data> if [#<_hal[axisui.tool-reference-valid]> NE 1]
+        (ABORT,Calibration data was not published. Abort then Pendant Mode; reopen the matching standard application before another measurement.)
+    o<ts_calibration_data> endif
+    #<_ts_height> = #<_hal[axisui.tool-reference-height-mm]>
+    #<_ts_home_z> = #<_hal[axisui.tool-reference-home-z-mm]>
     #<_ts_target_z> = #<_ini[axis_z]min_limit>
     (Retain the original approved motion values and position tolerance.)
     #<_ts_tolerance> = 0.010
@@ -70,8 +76,6 @@ o<dmc2_tool_setter_measure> sub
     #<_ts_sequence> = 0
     #<_ts_difference> = 0
     #<_ts_touch_count> = 0
-    M190 P7 Q0
-    M66 P5 L0
     (LOGOPEN,../tmp/output/tool-setter-request.txt)
     (LOG,DMC2_TOOL_SETTER_RECORD_V1)
     (LOG,sequence=%d#<_ts_sequence>)

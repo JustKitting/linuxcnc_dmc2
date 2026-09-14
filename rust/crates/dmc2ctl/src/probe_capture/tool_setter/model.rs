@@ -2,67 +2,7 @@
 use crate::ledger::{number, records};
 use crate::schema::Workflow;
 
-#[derive(Clone, Copy, Debug)]
-pub(super) struct Calibration {
-    pub height_mm: f64,
-    pub home_z_mm: f64,
-}
-
-impl Calibration {
-    pub fn read(ini: &str, accepted_reference: &str) -> Result<Self, String> {
-        let height_mm = ini_number(ini, "TOOL_SETTER", "HEIGHT_ABOVE_PLATE_MM")?;
-        let home_z_mm = ini_number(ini, "JOINT_2", "HOME")?;
-        // Read this canonical calibration document's unique numeric field;
-        // reject duplicate/missing fields rather than choosing one silently.
-        let mut matches = accepted_reference
-            .split("\"accepted_height_above_plate_mm\"")
-            .skip(1);
-        let raw = matches.next().ok_or("accepted setter height is missing")?;
-        if matches.next().is_some() {
-            return Err("accepted setter reference repeats its height field".into());
-        }
-        let accepted = raw
-            .trim_start()
-            .strip_prefix(':')
-            .and_then(|s| s.split([',', '}']).next())
-            .and_then(|s| s.trim().parse::<f64>().ok())
-            .filter(|n| n.is_finite())
-            .ok_or("accepted setter height is not a finite numeric field")?;
-        if height_mm <= 0.0 || accepted != height_mm {
-            return Err("TOOL_SETTER height is nonpositive or disagrees with the accepted BTER reference; reconcile the calibration before measuring or exporting".into());
-        }
-        Ok(Self {
-            height_mm,
-            home_z_mm,
-        })
-    }
-}
-
-fn ini_number(text: &str, section: &str, key: &str) -> Result<f64, String> {
-    let mut selected = false;
-    let mut value = None;
-    for line in text.lines() {
-        let line = line.split(['#', ';']).next().unwrap_or("").trim();
-        if let Some(name) = line.strip_prefix('[').and_then(|s| s.strip_suffix(']')) {
-            selected = name.trim().eq_ignore_ascii_case(section);
-        } else if selected {
-            if let Some((name, raw)) = line.split_once('=') {
-                if name.trim().eq_ignore_ascii_case(key) {
-                    let parsed = raw
-                        .trim()
-                        .parse::<f64>()
-                        .ok()
-                        .filter(|v| v.is_finite())
-                        .ok_or_else(|| format!("[{section}] {key} is not finite"))?;
-                    if value.replace(parsed).is_some() {
-                        return Err(format!("[{section}] {key} is duplicated"));
-                    }
-                }
-            }
-        }
-    }
-    value.ok_or_else(|| format!("[{section}] {key} is missing from the saved INI"))
-}
+pub(super) use dmc2ctl::calibration::Calibration;
 
 #[derive(Debug)]
 pub(super) struct ToolOffset {
@@ -116,7 +56,18 @@ impl ToolOffset {
         })
     }
 
-    pub fn json(&self, id: &str, calibration: Calibration, timing: &str) -> String {
+    pub fn json(
+        &self,
+        id: &str,
+        calibration: Calibration,
+        timing: &str,
+        has_reference: bool,
+    ) -> String {
+        let source_reference = if has_reference {
+            format!("\"{id}.setter-reference.json\"")
+        } else {
+            "null".into()
+        };
         let coarse = self.coarse_z_mm.map_or("null".into(), |z| z.to_string());
         let difference = self.coarse_z_mm.map_or("null".into(), |z| {
             (self.trigger_mm[2] - z).abs().to_string()
@@ -128,7 +79,7 @@ impl ToolOffset {
   "units": "mm",
   "source_ledger": "{id}.txt",
   "source_calibration_ini": "{id}.tool-reference.ini",
-  "source_setter_reference": "{id}.setter-reference.json",
+  "source_setter_reference": {source_reference},
   "calibration_snapshot_timing": "{timing}",
   "tool_identity": "installed tool at this measurement; no tool-table number assigned",
   "contact_input": "BTER normal contact IN0; overtravel IN2 is not the measurement source",
