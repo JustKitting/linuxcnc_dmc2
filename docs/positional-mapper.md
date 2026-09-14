@@ -316,13 +316,29 @@ machine run.
   approach. Those outcomes remain open with the fine-allowance work above. Source:
   `object_map/capture.rs`, `probe_capture/mapper/state.rs`, and
   `live/nc_files/mapper-move.ngc`.
-- [ ] **Extract reference features and measured stock.** Turn retained rim,
-  top and side observations into planes, rotated footprints, dimensions and
-  coverage with source-contact references. The existing named-face calculation
-  requires manual face assignments and assumes model-axis-parallel planes.
-  Add an explicit stock representation with observed, supported-empty and
-  unknown regions. Keep predicted stock from operation history separate from
-  measured stock; do not fill unobserved regions by implication.
+- [ ] **Reconstruct oversized, irregular measured stock.** The owner clarified
+  that the wood will exceed the required cutting geometry and has no guaranteed
+  exact shape. Minimize residuals to retained rim/top/side measurements while
+  allowing dimensions, edge directions and surface shape to vary. Do not require
+  a quadrilateral, parallel/perpendicular sides or corresponding nominal CAD
+  planes. Local plane or rectangle summaries must retain the actual outline,
+  coherent deviations, concavities and original contact references. The current
+  named-face calculation assumes model-axis-parallel planes and does not provide
+  this reconstruction. Represent observed, supported-empty and unknown regions;
+  retain explicit uncertainty/modeling assumptions instead of filling unobserved
+  volume by implication. Keep predicted operation stock separate from measured
+  stock. This takes priority over matched-plane initial alignment for the raw
+  wood workflow; see the owner clarification in
+  [the research and implementation note](probe-based-continuation.md#owner-clarification-oversized-wood-without-an-exact-stock-model).
+- [ ] **Optimize machining placement inside measured stock.** Fit the unchanged
+  required geometry into the stock estimate using the allowed translations and
+  rotations. Account for material shortage and unknown coverage separately;
+  expected oversize must not pull stock surfaces onto finished-part surfaces.
+  Report local deficits even if an aggregate penalty is small. Select any
+  clearance/allowance objectives from actual setup context. For dice OP1, preserve
+  `stage1_after`, including backing and envelopes; checking only finished blanks
+  would omit required intermediate material. The current Huber STL registration
+  objective and descriptive `model_role` do not implement this placement problem.
 - [ ] **Validate placement and compare setups.** Retain named calibration
   evidence and reference-frame relationships, calculate independent feature
   prediction errors, and provide a reviewed placement state with an explicit
@@ -331,8 +347,11 @@ machine run.
   placement or establish uncertainty. Relocation must create a new setup and
   transform the same design-space feature coordinates through its new pose.
 - [ ] **Improve registration and mesh handling where required.** Add usable
-  initial alignment from identified features, expose competing symmetric
-  placements, and handle surface/mesh defects explicitly. Nearest-triangle
+  initial alignment from genuinely corresponding measured or machined features,
+  expose competing symmetric placements, and handle surface/mesh defects
+  explicitly. Matched-plane alignment is optional; it must not become a
+  prerequisite for unknown-shaped raw stock or replace its reconstruction and
+  containment objective. Nearest-triangle
   lookup now uses an immutable, balanced bounding-box hierarchy in Rust,
   retaining original triangle IDs and the lowest original ID for equal-distance
   matches. Coordinate-gap bounds prune distant branches without a dimensional
