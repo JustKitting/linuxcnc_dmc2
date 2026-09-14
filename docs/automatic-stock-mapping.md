@@ -8,7 +8,16 @@ LEFT / LinuxCNC +X at the Z of the most recent successful top contact minus the 
 depth. That depth defaults to the operator-requested 12.7 mm.
 
 `config/mapper-outline.txt` owns the 25.4 mm initial bracket handoff requested by
-the operator. Each run retains its own policy snapshot. Trace step uses the
+the operator and the initial 1 mm edge-search offset. New runs use policy V3:
+probe at offsets 1, 2, 4, 8, ... mm from the starting top sample in physical
+RIGHT / LinuxCNC -X. These are distances from the initial sample, not cumulative
+travel legs. Growth ends at the first retained miss or at the retained plate
+boundary, whichever comes first. A plate-boundary contact is an error, not an
+invented outside point. Binary refinement stays inside the last contact/miss
+bracket until it meets the handoff distance, then the existing side approach
+finds the edge at tracing depth. The newest successful top trigger establishes
+that depth. Each run retains its own policy snapshot; V1 and V2 recordings
+retain their original plate-first search during replay. Trace step uses the
 existing editable spacing value as its local search radius. Outline resolution
 controls the polygonal search circle's maximum chord sagitta and the final
 seam-contact tolerance; sector count follows from those two values, with sectors
@@ -68,3 +77,11 @@ cycles require it before the slow re-touch and before another local candidate.
 
 The standard binary/configuration must be reopened after installing the matching
 plan fields. Software checks are not evidence that a physical trace has completed.
+The V3 first-edge change uses the existing plan fields and executor; it does not
+require new HAL pins. The installed capture binary reads the new policy when a
+new run begins. The running UI may retain its earlier description until reopened.
+
+The growing local rim search and an explicit fine re-touch allowance remain
+pending; see `docs/positional-mapper.md` for the continuing implementation list.
+This first-edge change does not correct the fine-endpoint failure retained in
+the earlier rim run.

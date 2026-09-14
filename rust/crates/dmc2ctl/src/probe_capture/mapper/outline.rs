@@ -1,6 +1,6 @@
 //! Local tactile contour following. Plans data only; LinuxCNC owns each move.
 use super::{
-    model::{close, Phase, Request, Sample, Settings},
+    model::{close, BoundarySearch, Phase, Request, Sample, Settings},
     search::Progress,
 };
 use std::{
@@ -24,10 +24,12 @@ enum TraceError {
     RepeatedRegion,
     ClosureMismatch,
     SearchPrecision,
+    NoOutwardStep,
 }
 impl fmt::Display for TraceError {
     fn fmt(&self, f: &mut fmt::Formatter<'_>) -> fmt::Result {
         let message = match self {
+            Self::NoOutwardStep => "No full X step remains to the next bounded search point in physical RIGHT / LinuxCNC -X. No outside point was inferred; choose a starting point with room inside the plate envelope before a new Run.",
             Self::SearchPrecision => "The selected search geometry exhausted representable coordinate precision. Correct the outline policy or resolution before Run.",
             Self::NoTop => "No starting top contact was retained within the descent budget.",
             Self::PlateContact => "The first outward search still touches at the plate envelope; there is no measured outside point.",
@@ -145,14 +147,11 @@ fn endpoint(sample: &Sample) -> Result<Point, Progress> {
 }
 
 pub fn run(s: &Settings, samples: &[Sample]) -> Result<Outline, Progress> {
-    let handoff =
-        s.outline
-            .ok_or_else(|| {
-                Progress::Invalid(
+    let policy = s.outline.ok_or_else(|| {
+        Progress::Invalid(
             "The outline policy snapshot is missing. Reopen the script and start a new Run.".into(),
         )
-            })?
-            .handoff_mm;
+    })?;
     let mut r = Reader {
         s,
         samples,
@@ -167,11 +166,59 @@ pub fn run(s: &Settings, samples: &[Sample]) -> Result<Outline, Progress> {
     let mut top = point(reference, s)?;
     // Preserve the existing first search direction: physical RIGHT / LinuxCNC -X.
     // Only this one edge bracket is located; no opposite-side search or grid.
-    let mut outside = [s.min[0], seed[1]];
-    if r.top(outside, Phase::Boundary)?.trigger.is_some() {
-        return Err(TraceError::PlateContact.into());
-    }
-    while length(sub(inside, outside)) > handoff {
+    let mut outside = match policy.boundary_search {
+        BoundarySearch::EnvelopeThenBisect => {
+            let edge = [s.min[0], seed[1]];
+            if r.top(edge, Phase::Boundary)?.trigger.is_some() {
+                return Err(TraceError::PlateContact.into());
+            }
+            edge
+        }
+        BoundarySearch::ExponentialOffsets { initial_mm } => {
+            let available = seed[0] - s.min[0];
+            if available < s.step[0] && !close(available, s.step[0]) {
+                return Err(TraceError::NoOutwardStep.into());
+            }
+            let mut offset = initial_mm.min(available);
+            loop {
+                // Physical RIGHT / LinuxCNC -X. Offset is measured from seed;
+                // the final bounded sample is exactly the retained plate edge.
+                let candidate = [
+                    if offset == available {
+                        s.min[0]
+                    } else {
+                        seed[0] - offset
+                    },
+                    seed[1],
+                ];
+                if candidate[0] >= inside[0] {
+                    return Err(TraceError::SearchPrecision.into());
+                }
+                let travel = inside[0] - candidate[0];
+                if travel < s.step[0] && !close(travel, s.step[0]) {
+                    return Err(TraceError::NoOutwardStep.into());
+                }
+                let sample = r.top(candidate, Phase::Boundary)?;
+                if sample.trigger.is_none() {
+                    break candidate;
+                }
+                inside = candidate;
+                top = point(sample, s)?;
+                if offset == available {
+                    return Err(TraceError::PlateContact.into());
+                }
+                // The user's 1, 2, 4, ... sequence; plate bounds cap growth.
+                let next = (offset * 2.0).min(available);
+                if next <= offset {
+                    return Err(TraceError::SearchPrecision.into());
+                }
+                offset = next;
+            }
+        }
+    };
+    while length(sub(inside, outside)) > policy.handoff_mm {
+        // Refine only the observed bracket. Physical RIGHT / LinuxCNC -X;
+        // physical LEFT / LinuxCNC +X, according to the previous sample.
         let mid = scale(add(inside, outside), 0.5);
         if mid == inside || mid == outside {
             return Err(TraceError::SearchPrecision.into());

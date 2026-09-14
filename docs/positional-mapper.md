@@ -235,14 +235,16 @@ supported. Source implementation, installation, numerical results and physical
 acceptance are separate milestones. Recording a task does not authorize a
 machine run.
 
-- [ ] **Exponential edge bracketing, then binary refinement.** Replace the
-  initial long traversal and repeated direction reversals with the user's
-  growing search sequence: **1 mm, 2 mm, 4 mm, …**, bounded by the configured
-  maximum and retained plate edge. Keep the last contact/no-contact observations
-  that bracket the transition, then binary-search inside that bracket. Preserve
-  the existing first direction: physical RIGHT / LinuxCNC -X. Define the step
-  reference explicitly in the implementation so growing travel legs and
-  distances from the initial position cannot be confused.
+- [ ] **Exponential edge bracketing, then binary refinement.** Source and
+  standard capture binary now use versioned policy V3 for new runs: **1 mm,
+  2 mm, 4 mm, …** offsets from the initial top sample, in physical RIGHT /
+  LinuxCNC -X, bounded by the retained plate/travel intersection. The last
+  contact and first miss define the bracket; binary refinement stays inside
+  it until the existing handoff distance is met. A plate-boundary contact
+  remains an error with no inferred outside point. Old policy snapshots retain
+  their original plate-first path. Numerical checks reported no failures for
+  refinement, plate termination and historical replay. Physical behavior under
+  this new policy has not been observed; that acceptance milestone remains open.
 - [ ] **Growing local edge search with internal refinement.** Apply the same
   coarse-growth/local-refinement principle to edge detection and rim following
   instead of always advancing by fixed 1 mm increments. Retain the local contact
@@ -262,8 +264,10 @@ machine run.
   bounds explicitly; retain the exact fine-capture requirement. Do not accept
   the missed endpoint or coarse trigger as a fine measurement. Source ledger:
   `tmp/output/mapper/mapper-1789419086126841028-1241227.txt`, records 405–409;
-  paired comparison: records 359 and 363. No new allowance or retry behavior
-  has been applied.
+  paired comparison: records 359 and 363. A maximum 0.1 mm past the coarse
+  contact has been proposed to the operator, using the existing outline
+  resolution and recorded variation as context. The answer remains pending;
+  no new allowance or retry behavior has been applied.
 - [ ] **Represent failed capture cycles explicitly.** A fine search reaching
   its endpoint without contact is currently recorded as `travel` with fine
   stage, followed by an interpreter abort. Shared Rust failure types now classify

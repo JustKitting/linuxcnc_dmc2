@@ -1,2 +1,3 @@
-DMC2_OUTLINE_POLICY_V2
+DMC2_OUTLINE_POLICY_V3
 handoff_mm=25.4
+initial_edge_offset_mm=1

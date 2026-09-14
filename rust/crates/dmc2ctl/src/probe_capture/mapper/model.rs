@@ -16,18 +16,28 @@ pub enum OutlineRevision {
     BelowContact,
 }
 #[derive(Clone, Copy, Debug)]
+pub enum BoundarySearch {
+    EnvelopeThenBisect,
+    /// Doubling distances from the initial top sample, not cumulative legs.
+    ExponentialOffsets {
+        initial_mm: f64,
+    },
+}
+#[derive(Clone, Copy, Debug)]
 pub struct OutlinePolicy {
     pub revision: OutlineRevision,
     pub handoff_mm: f64,
+    pub boundary_search: BoundarySearch,
 }
 impl OutlinePolicy {
     pub fn read(text: &str) -> Result<Self, String> {
-        let (header, revision) = match text.lines().next() {
-            Some("DMC2_OUTLINE_POLICY_V1") => ("DMC2_OUTLINE_POLICY_V1", OutlineRevision::ContactPlane),
-            Some("DMC2_OUTLINE_POLICY_V2") => ("DMC2_OUTLINE_POLICY_V2", OutlineRevision::BelowContact),
+        let (header, revision, fields) = match text.lines().next() {
+            Some("DMC2_OUTLINE_POLICY_V1") => ("DMC2_OUTLINE_POLICY_V1", OutlineRevision::ContactPlane, &["handoff_mm"][..]),
+            Some("DMC2_OUTLINE_POLICY_V2") => ("DMC2_OUTLINE_POLICY_V2", OutlineRevision::BelowContact, &["handoff_mm"][..]),
+            Some("DMC2_OUTLINE_POLICY_V3") => ("DMC2_OUTLINE_POLICY_V3", OutlineRevision::BelowContact, &["handoff_mm", "initial_edge_offset_mm"][..]),
             _ => return Err("Unsupported outline policy. Correct config/mapper-outline.txt then start a new Run; Pendant Mode remains available.".into()),
         };
-        let fields = data(text, header, &["handoff_mm"])?;
+        let fields = data(text, header, fields)?;
         let handoff_mm = number(&fields, "handoff_mm")?;
         if handoff_mm <= 0.0 {
             return Err(
@@ -35,9 +45,20 @@ impl OutlinePolicy {
                     .into(),
             );
         }
+        let boundary_search = match fields.get("initial_edge_offset_mm") {
+            Some(_) => {
+                let initial_mm = number(&fields, "initial_edge_offset_mm")?;
+                if initial_mm <= 0.0 {
+                    return Err("The initial exponential edge-search offset must be positive; correct config/mapper-outline.txt before Run. Pendant Mode remains available.".into());
+                }
+                BoundarySearch::ExponentialOffsets { initial_mm }
+            }
+            None => BoundarySearch::EnvelopeThenBisect,
+        };
         Ok(Self {
             revision,
             handoff_mm,
+            boundary_search,
         })
     }
 }
@@ -204,6 +225,22 @@ impl Settings {
             return Err(
                 "Set a positive Trace depth below last top contact in Scripts before Run.".into(),
             );
+        }
+        if let Some(OutlinePolicy {
+            boundary_search: BoundarySearch::ExponentialOffsets { initial_mm },
+            handoff_mm,
+            ..
+        }) = result.outline
+        {
+            if initial_mm < step[0] {
+                return Err("The initial exponential edge-search offset is smaller than one X step; correct config/mapper-outline.txt before Run. Pendant Mode remains available.".into());
+            }
+            // Each binary candidate bisects the remaining interval. Retain at
+            // least one whole X step on either side; this is step resolution,
+            // not a tolerance for unaccepted manual jog increments.
+            if handoff_mm < 2.0 * step[0] {
+                return Err("The exponential edge-search handoff must span at least two X steps so a binary half-step remains resolvable; correct config/mapper-outline.txt before Run. Pendant Mode remains available.".into());
+            }
         }
         result.bounds(origin)?;
         result.bounds([origin[0], origin[1], result.floor])?;
