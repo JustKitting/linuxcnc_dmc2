@@ -130,6 +130,9 @@ pub(super) fn commit(
     if workflow == Workflow::Surface && request.lines().any(|line| line == "kind=result") {
         super::surface::export(&path, true)?;
     }
+    if workflow == Workflow::Mapper && request.lines().any(|line| line == "kind=result") {
+        super::mapper::export(&path, true)?;
+    }
     if workflow == Workflow::Block && request.lines().any(|line| line == "kind=result") {
         super::block::export(&path, true)?;
     }

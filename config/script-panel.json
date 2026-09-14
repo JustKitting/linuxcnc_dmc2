@@ -45,6 +45,106 @@
         {"pin": "surface-clearance-mm", "label": "Travel clearance", "kind": "positive-mm", "default": "2", "increment": "1"},
         {"pin": "surface-reach-reserve-mm", "label": "Probe reach reserve", "kind": "positive-mm", "default": "2", "increment": "1"}
       ]
+    },
+    {
+      "key": "auto-map",
+      "operation": "program.auto-map",
+      "requires_beginning": true,
+      "description": "Start clear above the block. Uses the retained plate envelope, binary edge searches and an outward grid; verifies the fitted faces. Starting Z is the clearance ceiling; every dip stays within its original descent budget. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
+      "parameters": [
+        {
+          "pin": "auto-map-drop-mm",
+          "label": "Maximum descent from starting Z",
+          "kind": "positive-mm",
+          "default": "12.7",
+          "increment": "1"
+        },
+        {
+          "pin": "auto-map-grid-mm",
+          "label": "Grid / station spacing",
+          "kind": "positive-mm",
+          "default": "1",
+          "increment": "1"
+        },
+        {
+          "pin": "auto-map-resolution-mm",
+          "label": "Boundary bracket resolution",
+          "kind": "positive-mm",
+          "default": "0.1",
+          "increment": "0.1"
+        },
+        {
+          "pin": "auto-map-usable-reach-mm",
+          "label": "Mounted usable probe reach",
+          "kind": "positive-mm",
+          "default": "0",
+          "increment": "1"
+        },
+        {
+          "pin": "auto-map-reach-reserve-mm",
+          "label": "Probe reach reserve",
+          "kind": "positive-mm",
+          "default": "2",
+          "increment": "1"
+        }
+      ]
+    },
+    {
+      "key": "rim",
+      "operation": "program.rim",
+      "requires_beginning": true,
+      "description": "Start clear above the block. Uses the retained plate envelope, binary edge searches and an outward grid; verifies the fitted faces. Starting Z is the clearance ceiling; every dip stays within its original descent budget. Then touches around the sides, backing off at each station. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
+      "parameters": [
+        {
+          "pin": "rim-drop-mm",
+          "label": "Maximum descent from starting Z",
+          "kind": "positive-mm",
+          "default": "12.7",
+          "increment": "1"
+        },
+        {
+          "pin": "rim-grid-mm",
+          "label": "Grid / station spacing",
+          "kind": "positive-mm",
+          "default": "1",
+          "increment": "1"
+        },
+        {
+          "pin": "rim-resolution-mm",
+          "label": "Boundary bracket resolution",
+          "kind": "positive-mm",
+          "default": "0.1",
+          "increment": "0.1"
+        },
+        {
+          "pin": "rim-usable-reach-mm",
+          "label": "Mounted usable probe reach",
+          "kind": "positive-mm",
+          "default": "0",
+          "increment": "1"
+        },
+        {
+          "pin": "rim-reach-reserve-mm",
+          "label": "Probe reach reserve",
+          "kind": "positive-mm",
+          "default": "2",
+          "increment": "1"
+        },
+        {
+          "pin": "rim-side-depth-mm",
+          "label": "Side ball-centre depth below top",
+          "kind": "positive-mm",
+          "default": "1",
+          "increment": "1"
+        },
+        {
+          "pin": "rim-backoff-mm",
+          "label": "Side clearance beyond estimated edge",
+          "kind": "positive-mm",
+          "default": "2",
+          "increment": "1"
+        }
+      ]
     }
   ]
 }

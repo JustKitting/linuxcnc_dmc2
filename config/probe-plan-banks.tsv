@@ -1,0 +1,3 @@
+DMC2_PROBE_PLAN_BANKS_V1
+block	block-plan-fields.txt	DMC2_BLOCK_PLAN_V1
+mapper	mapper-plan-fields.txt	DMC2_MAPPER_PLAN_V1

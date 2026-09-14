@@ -1,6 +1,9 @@
 //! Synchronous M190 persistence and data-planning gate for probing scripts.
 //! No motion, command channel, reset, restart, or fault-clear capability.
 mod block;
+mod geometry;
+mod mapper;
+mod plan_bank;
 use dmc2ctl::probe_data::{ledger, schema};
 mod storage;
 mod surface;
@@ -46,11 +49,13 @@ fn main() {
     }
     if matches!(
         args.first().map(String::as_str),
-        Some("--export-surface" | "--export-block")
+        Some("--export-surface" | "--export-block" | "--export-mapper")
     ) {
         // Offline data export must never publish a live machine error.
         let result = if args.len() == 2 {
-            if args[0] == "--export-block" {
+            if args[0] == "--export-mapper" {
+                mapper::export(std::path::Path::new(&args[1]), false)
+            } else if args[0] == "--export-block" {
                 block::export(std::path::Path::new(&args[1]), false)
             } else {
                 surface::export(std::path::Path::new(&args[1]), false)
@@ -65,8 +70,12 @@ fn main() {
         return;
     }
     if let Err(error) = run() {
-        let message = if args.first().and_then(|s| integer(s).ok()) == Some(6) {
-            format!("Gauge-block planning stopped: {error} Captures are retained. Use Abort, then Pendant Mode; correct the reported condition before a new Run.")
+        let message = if args
+            .first()
+            .and_then(|s| integer(s).ok())
+            .is_some_and(|action| matches!(action, 6 | 11))
+        {
+            format!("Probe planning stopped: {error} Captures are retained. Use Abort, then Pendant Mode; correct the reported condition before a new Run.")
         } else {
             format!(
             "CAPTURE FAILED - KEEP THE SETUP IN PLACE. Abort, then Pendant Mode. Recording error: {error}"
@@ -91,7 +100,7 @@ fn main() {
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args == ["--help"] {
-        println!("dmc2-probe-capture is the synchronous M190 capture gate. Circle: P0 Q0 begins, P1 Q<sequence> saves. Surface: P2 Q0 begins, P3 Q<sequence> saves. Block: P4 Q0 begins, P5 Q<sequence> saves, P6 Q<sequence> publishes the next retained-data plan. Tool setter: P7 Q0 snapshots calibration and begins; P8 Q<sequence> saves and exports the fine contact's plate-referenced Z tool offset. Records are durably saved and read back. --export-surface <ledger>, --export-block <ledger>, and --export-tool-offset <ledger> [<INI> [<historical-reference.json>]] export retained data without a machine connection. No machine commands are issued.");
+        println!("dmc2-probe-capture is the synchronous M190 capture gate. Circle: P0 Q0 begins, P1 Q<sequence> saves. Surface: P2 Q0 begins, P3 Q<sequence> saves. Block: P4 Q0 begins, P5 Q<sequence> saves, P6 Q<sequence> publishes the next retained-data plan. Tool setter: P7 Q0 snapshots calibration and begins; P8 Q<sequence> saves and exports the fine contact's plate-referenced Z tool offset. Automatic mapper: P9 Q0 begins with plate/feed snapshots; P10 saves; P11 publishes the next plan. --export-mapper exports retained partial data offline. Records are durably saved and read back. --export-surface <ledger>, --export-block <ledger>, and --export-tool-offset <ledger> [<INI> [<historical-reference.json>]] export retained data without a machine connection. No machine commands are issued.");
         return Ok(());
     }
     if args.len() != 2 {
@@ -131,6 +140,9 @@ fn run() -> Result<(), String> {
             tool_setter::begin(&path, &ini)
         }
         8 => storage::commit(&output, Workflow::ToolSetter, sequence, trigger_position),
+        9 if sequence == 0 => mapper::begin(root, &output),
+        10 => storage::commit(&output, Workflow::Mapper, sequence, trigger_position),
+        11 => mapper::publish_next(&output, sequence),
         _ => Err("unknown capture action; reopen the selected probing script".to_owned()),
     }
 }

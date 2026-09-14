@@ -6,6 +6,7 @@ pub enum Workflow {
     Surface,
     Block,
     ToolSetter,
+    Mapper,
 }
 
 impl Workflow {
@@ -15,6 +16,7 @@ impl Workflow {
             Self::Surface => "surface",
             Self::Block => "block",
             Self::ToolSetter => "tool-setter",
+            Self::Mapper => "mapper",
         }
     }
     pub fn magic(self) -> &'static str {
@@ -23,6 +25,7 @@ impl Workflow {
             Self::Surface => "DMC2_SURFACE_RECORD_V1",
             Self::Block => "DMC2_BLOCK_RECORD_V1",
             Self::ToolSetter => "DMC2_TOOL_SETTER_RECORD_V1",
+            Self::Mapper => "DMC2_MAPPER_RECORD_V1",
         }
     }
     pub fn ledger_magic(self) -> &'static str {
@@ -31,6 +34,7 @@ impl Workflow {
             Self::Surface => "DMC2_SURFACE_LEDGER_V1",
             Self::Block => "DMC2_BLOCK_LEDGER_V1",
             Self::ToolSetter => "DMC2_TOOL_SETTER_LEDGER_V1",
+            Self::Mapper => "DMC2_MAPPER_LEDGER_V1",
         }
     }
     pub fn request(self) -> String {
@@ -198,6 +202,11 @@ pub fn validate(workflow: Workflow, request: &str, sequence: u64) -> Result<(), 
             "final_work_y",
             "final_work_z",
         ],
+        (Workflow::Mapper, "start") => super::mapper_schema::START_FIELDS,
+        (
+            Workflow::Mapper,
+            "touch" | "miss" | "travel" | "obstruction" | "ready" | "recovery" | "result",
+        ) => super::mapper_schema::EVENT_FIELDS,
         (Workflow::Block, "start") => super::block_schema::START_FIELDS,
         (Workflow::ToolSetter, "start") => &[
             "style",
@@ -262,6 +271,9 @@ pub fn validate(workflow: Workflow, request: &str, sequence: u64) -> Result<(), 
     }
     if kind == "touch" && !matches!(values["stage"], "0" | "1") {
         return Err("touch stage must be coarse-location=0 or fine-measurement=1".into());
+    }
+    if workflow == Workflow::Mapper {
+        super::mapper_schema::validate(kind, &values)?;
     }
     if workflow == Workflow::Block {
         super::block_schema::validate_fields(kind, &values)?;

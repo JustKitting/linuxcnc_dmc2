@@ -37,6 +37,8 @@ macro_rules! h100_file {
 
 pub const FILES: &[File] = &[
     project_file!("config/block-plan-fields.txt"),
+    project_file!("config/probe-plan-banks.tsv"),
+    project_file!("config/mapper-plan-fields.txt"),
     project_file!("config/processes.tsv"),
     project_file!("config/linuxcnc-driver-overlays.tsv"),
     project_file!("packaging/dmc2-linuxcnc-autostart.desktop"),

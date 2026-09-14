@@ -1,5 +1,9 @@
 # Known plate reference from the 2026-09-12 recording
 
+The 2026-09-14 [automatic mapper envelope](automatic-stock-mapping.md) adds the
+opposite Y edge and the operator-specified approximate full-X span. The record
+below preserves the original partial measurement and its calibration limits.
+
 The reusable record is [known-plate-position.json](../config/metrology/known-plate-position.json).
 It retains the measured local Y edge and the mounted-probe surface contact datums
 for future model and script generation. It is a **partial measured reference**;

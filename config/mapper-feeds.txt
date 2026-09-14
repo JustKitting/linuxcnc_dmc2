@@ -1,0 +1,4 @@
+DMC2_MAPPER_FEEDS_V1
+coarse_feed=800
+fine_feed=50
+travel_feed=1500

@@ -1,0 +1,137 @@
+o<mapper-run> sub
+(Shared executor. Parameters: mode, drop, grid, resolution, usable reach, reserve, side depth, side backoff.)
+(Physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+o<mp_preview> if [#<_task> EQ 0]
+    (PREVIEW,stop)
+    o<mapper-run> return
+o<mp_preview> endif
+o<mp_spindle> if [#<_spindle_on> NE 0]
+    (ABORT,Stop the spindle before using the XYZ probe. Pendant Mode remains available.)
+o<mp_spindle> endif
+M66 P3 L0
+o<mp_spindle_feedback> if [#5399 NE 0]
+    (ABORT,Spindle feedback reports running. Use Spindle Stop before Run; Pendant Mode remains available.)
+o<mp_spindle_feedback> endif
+o<mp_rotation> if [#[5230 + [#5220 - 1] * 20] NE 0]
+    (ABORT,Select an unrotated work frame for the mapper. The stock may be rotated. No offsets were changed.)
+o<mp_rotation> endif
+M70
+G21 G90 G94 G17 G40 G80 G61.1
+#<_mp_ox> = [#<_abs_x> - #<_x>]
+#<_mp_oy> = [#<_abs_y> - #<_y>]
+#<_mp_oz> = [#<_abs_z> - #<_z>]
+#<_mp_clear> = #<_z>
+#<_mp_floor> = [#<_z> - #2]
+#<_mp_step_z> = [1 / ABS[#<_ini[joint_2]scale>]]
+#<_mp_sequence> = 0
+#<_mp_sample> = 0
+#<_mp_phase> = 0
+#<_mp_edge> = -1
+#<_mp_stage> = -1
+M64 P1
+M66 P5 L0
+o<mp_selected> if [#5399 NE 1]
+    (ABORT,XYZ probe selection was not reported. Abort then Pendant Mode; check its selection indication.)
+o<mp_selected> endif
+o<mp_initial_contact> if [#<_hal[motion.probe-input]> NE 0]
+    (ABORT,Probe is already touching. Use Pendant Mode to position clear above the block before Run.)
+o<mp_initial_contact> endif
+M190 P9 Q0
+M66 P5 L0
+(LOGOPEN,../tmp/output/mapper-request.txt)
+(LOG,DMC2_MAPPER_RECORD_V1)
+(LOG,sequence=0)
+(LOG,kind=start)
+(LOG,mode=%d#1)
+(LOG,x=%.9f#<_x>)
+(LOG,y=%.9f#<_y>)
+(LOG,z=%.9f#<_z>)
+(LOG,offset_x=%.9f#<_mp_ox>)
+(LOG,offset_y=%.9f#<_mp_oy>)
+(LOG,offset_z=%.9f#<_mp_oz>)
+(LOG,x_min=%.9f#<_ini[axis_x]min_limit>)
+(LOG,x_max=%.9f#<_ini[axis_x]max_limit>)
+(LOG,y_min=%.9f#<_ini[axis_y]min_limit>)
+(LOG,y_max=%.9f#<_ini[axis_y]max_limit>)
+(LOG,z_min=%.9f#<_ini[axis_z]min_limit>)
+(LOG,z_max=%.9f#<_ini[axis_z]max_limit>)
+(LOG,drop=%.9f#2)
+(LOG,grid=%.9f#3)
+(LOG,resolution=%.9f#4)
+(LOG,usable_reach=%.9f#5)
+(LOG,reach_reserve=%.9f#6)
+(LOG,side_depth=%.9f#7)
+(LOG,backoff=%.9f#8)
+#<step_x> = [1 / ABS[#<_ini[joint_0]scale>]]
+#<step_y> = [1 / ABS[#<_ini[joint_1]scale>]]
+(LOG,step_x=%.9f#<step_x>)
+(LOG,step_y=%.9f#<step_y>)
+(LOG,step_z=%.9f#<_mp_step_z>)
+#<max_feed> = [#<_ini[traj]max_linear_velocity> * 60]
+(LOG,max_feed=%.9f#<max_feed>)
+(LOGCLOSE)
+M190 P10 Q0
+M66 P5 L0
+#<_mp_sequence> = 1
+
+o<mp_loop> while [1]
+    M190 P11 Q#<_mp_sequence>
+    M66 P5 L0
+    o<mp_fresh> if [#<_hal[axisui.mapper-plan-sequence]> NE #<_mp_sequence>]
+        (ABORT,The mapper did not publish this capture sequence. No stale target was used. Abort then Pendant Mode.)
+    o<mp_fresh> endif
+    #<_mp_phase> = #<_hal[axisui.mapper-plan-phase]>
+    #<_mp_sample> = #<_hal[axisui.mapper-plan-sample]>
+    #<_mp_edge> = #<_hal[axisui.mapper-plan-edge]>
+    #<_mp_ax> = #<_hal[axisui.mapper-plan-approach-x]>
+    #<_mp_ay> = #<_hal[axisui.mapper-plan-approach-y]>
+    #<tx> = #<_hal[axisui.mapper-plan-target-x]>
+    #<ty> = #<_hal[axisui.mapper-plan-target-y]>
+    #<tz> = #<_hal[axisui.mapper-plan-target-z]>
+    #<_mp_coarse> = #<_hal[axisui.mapper-plan-coarse-feed]>
+    #<_mp_fine> = #<_hal[axisui.mapper-plan-fine-feed]>
+    #<_mp_travel> = #<_hal[axisui.mapper-plan-travel-feed]>
+    o<mp_still_fresh> if [#<_hal[axisui.mapper-plan-sequence]> NE #<_mp_sequence>]
+        (ABORT,The mapper plan changed while being read. Abort then Pendant Mode.)
+    o<mp_still_fresh> endif
+    o<mp_finished> if [#<_mp_phase> EQ 5]
+        o<mp_loop> break
+    o<mp_finished> endif
+    o<mp_at_clearance> if [ABS[#<_z> - #<_mp_clear>] GT [#<_mp_step_z> / 2]]
+        (ABORT,Probe is not at the starting-Z clearance plane. No lateral transfer was issued. Abort then Pendant Mode.)
+    o<mp_at_clearance> endif
+    (XY transfer at starting clearance: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+    o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<_mp_clear>] [0] [#<_mp_travel>]
+    #<return_z> = #<_mp_clear>
+    o<mp_side> if [#<_mp_phase> EQ 4]
+        (Outside-edge descent holds XY; coarse probe feed, not clearance travel feed.)
+        o<mapper-move> call [#<_x>] [#<_y>] [#<tz>] [0] [#<_mp_coarse>]
+        #<return_z> = #<tz>
+    o<mp_side> endif
+    (Top -Z or inward side touch: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+    o<mapper-move> call [#<tx>] [#<ty>] [#<tz>] [2] [#<_mp_coarse>]
+    o<mp_coarse_hit> if [#<_mp_hit> EQ 1]
+        (Release along reverse approach. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+        o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [1] [#<_mp_fine>]
+        (Same target, slow re-touch. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+        o<mapper-move> call [#<tx>] [#<ty>] [#<tz>] [3] [#<_mp_fine>]
+    o<mp_coarse_hit> endif
+    (Withdraw on the same normal before lifting: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+    o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [1] [#<_mp_fine>]
+    (Complete the backoff: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+    o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [0] [#<_mp_travel>]
+    (Return UP / LinuxCNC +Z, XY unchanged.)
+    o<mapper-move> call [#<_x>] [#<_y>] [#<_mp_clear>] [0] [#<_mp_travel>]
+    o<mapper-record> call [4]
+    (DEBUG,Mapper sample %d#<_mp_sample> retained; phase %d#<_mp_phase>. Returned to starting clearance.)
+o<mp_loop> endwhile
+M65 P1
+M66 P5 L0
+o<mp_release_selection> if [#5399 NE 0]
+    (ABORT,Scan ended but program probe selection remains active. Captures are retained. Abort then Pendant Mode.)
+o<mp_release_selection> endif
+o<mapper-record> call [6]
+(DEBUG,Automatic scan ended at starting-Z clearance. Contacts and rough geometry are in tmp/output/mapper.)
+M72
+o<mapper-run> endsub
+M2

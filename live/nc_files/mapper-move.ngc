@@ -1,0 +1,78 @@
+o<mapper-move> sub
+(Arguments XYZ, action: 0 guarded transfer, 1 release, 2 coarse touch, 3 fine touch; feed.)
+(X increasing: physical LEFT / LinuxCNC +X; decreasing: physical RIGHT / LinuxCNC -X.)
+#<_mp_fx> = #<_x>
+#<_mp_fy> = #<_y>
+#<_mp_fz> = #<_z>
+#<_mp_tx> = #1
+#<_mp_ty> = #2
+#<_mp_tz> = #3
+#<_mp_feed> = #5
+#<_mp_stage> = -1
+#<mx> = [#1 + #<_mp_ox>]
+#<my> = [#2 + #<_mp_oy>]
+#<mz> = [#3 + #<_mp_oz>]
+o<mm_limits> if [[#<mx> LE #<_ini[axis_x]min_limit>] OR [#<mx> GE #<_ini[axis_x]max_limit>] OR [#<my> LE #<_ini[axis_y]min_limit>] OR [#<my> GE #<_ini[axis_y]max_limit>] OR [#<mz> LE #<_ini[axis_z]min_limit>] OR [#<mz> GE #<_ini[axis_z]max_limit>]]
+    (ABORT,Mapper endpoint reaches a configured travel boundary. Abort then Pendant Mode. No clipped target was used.)
+o<mm_limits> endif
+o<mm_floor> if [[#3 LT [#<_mp_floor> - 0.000000001]] OR [#3 GT [#<_mp_clear> + 0.000000001]]]
+    (ABORT,Mapper target exceeds the original starting-Z descent envelope. Abort then Pendant Mode.)
+o<mm_floor> endif
+o<mm_release> if [#4 EQ 1]
+    o<mm_release_active> if [#<_hal[motion.probe-input]> NE 0]
+        (Reverse the approach: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X; vertical release is +Z.)
+        G38.5 X#1 Y#2 Z#3 F#5
+        #<released> = #5070
+        o<mapper-record> call [2]
+        o<mm_release_failed> if [[#<released> NE 1] OR [#<_hal[motion.probe-input]> NE 0]]
+            (ABORT,Probe did not release along its return path. Captures are retained. Abort then Pendant Mode.)
+        o<mm_release_failed> endif
+    o<mm_release_active> endif
+o<mm_release> else
+    o<mm_active> if [#<_hal[motion.probe-input]> NE 0]
+        (ABORT,Probe is active before a mapper approach or transfer. No new move was issued. Abort then Pendant Mode.)
+    o<mm_active> endif
+    o<mm_motion> if [[#1 NE #<_x>] OR [#2 NE #<_y>] OR [#3 NE #<_z>]]
+        o<mm_stage> if [#4 GE 2]
+            #<_mp_stage> = [#4 - 2]
+        o<mm_stage> endif
+        (X increasing: physical LEFT / LinuxCNC +X; decreasing: physical RIGHT / LinuxCNC -X. Top approaches hold XY.)
+        G38.3 X#1 Y#2 Z#3 F#5
+        #<_mp_hit> = #5070
+        o<mm_contact> if [#<_mp_hit> EQ 1]
+            o<mm_obstruction> if [#4 EQ 0]
+                o<mapper-record> call [3]
+                o<mm_outside_z> if [[#<_mp_phase> EQ 4] AND [#1 EQ #<_mp_fx>] AND [#2 EQ #<_mp_fy>] AND [#3 LT #<_mp_fz>]]
+                    (User-requested outside-edge Z recovery: retain trigger first, release UP then return to starting clearance; cancel.)
+                    (UP / LinuxCNC +Z only; XY unchanged.)
+                    o<mapper-move> call [#<_x>] [#<_y>] [#<_mp_clear>] [1] [#<_mp_fine>]
+                    o<mapper-move> call [#<_x>] [#<_y>] [#<_mp_clear>] [0] [#<_mp_fine>]
+                    o<mapper-record> call [5]
+                    (ABORT,Unexpected outside-edge Z contact. Trigger retained and probe returned above the block to starting clearance. Scan cancelled; Abort then Pendant Mode.)
+                o<mm_outside_z> endif
+                (ABORT,Unexpected mapper transfer contact was saved and read back. No further motion was issued. Abort then Pendant Mode.)
+            o<mm_obstruction> endif
+            o<mapper-record> call [0]
+        o<mm_contact> else
+            o<mm_unlatched> if [#<_hal[motion.probe-input]> NE 0]
+                o<mapper-record> call [2]
+                (ABORT,CAPTURE FAILED - KEEP THE SETUP IN PLACE. Probe is active without a retained G38 contact. No miss or reconstructed trigger was accepted. Abort then Pendant Mode.)
+            o<mm_unlatched> endif
+            o<mm_fine_miss> if [#4 EQ 3]
+                o<mapper-record> call [2]
+                (ABORT,CAPTURE FAILED - KEEP THE SETUP IN PLACE. Fine re-touch had no contact; coarse data was not accepted as a measurement. Abort then Pendant Mode.)
+            o<mm_fine_miss> endif
+            o<mm_miss_kind> if [#4 EQ 2]
+                o<mapper-record> call [1]
+            o<mm_miss_kind> else
+                o<mapper-record> call [2]
+            o<mm_miss_kind> endif
+        o<mm_contact> endif
+    o<mm_motion> else
+        o<mm_no_touch_motion> if [#4 GE 2]
+            (ABORT,The requested probing target is already the current position. No contact was manufactured. Abort then Pendant Mode.)
+        o<mm_no_touch_motion> endif
+    o<mm_motion> endif
+o<mm_release> endif
+o<mapper-move> endsub
+M2

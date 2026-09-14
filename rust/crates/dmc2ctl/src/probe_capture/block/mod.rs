@@ -1,6 +1,6 @@
 //! Adaptive cuboid metrology: Rust plans, the typed G-code script executes.
 mod exchange;
-mod geometry;
+use super::geometry;
 mod model;
 mod report;
 #[cfg(test)]

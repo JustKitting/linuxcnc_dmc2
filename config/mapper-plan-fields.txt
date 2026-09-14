@@ -1,0 +1,14 @@
+DMC2_MAPPER_PLAN_V1
+sequence
+phase
+sample
+edge
+approach-x
+approach-y
+target-x
+target-y
+target-z
+clear-z
+coarse-feed
+fine-feed
+travel-feed

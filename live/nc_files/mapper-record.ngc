@@ -1,0 +1,59 @@
+o<mapper-record> sub
+(Shared durable record gate: 0 touch, 1 miss, 2 travel, 3 obstruction, 4 ready, 5 recovery, 6 result.)
+#<ok> = 0
+#<x> = #<_x>
+#<y> = #<_y>
+#<z> = #<_z>
+o<mr_trigger> if [[#1 EQ 0] OR [#1 EQ 3]]
+    #<ok> = #5070
+    #<x> = #5061
+    #<y> = #5062
+    #<z> = #5063
+o<mr_trigger> endif
+#<mx> = [#<x> + #<_mp_ox>]
+#<my> = [#<y> + #<_mp_oy>]
+#<mz> = [#<z> + #<_mp_oz>]
+(LOGOPEN,../tmp/output/mapper-request.txt)
+(LOG,DMC2_MAPPER_RECORD_V1)
+(LOG,sequence=%d#<_mp_sequence>)
+o<mr_kind> if [#1 EQ 0]
+    (LOG,kind=touch)
+o<mr_kind> elseif [#1 EQ 1]
+    (LOG,kind=miss)
+o<mr_kind> elseif [#1 EQ 2]
+    (LOG,kind=travel)
+o<mr_kind> elseif [#1 EQ 3]
+    (LOG,kind=obstruction)
+o<mr_kind> elseif [#1 EQ 4]
+    (LOG,kind=ready)
+o<mr_kind> elseif [#1 EQ 5]
+    (LOG,kind=recovery)
+o<mr_kind> elseif [#1 EQ 6]
+    (LOG,kind=result)
+o<mr_kind> endif
+(LOG,sample=%d#<_mp_sample>)
+(LOG,phase=%d#<_mp_phase>)
+(LOG,edge=%d#<_mp_edge>)
+(LOG,stage=%d#<_mp_stage>)
+(LOG,success=%d#<ok>)
+(LOG,approach_x=%.9f#<_mp_ax>)
+(LOG,approach_y=%.9f#<_mp_ay>)
+(LOG,work_x=%.9f#<x>)
+(LOG,work_y=%.9f#<y>)
+(LOG,work_z=%.9f#<z>)
+(LOG,machine_x=%.9f#<mx>)
+(LOG,machine_y=%.9f#<my>)
+(LOG,machine_z=%.9f#<mz>)
+(LOG,from_x=%.9f#<_mp_fx>)
+(LOG,from_y=%.9f#<_mp_fy>)
+(LOG,from_z=%.9f#<_mp_fz>)
+(LOG,target_x=%.9f#<_mp_tx>)
+(LOG,target_y=%.9f#<_mp_ty>)
+(LOG,target_z=%.9f#<_mp_tz>)
+(LOG,feed=%.9f#<_mp_feed>)
+(LOGCLOSE)
+M190 P10 Q#<_mp_sequence>
+M66 P5 L0
+#<_mp_sequence> = [#<_mp_sequence> + 1]
+o<mapper-record> endsub
+M2
