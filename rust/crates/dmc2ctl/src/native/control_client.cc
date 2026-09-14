@@ -10,6 +10,44 @@
 #include "cms.hh"
 #include "emc_nml.hh"
 
+extern "C" int32_t dmc2_probe_capture_position(
+    const char *nml_file, double xyz[3]) noexcept {
+    if (nml_file == nullptr || xyz == nullptr) return -1;
+    try {
+        RCS_STAT_CHANNEL channel(emcFormat, "emcStatus", "xemc", nml_file);
+        if (!channel.valid()) return -1;
+        const NMLTYPE type = channel.peek();
+        if (channel.error_type != NML_NO_ERROR ||
+            (type != 0 && type != EMC_STAT_TYPE)) return -1;
+        const auto *status = static_cast<const EMC_STAT *>(channel.get_address());
+        if (status == nullptr || !status->motion.traj.probe_tripped) return -1;
+        xyz[0] = status->motion.traj.probedPosition.tran.x;
+        xyz[1] = status->motion.traj.probedPosition.tran.y;
+        xyz[2] = status->motion.traj.probedPosition.tran.z;
+        return 0;
+    } catch (...) {
+        return -1;
+    }
+}
+
+extern "C" int32_t dmc2_probe_capture_error(
+    const char *nml_file, const char *message) noexcept {
+    if (nml_file == nullptr || message == nullptr) return -1;
+    try {
+        // The stock NML configuration grants the tool process write access to
+        // emcError. This is a diagnostic writer, never a command-channel client.
+        NML channel(emcFormat, "emcError", "tool", nml_file);
+        if (!channel.valid()) return -1;
+        EMC_OPERATOR_ERROR error;
+        error.id = 0;
+        std::strncpy(error.error, message, sizeof(error.error) - 1);
+        error.error[sizeof(error.error) - 1] = '\0';
+        return channel.write(&error);
+    } catch (...) {
+        return -1;
+    }
+}
+
 namespace {
 
 constexpr const char *CLIENT_NAME = "xemc";

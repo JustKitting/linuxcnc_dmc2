@@ -3,7 +3,8 @@ use std::os::unix::ffi::OsStrExt;
 
 use crate::error::{render_bytes, Error};
 
-pub const USAGE: &str = "usage: dmc2-linuxcnc [--live [--persistent]]";
+pub const USAGE: &str =
+    "usage: dmc2-linuxcnc [--live [--persistent [--boot-retry-mesa-registration-once]]]";
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Command {
@@ -16,11 +17,13 @@ pub enum Mode {
     Validate,
     Direct,
     Persistent,
+    BootRetryMesaRegistrationOnce,
 }
 
 pub fn parse(arguments: &[OsString]) -> Result<Command, Error> {
     let mut live = false;
     let mut persistent = false;
+    let mut boot_retry_mesa_registration_once = false;
     let mut help = false;
 
     for argument in arguments {
@@ -33,8 +36,11 @@ pub fn parse(arguments: &[OsString]) -> Result<Command, Error> {
         match argument {
             "--live" if !live => live = true,
             "--persistent" if !persistent => persistent = true,
+            "--boot-retry-mesa-registration-once" if !boot_retry_mesa_registration_once => {
+                boot_retry_mesa_registration_once = true
+            }
             "--help" | "-h" if !help => help = true,
-            "--live" | "--persistent" | "--help" | "-h" => {
+            "--live" | "--persistent" | "--boot-retry-mesa-registration-once" | "--help" | "-h" => {
                 return Err(Error::Usage(format!(
                     "{USAGE}; duplicate argument {argument}"
                 )));
@@ -48,7 +54,7 @@ pub fn parse(arguments: &[OsString]) -> Result<Command, Error> {
     }
 
     if help {
-        if live || persistent {
+        if live || persistent || boot_retry_mesa_registration_once {
             return Err(Error::Usage(format!(
                 "{USAGE}; help cannot be combined with live options"
             )));
@@ -60,8 +66,15 @@ pub fn parse(arguments: &[OsString]) -> Result<Command, Error> {
             "{USAGE}; --persistent requires --live"
         )));
     }
+    if boot_retry_mesa_registration_once && !persistent {
+        return Err(Error::Usage(format!(
+            "{USAGE}; --boot-retry-mesa-registration-once requires --live --persistent"
+        )));
+    }
     let mode = if !live {
         Mode::Validate
+    } else if boot_retry_mesa_registration_once {
+        Mode::BootRetryMesaRegistrationOnce
     } else if persistent {
         Mode::Persistent
     } else {

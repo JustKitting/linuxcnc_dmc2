@@ -15,7 +15,7 @@ from .constants import ERROR_CHANNEL_KIND_DEFINITIONS, REQUIRED_LINUXCNC_VERSION
 from .recovery_contract import RecoveryClassCode
 
 
-JOURNAL_SCHEMA_VERSION = 3
+JOURNAL_SCHEMA_VERSION = 4
 JOURNAL_OBJECT_CAPACITY = 280
 JOURNAL_HEADER_MARKER = "DMC2_ERROR_JOURNAL"
 JOURNAL_EVENT_MARKER = "DMC2_ERROR_EVENT"
@@ -63,18 +63,14 @@ class ErrorJournalEvent:
     object_bytes: bytes
     nml_error: int
     cms_status: int
+    source_identity: str
+    cause: str
+    action: str
 
     def display_text(self) -> str:
-        if not self.known:
-            return (
-                "UNKNOWN_LINUXCNC_ERROR_CHANNEL_TYPE"
-                f"(raw={self.message_type})\n"
-                "Cause: LinuxCNC supplied an error-channel type outside the pinned "
-                "2.9.10 public catalog\n"
-                "Action: preserve the raw journal record and stop using the machine "
-                "until the binary/version mismatch is corrected"
-            )
-        return self.text.decode("utf-8", errors="replace")
+        raw = self.text.decode("utf-8", errors="replace")
+        return f"{self.source_identity}\nCause: {self.cause}\nAction: {self.action}\nNative message: {raw}"
+
 
 
 class ErrorJournalReader:
@@ -218,20 +214,20 @@ class ErrorJournalReader:
         line: str, nml_no_error: int, cms_read_ok: int
     ) -> ErrorJournalEvent:
         fields = line.split("\t")
-        if len(fields) != 19:
+        if len(fields) != 22:
             raise RuntimeError(
-                f"error journal event has {len(fields)} fields instead of 19"
+                f"error journal event has {len(fields)} fields instead of 22"
             )
         if fields[0] != JOURNAL_EVENT_MARKER or fields[1] != str(
             JOURNAL_SCHEMA_VERSION
         ):
             raise RuntimeError("error journal event marker or schema changed")
-        prefix = "\t".join(fields[:18]).encode("ascii")
+        prefix = "\t".join(fields[:21]).encode("ascii")
         expected_checksum = f"{_fnv64(prefix):016x}"
-        if fields[18] != expected_checksum:
+        if fields[21] != expected_checksum:
             raise RuntimeError(
                 "error journal checksum mismatch: "
-                f"expected {expected_checksum}, found {fields[18]}"
+                f"expected {expected_checksum}, found {fields[21]}"
             )
 
         sequence = _bounded_int(fields[2], "sequence", 1, U64_MAX)
@@ -260,18 +256,12 @@ class ErrorJournalReader:
         nml_error = _bounded_int(fields[16], "NML error", I32_MIN, I32_MAX)
         cms_status = _bounded_int(fields[17], "CMS status", I32_MIN, I32_MAX)
 
-        if known and message_type in (1, 11):
-            expected_recovery = RecoveryClassCode.ABORT_TASK
-        elif known:
-            expected_recovery = RecoveryClassCode.RECHECK_SOURCE
-        else:
-            expected_recovery = RecoveryClassCode.RELAUNCH_APPLICATION
-        if recovery_code != expected_recovery:
-            raise RuntimeError(
-                "ERROR_JOURNAL_RECOVERY_CLASS_MISMATCH: "
-                f"message_type={message_type} expected={expected_recovery.name} "
-                f"actual={recovery_code.name}; action: run matched DMC2 binaries"
-            )
+        # Rust owns cause/recovery classification. Severity cannot determine it.
+        source_identity = fields[18]
+        cause = _hex(fields[19], "cause").decode("utf-8")
+        action = _hex(fields[20], "action").decode("utf-8")
+        if not re.fullmatch(r"[A-Z][A-Z0-9_]*", source_identity) or not cause or not action:
+            raise RuntimeError("ERROR_JOURNAL_SOURCE_CONTRACT_INVALID: cause/action missing; reopen the matching application")
 
         if nml_error != nml_no_error or cms_status != cms_read_ok:
             raise RuntimeError(
@@ -355,6 +345,9 @@ class ErrorJournalReader:
             object_bytes=object_bytes,
             nml_error=nml_error,
             cms_status=cms_status,
+            source_identity=source_identity,
+            cause=cause,
+            action=action,
         )
 
 

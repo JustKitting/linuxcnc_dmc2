@@ -8,6 +8,7 @@ pub mod recovery;
 pub mod runtime;
 pub mod startup;
 pub mod supervisor;
+pub mod tool_setter;
 
 include!(concat!(env!("OUT_DIR"), "/machine_scale.rs"));
 

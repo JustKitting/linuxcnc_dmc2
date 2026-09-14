@@ -7,6 +7,7 @@ hal::realtime_hal_pin_catalog! {
     pub(in crate::component) struct Pins;
     pub(in crate::component) fn register_pins;
     pins {
+        manual_probe_contact: bit in => "dmc2-pendant-control.manual-probe-contact";
         pendant_snapshot_generation: u32 in => "dmc2-pendant-control.snapshot-generation";
         connected: bit in => "dmc2-pendant-control.connected";
         serial_fault: bit in => "dmc2-pendant-control.serial-fault";
@@ -100,6 +101,8 @@ hal::realtime_hal_pin_catalog! {
         software_watchdog_ok: bit in => "dmc2-pendant-control.software-watchdog-ok";
         ui_ready: bit in => "dmc2-pendant-control.ui-ready";
         linuxcnc_estop_reset_request: bit in => "dmc2-pendant-control.base-estop-reset";
+        clear_fault_request: u32 in => "dmc2-pendant-control.clear-fault-request";
+        clear_fault_ack: u32 out => "dmc2-pendant-control.clear-fault-ack";
 
         motor_limit_reset: bit[3] out => [
             "dmc2-pendant-control.motor-0-limit-reset",
@@ -122,7 +125,6 @@ hal::realtime_hal_pin_catalog! {
         position_known: bit out => "dmc2-pendant-control.position-known";
         position_unknown: bit out => "dmc2-pendant-control.position-unknown";
         control_ready: bit out => "dmc2-pendant-control.control-ready";
-        fault_reset_allowed: bit out => "dmc2-pendant-control.fault-reset-allowed";
         fault: bit out => "dmc2-pendant-control.fault";
         fault_snapshot_generation: u32 out => "dmc2-pendant-control.fault-snapshot-generation";
         fault_code: s32 out => "dmc2-pendant-control.fault-code";

@@ -3,6 +3,8 @@
 from __future__ import annotations
 
 from collections.abc import Mapping, MutableMapping
+from dataclasses import dataclass
+from pathlib import Path
 
 from .constants import (
     AGGREGATED_ERROR_PREFIXES,
@@ -10,8 +12,9 @@ from .constants import (
     EXPECTED_JOG_STOP_MESSAGES,
     REQUIRED_LINUXCNC_VERSION,
 )
-from .error_journal import ErrorJournalReader
+from .error_journal import ErrorJournalEvent, ErrorJournalReader
 from .diagnostic_journal import (
+    DiagnosticEvent,
     DiagnosticJournalReader,
 )
 from .recovery_contract import RecoveryClassCode, RecoveryOperationCode
@@ -26,6 +29,20 @@ from .recovery_ui import (
     validate_recovery_ui,
 )
 from .ui_fault import AxisUiFault, AxisUiFaultKind
+
+
+@dataclass(frozen=True)
+class EventNotification:
+    """Identify one recorded event's popup even when AXIS reuses its frame."""
+
+    event: DiagnosticEvent | ErrorJournalEvent
+    widgets: object
+
+    def is_visible(self, notifications) -> bool:
+        # AXIS caches and reuses frames. Equal widget tuples can belong to a
+        # later message; only the exact tuple still belongs to this notice.
+        return any(item is self.widgets for item in notifications.widgets)
+
 
 def error_channel_kind_catalog(linuxcnc_module) -> dict[int, tuple[str, str]]:
     """Return the complete public LinuxCNC 2.9.10 error-channel catalog."""
@@ -92,7 +109,9 @@ def install_axis_ui_policy(
     notifications = namespace["notifications"]
     original_add = notifications.add
     live_plotter._dmc2_recovery_notification_add = original_add
-    active_diagnostic_widgets = {}
+    active_diagnostic_notices: dict[tuple[object, ...], EventNotification] = {}
+    error_notices: list[EventNotification] = []
+    reveal_diagnostics = False
     checked_recovery_contract = None
     recovery_contract_error_identity = None
     recovery_contract_error_notice = RecoveryUiNotice(namespace)
@@ -128,10 +147,8 @@ def install_axis_ui_policy(
     def filtered_error_task():
         nonlocal checked_recovery_contract
         nonlocal recovery_contract_error_identity
+        nonlocal reveal_diagnostics
         try:
-            run_guard = getattr(live_plotter, "_dmc2_axis_run_guard", None)
-            if run_guard is not None:
-                run_guard.reconcile()
             try:
                 ensure_essential_recovery_controls(namespace)
             except Exception as controls_error:
@@ -143,6 +160,12 @@ def install_axis_ui_policy(
                 )
             else:
                 essential_controls_notice.clear()
+            error_notices[:] = [
+                notice for notice in error_notices if notice.is_visible(notifications)
+            ]
+            run_guard = getattr(live_plotter, "_dmc2_axis_run_guard", None)
+            if run_guard is not None:
+                run_guard.reconcile()
             prefetched_diagnostic = None
             diagnostic_poll_failed = False
             try:
@@ -184,7 +207,8 @@ def install_axis_ui_policy(
                     break
                 try:
                     kind = int(event.message_type)
-                    message = str(event.display_text())
+                    message = event.text.decode("utf-8", errors="replace")
+                    presentation = str(event.display_text())
                 except Exception as malformed:
                     kind = AxisUiFaultKind.ERROR_JOURNAL_RECORD_PRESENTATION_FAILED
                     print(
@@ -225,6 +249,19 @@ def install_axis_ui_policy(
                         message,
                         linuxcnc_module,
                     )
+                    probe_binding = getattr(live_plotter, "_dmc2_probe_mode", None)
+                    if (
+                        probe_binding is not None
+                        and bool(probe_binding.comp["probe-mode"])
+                        and bool(probe_binding.comp["probe-selected"])
+                        and message.strip() in (
+                            "Probe tripped during a joint jog.",
+                            "Probe tripped during a coordinate jog.",
+                        )
+                    ):
+                        # Rust delivers the retained contact sample as the info
+                        # bubble; preserve the raw LinuxCNC event in its journal.
+                        suppressed = True
                     print(
                         "DMC2_LINUXCNC_ERROR_CHANNEL "
                         f"sequence={event.sequence} kind={kind} name={name} "
@@ -237,7 +274,7 @@ def install_axis_ui_policy(
                     if not suppressed:
                         accepted = notifications.add(
                             severity,
-                            f"{message}\n{recovery_text}",
+                            f"{presentation}\n{recovery_text}",
                         )
                         if accepted is False:
                             raise RuntimeError(
@@ -245,6 +282,10 @@ def install_axis_ui_policy(
                                 f"sequence={event.sequence}; action: use the visible "
                                 "recovery controls and correct notification delivery"
                             )
+                        if severity == "error":
+                            error_notices.append(EventNotification(
+                                event, notifications.widgets[-1]
+                            ))
 
             while not diagnostic_poll_failed:
                 try:
@@ -413,16 +454,19 @@ def install_axis_ui_policy(
                 for diagnostic in diagnostic_reader.active_events()
             }
             clear_failures = []
-            for active_key, widget in tuple(active_diagnostic_widgets.items()):
-                if active_key in active_diagnostics:
+            for active_key, notice in tuple(active_diagnostic_notices.items()):
+                # The reader retains the assertion object until CLEAR. A new
+                # ASSERT is a new occurrence, including clear/reassert events
+                # read in the same poll and replacement journal sessions.
+                if notice.event is active_diagnostics.get(active_key):
                     continue
                 try:
-                    if widget in notifications.widgets:
-                        notifications.remove(widget)
+                    if notice.is_visible(notifications):
+                        notifications.remove(notice.widgets)
                 except Exception as clear_error:
                     clear_failures.append((active_key, clear_error))
                 else:
-                    active_diagnostic_widgets.pop(active_key, None)
+                    active_diagnostic_notices.pop(active_key, None)
             if clear_failures:
                 diagnostic_clear_error_notice.present(
                     fault=AxisUiFault(
@@ -437,10 +481,13 @@ def install_axis_ui_policy(
                 diagnostic_clear_error_notice.clear()
 
             for active_key, diagnostic in active_diagnostics.items():
-                previous_widget = active_diagnostic_widgets.get(active_key)
+                previous_notice = active_diagnostic_notices.get(active_key)
                 if (
-                    previous_widget is not None
-                    and previous_widget in notifications.widgets
+                    previous_notice is not None
+                    and (
+                        not reveal_diagnostics
+                        or previous_notice.is_visible(notifications)
+                    )
                 ):
                     continue
                 accepted = notifications.add(
@@ -453,7 +500,16 @@ def install_axis_ui_policy(
                         f"diagnostic={active_key!r}; action: use the visible "
                         "recovery controls and correct notification delivery"
                     )
-                active_diagnostic_widgets[active_key] = notifications.widgets[-1]
+                active_diagnostic_notices[active_key] = EventNotification(
+                    diagnostic, notifications.widgets[-1]
+                )
+            if (
+                reveal_diagnostics
+                and not active_diagnostics
+                and diagnostic_reader.contract_ready()
+            ):
+                notifications.add("info", "No active diagnostic faults.")
+            reveal_diagnostics = False
             if not error_poll_failed:
                 if journal_reader.contract_ready():
                     error_reader_error_notice.clear()
@@ -493,9 +549,52 @@ def install_axis_ui_policy(
                 )
             )
 
+    def acknowledge_error_notifications():
+        """Acknowledge delivered history after an explicit successful clear.
+
+        Live diagnostic assertions have their own assertion/clear lifecycle.
+        This never edits a journal, changes a machine signal, or acknowledges
+        an event that has not yet been presented to the operator.
+        """
+        failures = []
+        for notice in tuple(error_notices):
+            try:
+                if notice.is_visible(notifications):
+                    notifications.remove(notice.widgets)
+            except Exception as error:
+                failures.append(f"event {notice.event.sequence}: {error}")
+            else:
+                error_notices.remove(notice)
+                print(
+                    "DMC2_ERROR_NOTIFICATION_ACK "
+                    f"sequence={notice.event.sequence} source=operator-clear-fault",
+                    flush=True,
+                )
+        if failures:
+            raise RuntimeError(
+                "Clear Fault recovered the controller, but these historical "
+                "popups could not be dismissed; use their close buttons or "
+                "retry Clear Fault: " + "; ".join(failures)
+            )
+
     notifications.add = add_with_delivery_status
+    live_plotter._dmc2_acknowledge_error_notifications = acknowledge_error_notifications
     live_plotter.error_task = filtered_error_task
     live_plotter._dmc2_diagnostic_reader = diagnostic_reader
-    live_plotter._dmc2_active_diagnostic_widgets = active_diagnostic_widgets
+    live_plotter._dmc2_active_diagnostic_notices = active_diagnostic_notices
     live_plotter._dmc2_recovery_contract = lambda: checked_recovery_contract
     live_plotter._dmc2_ui_policy_installed = True
+
+    def show_active_diagnostics():
+        nonlocal reveal_diagnostics
+        reveal_diagnostics = True
+
+    root_window = namespace["root_window"]
+    root_window.tk.call(
+        ".menu.view", "add", "command",
+        "-label", "Show Active Diagnostics",
+        "-command", root_window.register(show_active_diagnostics),
+    )
+    # Keep diagnostics/recovery installed if optional repaint setup raises.
+    notifications.tk.call("source", str(Path(__file__).with_name("notification_paint.tcl")))
+    notifications.tk.call("::dmc2::notification_paint::install", str(notifications))

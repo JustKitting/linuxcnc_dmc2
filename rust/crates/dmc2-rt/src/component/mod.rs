@@ -33,6 +33,7 @@ enum StartupFailure {
     Hal(linuxcnc_hal::HalError),
     PinStorageAllocation,
     StateAllocation,
+    ProbeStream(linuxcnc_hal::probe_stream::StreamError),
 }
 
 impl StartupFailure {
@@ -40,6 +41,7 @@ impl StartupFailure {
         match self {
             Self::Hal(error) => error.safe_return_code(),
             Self::PinStorageAllocation | Self::StateAllocation => ENOMEM,
+            Self::ProbeStream(error) => error.raw,
         }
     }
 }
@@ -48,6 +50,7 @@ impl fmt::Display for StartupFailure {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
             Self::Hal(error) => error.fmt(formatter),
+            Self::ProbeStream(error) => error.fmt(formatter),
             Self::PinStorageAllocation => formatter.write_str(
                 "HAL_PIN_STORAGE_ALLOCATION_FAILED (raw=null, call=hal_malloc): HAL shared memory could not hold the realtime pin-pointer structure; action: stop duplicate HAL owners and restore sufficient HAL shared memory before restarting",
             ),
@@ -62,7 +65,7 @@ impl RecoveryClassified for StartupFailure {
     fn recovery_class(&self) -> RecoveryClass {
         match self {
             Self::Hal(error) => error.recovery_class(),
-            Self::PinStorageAllocation | Self::StateAllocation => {
+            Self::PinStorageAllocation | Self::StateAllocation | Self::ProbeStream(_) => {
                 RecoveryClass::RelaunchApplication
             }
         }
@@ -191,6 +194,10 @@ pub extern "C" fn rtapi_app_main() -> c_int {
             )
         };
         linuxcnc_hal::HalCall::ExportFunct.classify(exported)?;
+        unsafe {
+            hal::probe::install(component_id, pins)?;
+            hal::tool_setter::install(component_id, pins)?;
+        }
         linuxcnc_hal::HalCall::Ready.classify(unsafe { linuxcnc_hal::hal_ready(component_id) })?;
         Ok(())
     })();

@@ -54,7 +54,7 @@
       "blocking": true,
       "status": "implemented_offline",
       "value": {
-        "order": ["X", "Y", "Z"],
+        "order": ["Z", "X", "Y"],
         "search": "+5.0 mm/s (5000 pulses/s)",
         "latch": "+0.25 mm/s (250 pulses/s)",
         "final_move": "-0.25 mm at 0.25 mm/s (250 pulses at 250 pulses/s)",
@@ -67,7 +67,7 @@
       "blocking": true,
       "status": "implemented_offline",
       "value": "Catalogued Home All control with Known/Unknown indicators in the Manual Control tab's Homing section",
-      "reason": "The Manual-tab button retains AXIS's existing Home All command binding, which invokes LinuxCNC's configured HOME_SEQUENCE 0/1/2 path for X then Y then Z; no second homing sequence or substituted motion values were introduced."
+      "reason": "The Manual-tab button retains AXIS's existing Home All command binding. HOME_SEQUENCE is Z=0, X=1, Y=2, so Z finishes before X starts and X finishes before Y starts; the existing search, latch and final-move values remain in use."
     },
     {
       "id": "pendant_latest_wins_motion_backend",
@@ -127,15 +127,15 @@
       "id": "probe_contact_motion_behavior",
       "blocking": false,
       "status": "implemented_offline",
-      "value": "The shared no-motion OUT5 connectivity test monitors puck IN0 and DMC2 side-probe IN1 and removes power on either contact; puck IN0 is connected to motion.probe-input plus motion.digital-in-00; the first explicitly approved moving test probes only Z at 0.1 mm/s from recorded X/Y and returns to machine Z home after contact; IN1 remains status-only for motion",
-      "reason": "The general panel test validates either contact in a separate no-motion run, while tool-height-first-test.ngc is the deliberately slow first live G38.2 validation and does not alter coordinates or the tool table."
+      "value": "Operator-enabled Probe Mode selects mounted XYZ probe IN1 during Manual/idle operation. Rust captures servo-cycle machine coordinates and motion details; LinuxCNC retains its manual-contact jog stop. Record buffers samples in memory and writes only on Record off or Probe Mode off.",
+      "reason": "Replaces the obsolete connectivity-test section. G-code P1 selection remains independent; no G38 stale coordinates, old side-probe calibration or radius offsets are substituted for the captured samples. Live acceptance remains pending."
     },
     {
       "id": "probe_power_operation_policy",
       "blocking": false,
       "status": "implemented_offline",
       "value": "M64/M65 P0 request OUT5 through a realtime program-running gate; motion.digital-in-01 reports the gate state; normal completion, timeout, and ON_ABORT_COMMAND clear the request",
-      "reason": "The no-motion panel test has an exact 300-second maximum window and removes OUT5 immediately on IN0 or IN1 contact. The moving first test enables OUT5 only after its operator gate and removes it before the Z-home return; the abort handler remains the fallback cleanup."
+      "reason": "The mounted XYZ probe is USER-OBSERVED ACTUAL fixed +5 V powered. Probe Mode performs no power switching. The obsolete panel test is removed; the existing G-code P0 program-running gate remains."
     },
     {
       "id": "motor_alarm_input_mapping_and_polarity",
@@ -173,9 +173,10 @@
     "x": {"joint": 0, "stepgen": 1, "positive_physical": "left", "negative_physical": "right", "limit": "IN11 left"},
     "y": {"joint": 1, "stepgen": 0, "positive_physical": "forward", "negative_physical": "backward", "limit": "IN9 forward"},
     "z": {"joint": 2, "stepgen": 2, "positive_physical": "up", "negative_physical": "down", "limit": "IN10 up"},
-    "puck_contact": "IN0",
-    "dmc2_continuity_probe": "IN1",
-    "probe_power_switch": "OUT5",
+    "tool_setter_contact": "IN0; NC closed=raw true, contact/open=normalized true",
+    "tool_setter_overtravel": "IN2; NC closed=raw true, overtravel/open=normalized true; retained program stop, operator clear",
+    "xyz_touch_probe": "IN1; fixed +5 V supply",
+    "legacy_program_output": "OUT5; not the fixed probe or setter supply",
     "spindle_direction": {
       "view": "top-down from spindle/head toward tool and workpiece",
       "h100_0200_0001": "generic operation only; not accepted as a direction-safe command",
@@ -185,7 +186,10 @@
       "linuxcnc_m4": "physical counterclockwise via H100 0200H=0002H"
     },
     "puck_height_mm": 19.40,
+    "puck_calibration_status": "Superseded legacy puck; historical calibration evidence only, not used by the converted tool-setter programs",
     "puck_reference_surface": "machine plate",
+    "tool_setter_reference": "config/metrology/tool-setter.json",
+    "tool_setter_reference_status": "User accepted on 2026-09-13: measured setter-top-to-plate height with source-nominal zero pretravel; measured contact XY retained separately from the unknown setter center",
     "current_cutter_marking": "10mm-60L"
   }
 }

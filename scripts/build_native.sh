@@ -34,6 +34,9 @@ install -D -m 0755 \
 install -D -m 0755 \
     "${rust_dir}/target/release/dmc2ctl" \
     "${native_bin_dir}/dmc2ctl"
+install -D -m 0755 \
+    "${rust_dir}/target/release/dmc2-probe-capture" \
+    "${native_bin_dir}/dmc2-probe-capture"
 cmp --silent \
     "${rust_dir}/target/release/dmc2-serial-bridge" \
     "${native_bin_dir}/dmc2-serial-bridge"
@@ -52,6 +55,9 @@ cmp --silent \
 cmp --silent \
     "${rust_dir}/target/release/dmc2ctl" \
     "${native_bin_dir}/dmc2ctl"
+cmp --silent \
+    "${rust_dir}/target/release/dmc2-probe-capture" \
+    "${native_bin_dir}/dmc2-probe-capture"
 
 echo "native release build passed"
 echo "userspace adapters installed in ${native_bin_dir}"

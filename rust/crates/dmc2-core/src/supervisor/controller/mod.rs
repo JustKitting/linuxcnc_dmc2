@@ -220,6 +220,8 @@ impl ActiveJog {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 enum RecoveryPowerPhase {
+    /// Clear has stopped commands; the visible reset path releases this hold.
+    AwaitUiReset,
     LimitResetAssert([bool; 3]),
     LimitResetValidate([bool; 3]),
     GateSettle,
@@ -304,21 +306,15 @@ impl LinuxCncPendantSupervisor {
         self.fault
     }
 
-    /// Clear one retained controller fault without restoring machine power or
-    /// accepting a motion command.  The runtime owns the current-input safety
-    /// checks that authorize this transition.
-    pub fn clear_latched_fault(&mut self) -> bool {
-        if self.fault.is_none() {
-            return false;
-        }
-
+    /// Unconditionally cancel pending work and clear retained software state.
+    pub fn clear_latched_fault(&mut self) {
         self.active = None;
         self.pending = None;
         self.transition(Phase::Idle);
         self.collision_motor = None;
         self.bounce_start_count = None;
         self.recovery = EstopRecoverySequence::new();
-        self.recovery_power_phase = None;
+        self.recovery_power_phase = Some(RecoveryPowerPhase::AwaitUiReset);
         self.recovery_restore_machine_on = false;
         self.recovery_elapsed_ns = 0;
         self.limit_reset = [false; 3];
@@ -335,7 +331,6 @@ impl LinuxCncPendantSupervisor {
         // Reassert the native realtime stop while the cleared controller is
         // still deliberately held disabled for this complete update cycle.
         self.command = Some(CommandEvent::JogStopImmediate);
-        true
     }
 
     pub fn observe_inputs(&mut self, inputs: SupervisorInputs) {
@@ -401,7 +396,7 @@ impl LinuxCncPendantSupervisor {
         record.evidence.motor = motor;
         record.evidence.axis = active
             .map(|value| value.intent.axis)
-            .or_else(|| motor.map(axis_by_motor));
+            .or_else(|| motor.and_then(axis_by_motor));
         if let Some(active) = active {
             record.evidence.start_count = Some(active.start_count);
             record.evidence.target_count = Some(active.target_count);
@@ -576,11 +571,11 @@ const fn single_active(values: [bool; 3]) -> Option<usize> {
     }
 }
 
-const fn axis_by_motor(motor: usize) -> Axis {
+const fn axis_by_motor(motor: usize) -> Option<Axis> {
     match motor {
-        0 => Axis::Y,
-        1 => Axis::X,
-        2 => Axis::Z,
-        _ => Axis::X,
+        0 => Some(Axis::Y),
+        1 => Some(Axis::X),
+        2 => Some(Axis::Z),
+        _ => None,
     }
 }

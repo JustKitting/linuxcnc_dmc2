@@ -11,7 +11,7 @@ pub(crate) fn generate(output_directory: &Path) {
             .args([
                 HAL_HEADER,
                 "--allowlist-function",
-                "(hal_(init|exit|ready|malloc|pin_(bit|float|s32|u32)_new|param_(float|u32)_new|export_funct)|rtapi_print_msg)",
+                "(hal_(init|exit|ready|malloc|pin_(bit|float|s32|u32)_new|param_(float|u32)_new|param_(bit|float)_set|export_funct|stream_.*)|rtapi_print_msg)",
                 "--allowlist-type",
                 "(hal_(bit|float|s32|u32|pin_dir|param_dir)_t|msg_level_t)",
                 "--allowlist-var",

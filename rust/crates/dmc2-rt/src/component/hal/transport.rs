@@ -415,7 +415,7 @@ fn commit_task_snapshot(
     }
 }
 
-unsafe fn refresh_task_snapshot(pins: &Pins, cached: &mut CachedTaskSnapshot) {
+pub(super) unsafe fn refresh_task_snapshot(pins: &Pins, cached: &mut CachedTaskSnapshot) {
     let first = unsafe { generation(pins.task_snapshot_generation) };
     if first & 1 != 0 {
         return;
@@ -460,6 +460,7 @@ pub(in crate::component) unsafe fn runtime_inputs(
     let pendant = unsafe { read_pendant(pins) };
     unsafe { refresh_task_snapshot(pins, &mut state.task) };
     RuntimeInputs {
+        clear_fault_request: unsafe { read(pins.clear_fault_request) },
         servo_thread_ready: unsafe { read(pins.servo_thread_ready) },
         mesa_watchdog_has_bit: unsafe { read(pins.mesa_watchdog_has_bit) },
         mesa_io_error: unsafe { read(pins.mesa_packet_error_exceeded) },
@@ -536,7 +537,7 @@ pub(in crate::component) unsafe fn publish(
         write(pins.position_known, outputs.position_known);
         write(pins.position_unknown, !outputs.position_known);
         write(pins.control_ready, supervisor.control_ready);
-        write(pins.fault_reset_allowed, outputs.fault_reset_allowed);
+        write(pins.clear_fault_ack, outputs.clear_fault_ack);
         write(
             pins.pendant_fault_reset_request,
             outputs.pendant_fault_reset_request,
@@ -649,7 +650,8 @@ pub(in crate::component) unsafe fn publish_initial_safe(pins: &Pins) {
         write(pins.position_known, false);
         write(pins.position_unknown, true);
         write(pins.control_ready, false);
-        write(pins.fault_reset_allowed, false);
+        write(pins.clear_fault_request, 0);
+        write(pins.clear_fault_ack, 0);
         write(pins.pendant_fault_reset_request, 0);
         write(pins.pendant_fault_reset_ack, 0);
         write(pins.fault_snapshot_generation, 0);
@@ -690,4 +692,8 @@ pub(in crate::component) unsafe fn publish_initial_safe(pins: &Pins) {
             );
         }
     }
+}
+
+pub(in crate::component) unsafe fn manual_probe_contact(pins: &Pins) -> bool {
+    unsafe { read(pins.manual_probe_contact) }
 }

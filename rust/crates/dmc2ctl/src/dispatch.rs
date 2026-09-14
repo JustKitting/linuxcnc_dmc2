@@ -9,7 +9,7 @@ use crate::native::{ControlBackend, MachineState, NativeError, Receipt, Status, 
 use crate::script::{ScriptContract, ScriptError};
 use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
-const STATUS_POLL_PERIOD: Duration = Duration::from_millis(20);
+pub(crate) const STATUS_POLL_PERIOD: Duration = Duration::from_millis(20);
 
 #[derive(Clone, Copy)]
 enum ProgramSource<'a> {
@@ -88,6 +88,9 @@ pub fn execute_control(
     backend: &mut impl ControlBackend,
     physical_estop_pressed: Option<bool>,
 ) -> Result<Receipt, DispatchError> {
+    if operation.driver == "dmc2.clear-fault" && operation.target == "mesa-and-estop-reset" {
+        return crate::fault_clear::execute(backend).map_err(DispatchError::FaultClear);
+    }
     require_kind(operation, OperationKind::Control)?;
     let status = backend.status()?;
     check_prerequisites(operation, &status, physical_estop_pressed)?;
@@ -361,6 +364,7 @@ fn check_prerequisite_values(
 
 #[derive(Debug)]
 pub enum DispatchError {
+    FaultClear(crate::fault_clear::FaultClearError),
     Script(ScriptError),
     Native(NativeError),
     WrongKind {
@@ -427,6 +431,7 @@ impl From<NativeError> for DispatchError {
 impl fmt::Display for DispatchError {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::FaultClear(error) => error.fmt(formatter),
             Self::Script(error) => error.fmt(formatter),
             Self::Native(error) => error.fmt(formatter),
             Self::WrongKind {
@@ -518,6 +523,7 @@ impl fmt::Display for DispatchError {
 impl RecoveryClassified for DispatchError {
     fn recovery_class(&self) -> RecoveryClass {
         match self {
+            Self::FaultClear(error) => error.recovery_class(),
             Self::Script(error) => error.recovery_class(),
             Self::Native(error) => error.recovery_class(),
             Self::Prerequisite { prerequisite, .. } => prerequisite.recovery_class(),

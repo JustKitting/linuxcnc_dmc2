@@ -13,6 +13,8 @@ const HAL_SOURCES: &[&str] = &[
     "live/hal/mesa_status_sources.hal",
     "live/hal/status_latches.hal",
     "live/hal/status_postgui.hal",
+    "live/hal/probe_mode.hal",
+    "live/hal/tool_setter.hal",
 ];
 
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -123,6 +125,14 @@ mod tests {
     #[test]
     fn all_live_hal_sources_assign_each_pin_to_only_one_signal() {
         let sources = [
+            (
+                "live/hal/tool_setter.hal",
+                include_str!("../../../../live/hal/tool_setter.hal"),
+            ),
+            (
+                "live/hal/probe_mode.hal",
+                include_str!("../../../../live/hal/probe_mode.hal"),
+            ),
             (
                 "live/machine.hal",
                 include_str!("../../../../live/machine.hal"),

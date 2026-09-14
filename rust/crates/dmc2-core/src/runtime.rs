@@ -11,6 +11,8 @@ use crate::{Freshness, PENDANT_PACKET_TIMEOUT_NS, TASK_HEARTBEAT_TIMEOUT_NS};
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RuntimeInputs {
+    /// Explicit operator command, independent of task/transport readiness.
+    pub clear_fault_request: u32,
     pub servo_thread_ready: bool,
     pub mesa_watchdog_has_bit: bool,
     pub mesa_io_error: bool,
@@ -40,6 +42,8 @@ pub struct RuntimeInputs {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RuntimeOutputs {
+    /// Last operator request processed. This acknowledges clearing, not health.
+    pub clear_fault_ack: u32,
     /// Nonzero only while one explicit UI reset awaits the bridge's reply.
     pub pendant_fault_reset_request: u32,
     pub heartbeat: bool,
@@ -50,7 +54,6 @@ pub struct RuntimeOutputs {
     pub controller_watchdog_phase: ControllerWatchdogPhase,
     pub supervisor: SupervisorOutputs,
     pub limit_reset: [bool; 3],
-    pub fault_reset_allowed: bool,
 }
 
 #[derive(Clone, Copy, Debug, PartialEq)]
@@ -61,6 +64,7 @@ struct PendingPendantReset {
 
 #[derive(Clone, Copy, Debug, PartialEq)]
 pub struct RuntimeController {
+    clear_fault_ack: u32,
     mesa_guard: MesaStartupGuard,
     watchdog_guard: ControllerWatchdogGuard,
     heartbeat: HeartbeatGenerator,
@@ -80,8 +84,14 @@ pub struct RuntimeController {
 }
 
 impl RuntimeController {
+    /// Acknowledge LinuxCNC's already executed manual probe jog interruption.
+    pub fn observe_manual_probe_stop(&mut self) {
+        self.supervisor.observe_manual_probe_stop();
+    }
+
     pub const fn new() -> Self {
         Self {
+            clear_fault_ack: 0,
             mesa_guard: MesaStartupGuard::new(),
             watchdog_guard: ControllerWatchdogGuard::new(),
             heartbeat: HeartbeatGenerator::new(),
@@ -123,36 +133,67 @@ impl RuntimeController {
         );
     }
 
-    fn reset_environment_healthy(&self, inputs: &RuntimeInputs, transport_valid: bool) -> bool {
-        inputs.servo_thread_ready
-            && !inputs.mesa_watchdog_has_bit
-            && !inputs.mesa_io_error
-            && transport_valid
-            && !self.pendant_estop_pressed
-            && !inputs.machine.any_homing()
+    pub const fn clear_fault_ack(&self) -> u32 {
+        self.clear_fault_ack
     }
 
-    fn fault_reset_allowed(&self, inputs: &RuntimeInputs, transport_valid: bool) -> bool {
-        self.reset_environment_healthy(inputs, transport_valid)
-            && (self.supervisor.fault().is_some() || self.pendant_quadrature_fault)
-            && (!self.pendant_quadrature_fault
-                || (inputs.pendant_coherent && !inputs.pendant_sample.deadman_held))
-    }
-
-    fn clear_fault_state(&mut self) -> bool {
-        if self.supervisor.fault().is_none() {
-            return false;
-        }
+    fn clear_fault_state(&mut self) {
         if self.mesa_guard.faulted {
             self.mesa_guard = MesaStartupGuard::new();
         }
         if self.watchdog_guard.faulted {
             self.watchdog_guard = ControllerWatchdogGuard::new();
         }
-        self.supervisor.clear_latched_fault()
+        self.supervisor.clear_latched_fault();
+    }
+
+    fn request_decoder_reset(&mut self) {
+        self.pendant_reset_generation = self.pendant_reset_generation.wrapping_add(1).max(1);
+        self.pending_pendant_reset = Some(PendingPendantReset {
+            request: self.pendant_reset_generation,
+            elapsed_ns: 0,
+        });
+    }
+
+    fn outputs(&self, heartbeat: bool, position_known: bool) -> RuntimeOutputs {
+        let supervisor = self.supervisor.outputs();
+        RuntimeOutputs {
+            clear_fault_ack: self.clear_fault_ack,
+            pendant_fault_reset_request: self.pending_pendant_reset.map_or(0, |p| p.request),
+            heartbeat,
+            watchdog_enable: self.watchdog_guard.enable,
+            mesa_watchdog_clear_requested: self.mesa_guard.watchdog_clear_requested,
+            position_known,
+            mesa_phase: self.mesa_guard.phase(),
+            controller_watchdog_phase: self.watchdog_guard.phase(),
+            supervisor,
+            limit_reset: if self.mesa_guard.ready() {
+                supervisor.limit_reset
+            } else {
+                self.mesa_guard.limit_reset
+            },
+        }
     }
 
     pub fn update(&mut self, period_ns: u64, inputs: RuntimeInputs) -> RuntimeOutputs {
+        // This dispatch precedes every health check, retained fault, pending
+        // command and task snapshot decision. No state can veto a new request.
+        if inputs.clear_fault_request != self.clear_fault_ack {
+            self.clear_fault_state();
+            // An already-high canonical reset is not a later release request.
+            self.linuxcnc_estop_reset_request_held = inputs.linuxcnc_estop_reset_request;
+            self.pending_pendant_reset = None;
+            if inputs.pendant_quadrature_fault || self.pendant_quadrature_fault {
+                self.request_decoder_reset();
+            }
+            self.clear_fault_ack = inputs.clear_fault_request;
+            let heartbeat = self.heartbeat.update(period_ns);
+            return self.outputs(
+                heartbeat,
+                inputs.machine.all_homed()
+                    && self.task_freshness.is_fresh(TASK_HEARTBEAT_TIMEOUT_NS),
+            );
+        }
         let linuxcnc_estop_reset_rising =
             inputs.linuxcnc_estop_reset_request && !self.linuxcnc_estop_reset_request_held;
         self.linuxcnc_estop_reset_request_held = inputs.linuxcnc_estop_reset_request;
@@ -200,16 +241,6 @@ impl RuntimeController {
         };
         self.supervisor.observe_inputs(supervisor_inputs);
 
-        self.mesa_guard.update(
-            period_ns,
-            inputs.servo_thread_ready,
-            inputs.mesa_watchdog_has_bit,
-            inputs.mesa_io_error,
-        );
-        if self.mesa_guard.faulted {
-            self.fail_runtime(FaultCode::MesaStartupFailure);
-        }
-
         let task_valid = inputs.task_monitor_connected
             && !inputs.task_monitor_fault
             && self.task_freshness.is_fresh(TASK_HEARTBEAT_TIMEOUT_NS);
@@ -218,12 +249,10 @@ impl RuntimeController {
             && !self.pendant_serial_fault
             && self.pendant_freshness.is_fresh(PENDANT_PACKET_TIMEOUT_NS);
         let pendant_valid = pendant_transport_valid && self.pendant_link_valid;
-        let fault_reset_allowed = self.fault_reset_allowed(&inputs, pendant_transport_valid);
         let mut pendant_reset_acknowledged = false;
         if let Some(mut pending) = self.pending_pendant_reset {
             pending.elapsed_ns = pending.elapsed_ns.saturating_add(period_ns);
-            if !self.reset_environment_healthy(&inputs, pendant_transport_valid)
-                || pending.elapsed_ns >= PENDANT_PACKET_TIMEOUT_NS
+            if pending.elapsed_ns >= PENDANT_PACKET_TIMEOUT_NS
                 || (inputs.pendant_coherent && inputs.pendant_sample.deadman_held)
             {
                 self.pending_pendant_reset = None;
@@ -234,36 +263,32 @@ impl RuntimeController {
                 self.pending_pendant_reset = Some(pending);
             }
         }
-        if linuxcnc_estop_reset_rising && fault_reset_allowed && self.pendant_quadrature_fault {
-            self.pendant_reset_generation = self.pendant_reset_generation.wrapping_add(1).max(1);
-            self.pending_pendant_reset = Some(PendingPendantReset {
-                request: self.pendant_reset_generation,
-                elapsed_ns: 0,
-            });
+        // Preserve stock AXIS E-stop reset and the existing bridge handshake.
+        // Internal cold-start reset echoes are not new operator clear commands.
+        let retained_fault_reset = linuxcnc_estop_reset_rising && self.supervisor.fault().is_some();
+        if retained_fault_reset && self.pendant_quadrature_fault {
+            self.request_decoder_reset();
         }
-        if pendant_reset_acknowledged
-            || (linuxcnc_estop_reset_rising
-                && fault_reset_allowed
-                && pendant_valid
-                && self.supervisor.fault().is_some())
-        {
-            self.pending_pendant_reset = None;
+        if pendant_reset_acknowledged || retained_fault_reset {
             self.clear_fault_state();
-            self.supervisor
-                .begin_linuxcnc_estop_reset(&supervisor_inputs);
-            let supervisor = self.supervisor.outputs();
-            return RuntimeOutputs {
-                pendant_fault_reset_request: 0,
-                heartbeat,
-                watchdog_enable: self.watchdog_guard.enable,
-                mesa_watchdog_clear_requested: self.mesa_guard.watchdog_clear_requested,
-                position_known: inputs.machine.all_homed() && task_valid,
-                mesa_phase: self.mesa_guard.phase(),
-                controller_watchdog_phase: self.watchdog_guard.phase(),
-                supervisor,
-                limit_reset: supervisor.limit_reset,
-                fault_reset_allowed: false,
-            };
+            if !self.pendant_estop_pressed && self.pending_pendant_reset.is_none() {
+                self.supervisor
+                    .begin_linuxcnc_estop_reset(&supervisor_inputs);
+            }
+            return self.outputs(heartbeat, inputs.machine.all_homed() && task_valid);
+        }
+        if self.pendant_quadrature_fault && self.pending_pendant_reset.is_none() {
+            self.fail_runtime(FaultCode::QuadratureFailure);
+        }
+
+        self.mesa_guard.update(
+            period_ns,
+            inputs.servo_thread_ready,
+            inputs.mesa_watchdog_has_bit,
+            inputs.mesa_io_error,
+        );
+        if self.mesa_guard.faulted {
+            self.fail_runtime(FaultCode::MesaStartupFailure);
         }
         let prerequisites =
             self.mesa_guard.ready() && inputs.ui_ready && task_valid && pendant_valid;
@@ -335,26 +360,7 @@ impl RuntimeController {
             }
         }
 
-        let supervisor = self.supervisor.outputs();
-        let limit_reset = if self.mesa_guard.ready() {
-            supervisor.limit_reset
-        } else {
-            self.mesa_guard.limit_reset
-        };
-        RuntimeOutputs {
-            pendant_fault_reset_request: self
-                .pending_pendant_reset
-                .map_or(0, |pending| pending.request),
-            heartbeat,
-            watchdog_enable: self.watchdog_guard.enable,
-            mesa_watchdog_clear_requested: self.mesa_guard.watchdog_clear_requested,
-            position_known: inputs.machine.all_homed() && task_valid,
-            mesa_phase: self.mesa_guard.phase(),
-            controller_watchdog_phase: self.watchdog_guard.phase(),
-            supervisor,
-            limit_reset,
-            fault_reset_allowed: self.fault_reset_allowed(&inputs, pendant_transport_valid),
-        }
+        self.outputs(heartbeat, inputs.machine.all_homed() && task_valid)
     }
 }
 
@@ -374,6 +380,7 @@ mod tests {
 
     pub(super) fn inputs(sequence: u32, task_heartbeat: u32) -> RuntimeInputs {
         RuntimeInputs {
+            clear_fault_request: 0,
             servo_thread_ready: true,
             mesa_watchdog_has_bit: false,
             mesa_io_error: false,

@@ -1,0 +1,50 @@
+{
+  "version": 1,
+  "scripts": [
+    {
+      "key": "tool-setter",
+      "operation": "program.tool-setter-manual",
+      "description": "Position the tool above the setter. Searches downward at 800 mm/min, backs off until released at 50 mm/min, then re-touches at 50 mm/min. Saves both contacts and stops after the slow touch. Z only; travel starts at the position when Run is pressed.",
+      "parameters": [
+        {"pin": "tool-setter-search-mm", "label": "Max downward travel", "kind": "positive-mm", "default": "25", "increment": "1"}
+      ]
+    },
+    {
+      "key": "block",
+      "operation": "program.measure-gauge-block",
+      "requires_beginning": true,
+      "description": "Start clear above the block. Discovers its rotated footprint on a 1 mm grid, then double-touches the same side stations on three circuits 1 mm apart. Unexpected outside-edge Z contact retracts above the measured top and cancels. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
+      "parameters": [
+        {"pin": "block-search-mm", "label": "Initial top search travel", "kind": "positive-mm", "default": "25", "increment": "1"},
+        {"pin": "block-clearance-mm", "label": "Clearance above measured top", "kind": "positive-mm", "default": "2", "increment": "1"},
+        {"pin": "block-drop-mm", "label": "Grid dip below first top", "kind": "positive-mm", "default": "1", "increment": "1"},
+        {"pin": "block-side-depth-mm", "label": "First side ball-centre depth", "kind": "positive-mm", "default": "1", "increment": "1"}
+      ]
+    },
+    {
+      "key": "circle",
+      "operation": "program.find-circle-center",
+      "description": "Start clear inside the hole at probing height. XY only. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
+      "parameters": [
+        {"pin": "circle-search-mm", "label": "Max travel / direction", "kind": "positive-mm", "default": "25", "increment": "1"}
+      ]
+    },
+    {
+      "key": "surface",
+      "operation": "program.map-top-surface",
+      "description": "Offsets start at the current XY. X positive: physical LEFT / LinuxCNC +X; X negative: physical RIGHT / LinuxCNC -X. Enter the mounted probe clearance before running.",
+      "parameters": [
+        {"pin": "surface-x-min-mm", "label": "X start offset", "kind": "signed-mm", "default": "0", "increment": "1"},
+        {"pin": "surface-x-max-mm", "label": "X end offset", "kind": "signed-mm", "default": "0", "increment": "1"},
+        {"pin": "surface-y-min-mm", "label": "Y start offset", "kind": "signed-mm", "default": "0", "increment": "1"},
+        {"pin": "surface-y-max-mm", "label": "Y end offset", "kind": "signed-mm", "default": "0", "increment": "1"},
+        {"pin": "surface-spacing-mm", "label": "Grid spacing", "kind": "positive-mm", "default": "0", "increment": "1"},
+        {"pin": "surface-usable-reach-mm", "label": "Mounted usable reach", "kind": "positive-mm", "default": "0", "increment": "1"},
+        {"pin": "surface-max-drop-mm", "label": "Maximum drop", "kind": "positive-mm", "default": "3", "increment": "1"},
+        {"pin": "surface-reference-search-mm", "label": "Reference search travel", "kind": "positive-mm", "default": "3", "increment": "1"},
+        {"pin": "surface-clearance-mm", "label": "Travel clearance", "kind": "positive-mm", "default": "2", "increment": "1"},
+        {"pin": "surface-reach-reserve-mm", "label": "Probe reach reserve", "kind": "positive-mm", "default": "2", "increment": "1"}
+      ]
+    }
+  ]
+}

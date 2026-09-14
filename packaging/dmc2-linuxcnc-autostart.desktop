@@ -1,0 +1,14 @@
+[Desktop Entry]
+Version=1.0
+Type=Application
+Name=DMC2 LinuxCNC Boot Start
+Comment=Start DMC2 LinuxCNC after the operator desktop session begins
+Exec=/home/kit/linuxcnc_dmc2/native/bin/dmc2-linuxcnc --live --persistent --boot-retry-mesa-registration-once
+TryExec=/home/kit/linuxcnc_dmc2/native/bin/dmc2-linuxcnc
+Path=/home/kit/linuxcnc_dmc2
+Icon=linuxcncicon
+Terminal=false
+StartupNotify=false
+OnlyShowIn=XFCE;
+NoDisplay=true
+X-GNOME-Autostart-enabled=true

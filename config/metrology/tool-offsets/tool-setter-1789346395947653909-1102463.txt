@@ -1,0 +1,52 @@
+DMC2_TOOL_SETTER_LEDGER_V1
+units=mm,mm/min
+source=LinuxCNC G38 trigger parameters; serialized decimal precision=9
+stage=0:coarse-location,1:fine-measurement
+X_positive=physical LEFT / LinuxCNC +X
+X_negative=physical RIGHT / LinuxCNC -X
+BEGIN 0
+DMC2_TOOL_SETTER_RECORD_V1
+sequence=0
+kind=touch
+stage=0
+axis=2
+direction=-1
+success=1
+work_x=275.775986481
+work_y=135.496050232
+work_z=85.312018280
+machine_x=275.775986481
+machine_y=135.496050232
+machine_z=85.312018280
+feed=800.000000000
+exact_source=emcStatus.motion.traj.probedPosition;machine-mm
+machine_x_exact=275.7759864807129
+machine_x_f64_bits=40713c6a70cccccd
+machine_y_exact=135.4960502319336
+machine_y_f64_bits=4060efdfa4bc6a7f
+machine_z_exact=85.31201828002929
+machine_z_f64_bits=405553f81b851eb8
+END 0
+BEGIN 1
+DMC2_TOOL_SETTER_RECORD_V1
+sequence=1
+kind=touch
+stage=1
+axis=2
+direction=-1
+success=1
+work_x=275.775986481
+work_y=135.496050232
+work_z=85.321167480
+machine_x=275.775986481
+machine_y=135.496050232
+machine_z=85.321167480
+feed=50.000000000
+exact_source=emcStatus.motion.traj.probedPosition;machine-mm
+machine_x_exact=275.7759864807129
+machine_x_f64_bits=40713c6a70cccccd
+machine_y_exact=135.4960502319336
+machine_y_f64_bits=4060efdfa4bc6a7f
+machine_z_exact=85.32116748046874
+machine_z_f64_bits=4055548e020c49ba
+END 1

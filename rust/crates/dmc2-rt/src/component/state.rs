@@ -13,7 +13,7 @@ pub(super) struct CachedTaskSnapshot {
 }
 
 impl CachedTaskSnapshot {
-    const fn safe() -> Self {
+    pub(in crate::component) const fn safe() -> Self {
         Self {
             connected: false,
             fault: true,

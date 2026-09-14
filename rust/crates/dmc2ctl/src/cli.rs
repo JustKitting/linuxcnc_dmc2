@@ -6,13 +6,14 @@ use std::path::PathBuf;
 use crate::catalog::default_catalog_path;
 use dmc2_diagnostics::{RecoveryClass, RecoveryClassified};
 
-pub const USAGE: &str = "Usage: dmc2ctl [--catalog PATH] [--nml-file PATH] <list|describe ID|status|execute ID|load ID|run ID|inspect-file PATH|load-file PATH|execute-file PATH>";
+pub const USAGE: &str = "Usage: dmc2ctl [--catalog PATH] [--nml-file PATH] <list|describe ID|status|clear-fault|execute ID|load ID|run ID|inspect-file PATH|load-file PATH|execute-file PATH>\n       dmc2ctl object-map --help";
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub enum Action {
     List,
     Describe(String),
     Status,
+    ClearFault,
     Execute(String),
     Load(String),
     Run(String),
@@ -73,14 +74,20 @@ fn parse(
     let action = match command {
         "list" if remaining.is_empty() => Action::List,
         "status" if remaining.is_empty() => Action::Status,
+        "clear-fault" if remaining.is_empty() => Action::ClearFault,
         "describe" => Action::Describe(single_id(command, remaining)?),
-        "execute" => Action::Execute(single_id(command, remaining)?),
+        "execute" => match single_id(command, remaining)?.as_str() {
+            "controller.clear-fault" => Action::ClearFault,
+            id => Action::Execute(id.to_owned()),
+        },
         "load" => Action::Load(single_id(command, remaining)?),
         "run" => Action::Run(single_id(command, remaining)?),
         "inspect-file" => Action::InspectFile(single_path(command, remaining)?),
         "load-file" => Action::LoadFile(single_path(command, remaining)?),
         "execute-file" => Action::ExecuteFile(single_path(command, remaining)?),
-        "list" | "status" => return Err(CliError::UnexpectedArguments(command.to_owned())),
+        "list" | "status" | "clear-fault" => {
+            return Err(CliError::UnexpectedArguments(command.to_owned()))
+        }
         _ => return Err(CliError::UnknownCommand(command.to_owned())),
     };
     Ok(Some(Arguments {

@@ -1,0 +1,35 @@
+%
+(DMC2 SCRIPT 1)
+(DMC2 EFFECTS axis-motion)
+(DMC2 REQUIRES running-session;estop-clear;machine-on;interpreter-idle;all-homed)
+(DMC2 RECOVERY abort-task)
+(DMC2 END)
+
+(GO TO SAFE POSITION NEAR MACHINE HOME - NO CALIBRATION, SPINDLE, OR COOLANT COMMANDS)
+(Requires all configured axes already homed.)
+(Uses machine coordinates so work offsets cannot change the destination.)
+(Stops 1 mm inside each positive software limit to avoid the home switches.)
+(Target speed: 30 mm/s = 1800 mm/min.)
+
+#<safe_home_x> = 299.000
+#<safe_home_y> = 172.000
+#<safe_home_z> = 134.000
+#<feed_mm_min> = 1800.000
+
+G21 G90 G94
+G17 G40 G49 G80
+(Exact stop: finish the Z segment before any X/Y segment starts, even after G64.)
+G61.1
+
+(First move Z to machine Z134 and stop.)
+(From below: physical UP / LinuxCNC +Z. From above: physical DOWN / LinuxCNC -Z.)
+G53 G1 Z#<safe_home_z> F#<feed_mm_min>
+
+(Only after Z finishes: return X/Y to machine X299/Y172.)
+(X below X299: physical LEFT / LinuxCNC +X; above X299: physical RIGHT / LinuxCNC -X.)
+(Y below Y172: LinuxCNC +Y; above Y172: LinuxCNC -Y.)
+G53 G1 X#<safe_home_x> Y#<safe_home_y> F#<feed_mm_min>
+
+(DEBUG,DMC2 GO TO HOME ENDED: commanded Z134, then X299/Y172 at 30 mm/s; all targets are 1 mm inside the positive limits.)
+M2
+%

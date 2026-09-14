@@ -12,7 +12,7 @@ use crate::platform::{CommandSpec, Platform, ProcessOutput};
 pub const EXPECTED_LINUXCNC_VERSION: &[u8] = b"2.9.10\n";
 
 pub const PASSES: &[&str] = &[
-    "all live launch inputs byte-match this compiled launcher",
+    "executable integration inputs match this build; runtime data is validated by its consuming operation",
     "all realtime modules, system libraries, and userspace binaries byte-match release artifacts",
     "LinuxCNC 2.9.10 is installed",
 ];

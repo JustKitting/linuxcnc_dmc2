@@ -1,0 +1,121 @@
+%
+(DMC2 SCRIPT 1)
+(DMC2 EFFECTS axis-motion;digital-output;coordinate-state;external-command)
+(DMC2 REQUIRES running-session;estop-clear;machine-on;interpreter-idle;all-homed)
+(DMC2 RECOVERY abort-task)
+(DMC2 END)
+(MANUAL BTER TOOL SETTER - CURRENT POSITION, 800 / 50 mm/min)
+(Start where the operator positioned the tool. Only Z is commanded.)
+(Physical DOWN / LinuxCNC -Z; backoff physical UP / LinuxCNC +Z.)
+(Fast contact, back off until released, slow contact, save and stop.)
+(No automatic tool-table or work-offset adjustment.)
+(Each original trigger is saved and read back through the existing Rust M190.)
+(Results: tmp/output/tool-setter/)
+(Custom Scripts: select Tool setter, set Max downward travel, then Run.)
+
+o<mts_preview> if [#<_task> EQ 0]
+    (PREVIEW,stop)
+    M2
+o<mts_preview> endif
+
+(Default 25 mm; snapshot the operator's travel field at Run.)
+(800 / 50 mm/min and release-until-clear duplicate the hole probe.)
+o<mts_parameters> if [#<_hal[axisui.tool-setter-parameters-valid]> NE 1]
+    (ABORT,Tool setter travel is invalid. Correct Max downward travel in Custom Scripts before Run; Pendant Mode remains available.)
+o<mts_parameters> endif
+#<search_mm> = #<_hal[axisui.tool-setter-search-mm]>
+o<mts_travel> if [#<search_mm> LE 0]
+    (ABORT,Max downward travel must be positive. Correct it in Custom Scripts before Run; Pendant Mode remains available.)
+o<mts_travel> endif
+#<search_feed> = 800
+#<touch_feed> = 50
+
+o<dmc2_tool_setter_ready> call
+o<mts_homed> if [#<_hal[motion.is-all-homed]> NE 1]
+    (ABORT,Machine position is not homed. Use Home All before Run; Pendant Mode remains available.)
+o<mts_homed> endif
+o<mts_rotation> if [#[5230 + [#5220 - 1] * 20] NE 0]
+    (ABORT,Trigger capture needs an unrotated work frame. Abort then Pendant Mode; select an unrotated frame before Run.)
+o<mts_rotation> endif
+
+(Save the stopped modal state; cancel compensation only during this measurement.)
+M70
+G21 G90 G94 G17 G40 G49 G80 G61.1
+M66 P5 L0
+#<start_z> = #<_z>
+#<target_z> = [#<start_z> - #<search_mm>]
+#<offset_x> = [#<_abs_x> - #<_x>]
+#<offset_y> = [#<_abs_y> - #<_y>]
+#<offset_z> = [#<_abs_z> - #<_z>]
+o<mts_lower_bound> if [[#<target_z> + #<offset_z>] LT #<_ini[axis_z]min_limit>]
+    (ABORT,The requested downward search exceeds the Z lower travel limit. Abort then Pendant Mode to reposition before Run. No descent was issued.)
+o<mts_lower_bound> endif
+o<mts_upper_bound> if [#<_abs_z> GT #<_ini[axis_z]max_limit>]
+    (ABORT,Starting Z is above the normal travel limit. Abort then Pendant Mode to reposition before Run. No descent was issued.)
+o<mts_upper_bound> endif
+
+(Create a unique ledger. No prior measurements are overwritten.)
+M190 P7 Q0
+M66 P5 L0
+#<stage> = 0
+o<mts_stages> repeat [2]
+    o<mts_feed> if [#<stage> EQ 0]
+        #<feed> = #<search_feed>
+    o<mts_feed> else
+        #<feed> = #<touch_feed>
+    o<mts_feed> endif
+    o<dmc2_tool_setter_ready> call
+
+    (Physical DOWN / LinuxCNC -Z; the same original search floor on both touches.)
+    G38.3 Z#<target_z> F#<feed>
+    o<mts_no_contact> if [#5070 NE 1]
+        (ABORT,CAPTURE FAILED - KEEP THE SETUP IN PLACE. No tool-setter contact within the selected downward search. Abort then Pendant Mode.)
+    o<mts_no_contact> endif
+
+    (Retain contact before a release probe can replace the G38 trigger.)
+    #<work_x> = #5061
+    #<work_y> = #5062
+    #<work_z> = #5063
+    #<machine_x> = [#<work_x> + #<offset_x>]
+    #<machine_y> = [#<work_y> + #<offset_y>]
+    #<machine_z> = [#<work_z> + #<offset_z>]
+    (LOGOPEN,../tmp/output/tool-setter-request.txt)
+    (LOG,DMC2_TOOL_SETTER_RECORD_V1)
+    (LOG,sequence=%d#<stage>)
+    (LOG,kind=touch)
+    (LOG,stage=%d#<stage>)
+    (LOG,axis=2)
+    (LOG,direction=-1)
+    (LOG,success=%d#5070)
+    (LOG,work_x=%.9f#<work_x>)
+    (LOG,work_y=%.9f#<work_y>)
+    (LOG,work_z=%.9f#<work_z>)
+    (LOG,machine_x=%.9f#<machine_x>)
+    (LOG,machine_y=%.9f#<machine_y>)
+    (LOG,machine_z=%.9f#<machine_z>)
+    (LOG,feed=%.9f#<feed>)
+    (LOGCLOSE)
+    M190 P8 Q#<stage>
+    M66 P5 L0
+
+    o<mts_first_touch> if [#<stage> EQ 0]
+        #<first_z> = #<machine_z>
+        (Only after durable readback, release upward toward the original start.)
+        o<mts_needs_release> if [#<_hal[motion.probe-input]> NE 0]
+            (Physical UP / LinuxCNC +Z at 50 mm/min; stop as the setter releases.)
+            G38.5 Z#<start_z> F#<touch_feed>
+            o<mts_release_failed> if [#5070 NE 1]
+                (ABORT,Tool setter did not release while backing toward the starting Z. First contact is saved. Abort then Pendant Mode.)
+            o<mts_release_failed> endif
+        o<mts_needs_release> endif
+    o<mts_first_touch> endif
+    #<stage> = [#<stage> + 1]
+o<mts_stages> endrepeat
+
+#<difference> = ABS[#<machine_z> - #<first_z>]
+(DEBUG,Tool setter slow trigger machine XYZ mm: %.9f#<machine_x>,#<machine_y>,#<machine_z>)
+(DEBUG,Fast trigger Z %.9f#<first_z> mm; fast-to-slow difference %.9f#<difference> mm.)
+(MSG,Both tool-setter contacts saved and read back in tmp/output/tool-setter. Stopped after the slow touch; Pendant Mode is available.)
+M72
+M2
+%

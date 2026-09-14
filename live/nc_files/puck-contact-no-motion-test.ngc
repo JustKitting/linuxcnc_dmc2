@@ -1,61 +1,29 @@
 %
-(DMC2 PUCK CONTACT TEST - NO MOTION)
-(Start with the installed cutter and puck physically separated.)
-(Start with the spindle stopped.)
-(The cutter marking and puck thickness are not used by this electrical test.)
-
+(DMC2 SCRIPT 1)
+(DMC2 EFFECTS digital-output)
+(DMC2 REQUIRES running-session;estop-clear;machine-on;interpreter-idle)
+(DMC2 RECOVERY abort-task)
+(DMC2 END)
+(BTER TOOL SETTER - CONTACT CHECK; legacy filename retained for compatibility.)
+(No axis or spindle command. The passive NC circuits use fixed commons.)
+(No clip, OUT5 switching, tool-length calculation or offset changes.)
+o<ts_contact_preview> if [#<_task> EQ 0]
+    (PREVIEW,stop)
+    M2
+o<ts_contact_preview> endif
 #<contact_timeout_seconds> = 300.0
-
-(Clear any previous LinuxCNC probe-power request.)
-M65 P0
-M66 P1 L4 Q1.0
-o<dmc2_puck_initial_power_off_check> if [#5399 LT 0]
-    (DEBUG,DMC2 PUCK TEST FAILED: LinuxCNC did not report the OUT5 gate off at startup)
-    M2
-o<dmc2_puck_initial_power_off_check> endif
-M66 P0 L0
-o<dmc2_puck_off_check> if [#5399 NE 0]
-    (DEBUG,DMC2 PUCK TEST FAILED: IN0 is active while OUT5 is off)
-    M2
-o<dmc2_puck_off_check> endif
-
-M64 P0
-M66 P1 L3 Q1.0
-o<dmc2_puck_power_on_check> if [#5399 LT 0]
-    M65 P0
-    (DEBUG,DMC2 PUCK TEST FAILED: LinuxCNC did not report the OUT5 gate on)
-    M2
-o<dmc2_puck_power_on_check> endif
-M66 P0 L0
-o<dmc2_puck_open_check> if [#5399 NE 0]
-    M65 P0
-    (DEBUG,DMC2 PUCK TEST FAILED: IN0 was already active immediately after OUT5 turned on)
-    M2
-o<dmc2_puck_open_check> endif
-
-(MSG,DMC2 PUCK TEST: OUT5 ON - touch the installed cutter to the puck and hold)
-(Wait for the real IN0 contact transition. No axis command is issued.)
+o<dmc2_tool_setter_ready> call
+(MSG,Tool setter contact check: press the setter pad, then release it. Abort and Pendant Mode remain available.)
 M66 P0 L1 Q#<contact_timeout_seconds>
-#<contact_result> = #5399
-M65 P0
-
-o<dmc2_puck_timeout_check> if [#<contact_result> LT 0]
-    (DEBUG,DMC2 PUCK TEST FAILED: no IN0 contact was detected within 300 seconds)
-    M2
-o<dmc2_puck_timeout_check> endif
-
-(Verify the gate turns off and the input drops after power is removed.)
-M66 P1 L4 Q1.0
-o<dmc2_puck_final_power_off_check> if [#5399 LT 0]
-    (DEBUG,DMC2 PUCK TEST FAILED: LinuxCNC did not report the OUT5 gate off)
-    M2
-o<dmc2_puck_final_power_off_check> endif
-M66 P0 L4 Q1.0
-o<dmc2_puck_input_clear_check> if [#5399 LT 0]
-    (DEBUG,DMC2 PUCK TEST FAILED: IN0 remained active after OUT5 turned off)
-    M2
-o<dmc2_puck_input_clear_check> endif
-
-(DEBUG,DMC2 PUCK TEST PASSED: LinuxCNC detected IN0 and removed OUT5 power)
+o<ts_contact_timeout> if [#5399 LT 0]
+    (ABORT,No setter contact arrived within the contact-check timeout. Use Abort then Pendant Mode; check the TOOL SETTER CONTACT indication before a new Run.)
+o<ts_contact_timeout> endif
+(DEBUG,Tool setter IN0 contact was reported. Waiting for the pad to be released.)
+M66 P0 L4 Q#<contact_timeout_seconds>
+o<ts_release_timeout> if [#5399 LT 0]
+    (ABORT,The setter contact remains open. Release the pad or correct the contact circuit, then use Clear Fault and Pendant Mode before a new Run.)
+o<ts_release_timeout> endif
+o<dmc2_tool_setter_ready> call
+(DEBUG,Tool setter check recorded an IN0 contact and release; the overtravel circuit is closed.)
 M2
 %

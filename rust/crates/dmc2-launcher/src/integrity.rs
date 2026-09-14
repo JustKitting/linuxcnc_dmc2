@@ -80,6 +80,12 @@ pub fn userspace_deployments(layout: &Layout) -> Vec<(PathBuf, PathBuf)> {
             layout.project.join("native/bin/dmc2ctl"),
             layout.project.join("rust/target/release/dmc2ctl"),
         ),
+        (
+            layout.project.join("native/bin/dmc2-probe-capture"),
+            layout
+                .project
+                .join("rust/target/release/dmc2-probe-capture"),
+        ),
     ]
 }
 
