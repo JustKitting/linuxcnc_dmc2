@@ -171,6 +171,11 @@ def user_hal_pins():
         "install_axis_probe_mode",
         _AxisUiFaultKind.PROBE_MODE_UI_INSTALL_FAILED,
     )
+    _install_extension(
+        ".object_mapper",
+        "install_axis_object_mapper",
+        _AxisUiFaultKind.OBJECT_MAPPER_INSTALL_FAILED,
+    )
 
 
 if _recovery_bootstrap_ready:

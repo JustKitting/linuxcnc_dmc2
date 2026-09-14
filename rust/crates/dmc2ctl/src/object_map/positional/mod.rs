@@ -1,10 +1,9 @@
 //! Offline positional mapper, reached through the standard dmc2ctl object-map path.
-pub(super) mod cli;
 mod fit;
 mod geometry;
 mod mesh;
 mod report;
-mod request;
+pub(super) mod request;
 #[cfg(test)]
 mod tests;
 use super::{
@@ -59,12 +58,8 @@ pub fn prepare(store: &Store, object: &Id, setup: &Id, design: &Id) -> Result<St
             }
         }
     }
-    String::from_utf8(record::encode(
-        "DMC2_POSITIONAL_REQUEST_V1",
-        &fields,
-        rows.as_bytes(),
-    )?)
-    .map_err(|e| Error::Data(e.to_string()))
+    String::from_utf8(record::encode(request::SCHEMA, &fields, rows.as_bytes())?)
+        .map_err(|e| Error::Data(e.to_string()))
 }
 fn folder(store: &Store, object: &Id, setup: &Id, id: &Id) -> Result<PathBuf, Error> {
     store.setup_label(object, setup)?;
@@ -282,6 +277,15 @@ pub fn locate(
         ids.len(),
         quote(&output.display().to_string())
     ))
+}
+pub fn show(store: &Store, object: &Id, setup: &Id, id: &Id) -> Result<String, Error> {
+    let dir = folder(store, object, setup, id)?;
+    let text = |name: &str| -> Result<String, Error> {
+        String::from_utf8(read(&dir.join(name))?)
+            .map_err(|e| Error::Data(format!("Analysis {name} is not UTF-8: {e}.")))
+    };
+    let manifest = text("manifest.json")?;
+    Ok(format!("{{\"schema\":\"dmc2.analysis-inspection.v1\",\"analysis_directory\":{},\"manifest_text\":{},\"residuals_csv\":{},\"request_text\":{},\"cam_ready\":false}}",quote(&dir.display().to_string()),quote(&manifest),quote(&text("residuals.csv")?),quote(&text("request.txt")?)))
 }
 pub fn export(
     store: &Store,

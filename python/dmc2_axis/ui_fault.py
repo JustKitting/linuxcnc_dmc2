@@ -31,6 +31,12 @@ class AxisUiFaultContract:
 class AxisUiFaultKind(Enum):
     """Every AXIS-local exception that may cross an operator boundary."""
 
+    OBJECT_MAPPER_INSTALL_FAILED = AxisUiFaultContract(
+        "OBJECT_MAPPER_INSTALL_FAILED",
+        RecoveryClassCode.RELAUNCH_APPLICATION,
+        "correct the named Object Mapper installation cause and relaunch DMC2; Abort, Clear Fault and Pendant Mode remain independent",
+    )
+
     CUSTOM_SCRIPTS_INSTALL_FAILED = AxisUiFaultContract(
         "CUSTOM_SCRIPTS_INSTALL_FAILED",
         RecoveryClassCode.RELAUNCH_APPLICATION,

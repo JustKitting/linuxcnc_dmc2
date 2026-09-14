@@ -222,10 +222,43 @@ sequence will be prepared separately after the actual part and geometry are
 known. The research document lists the inputs needed before generating later
 cutting operations or a printer-specific continuation.
 
-No new AXIS pane is added here. The current pendant scripts remain the
-acquisition interface. These Rust file commands are the analysis interface and
-can later be called by a dedicated UI without moving fitting work into the
-motion-control path.
+The AXIS startup integration now registers an **Object Mapper** tab beside
+Pendant and Custom Scripts. **Open object mapper** opens a nonmodal window;
+its forms come from the installed Rust binary's `object-map catalog` response.
+The same typed operation definitions validate CLI argument counts and provide
+UI labels and field kinds. Existing pendant scripts remain the acquisition
+interface. The mapper window owns file analysis, not machine state.
+
+The normal UI sequence is List/Create object, Show object, Add setup, Attach
+design, Import capture, Prepare fit request, Save request as, Calculate placement,
+and Inspect analysis. Existing object/setup/design/analysis IDs appear in the
+field selectors after their records have been read. Browse opens a nonmodal
+path chooser with directory navigation and an exact-path entry. The form values
+remain editable when correcting an input error.
+
+Prepare fit request and Open fit request create editable drafts in the result
+selector. Saving uses a new path and preserves conflicting existing content;
+an identical save is idempotent. Earlier drafts remain in the selector when a
+new result arrives. Inspect analysis presents separate report, residual-row and
+retained-request views. Export analysis and Map named locations use the same
+file contracts documented above. No numerical fit or calibration default is
+invented by the UI.
+
+The standard Rust child runs outside the Tk callback. Cancel analysis targets
+only that owned offline child; it does not abort or clear the CNC. An interrupted
+publication may retain partial files. Retry unfinished object/setup creation
+with the same ID and label; use a new analysis ID or export path after inspecting
+partial results. File errors clear on a subsequent successful operation. The
+mapper and its path chooser expose the existing Clear Fault and Pendant Mode
+actions without analysis-state prerequisites or modal grabs. Hide retains the
+window's drafts/results and does not issue a machine command.
+
+At this checkpoint the Rust binary is built and installed, and the AXIS entry
+point includes the new pane. The existing CNC session has **not** been restarted
+to load it. Disposable widget checks and the offline example reported no
+remaining failures; these do not establish live CNC behavior or physical
+acceptance. The code and file checks are retained in
+`/home/kit/cnc-backups/mapper-ui-e7tu4teh`.
 
 ## Recorded TODOs — 2026-09-14
 
@@ -308,8 +341,12 @@ machine run.
   access to object/setup selection, retained captures, model revisions, analysis
   parameters, residual inspection and named-location export. Analysis must run
   outside machine control and remain cancellable without gating Clear Fault or
-  Pendant Mode. The current implementation supplies standard Rust CLI commands
-  and exchange files; a dedicated mapper UI is not implemented.
+  Pendant Mode. The AXIS pane, catalog-driven forms, nonmodal file chooser,
+  retained request editor, analysis readback and cancellation path are now in
+  source, with the matched Rust command binary installed. The offline example,
+  conflicting-save check and disposable widget checks reported no remaining
+  failures. Activation in the running CNC session and operator observation
+  remain outstanding; no CNC restart or machine operation was issued.
 - [ ] **Implement the FreeCAD setup adapter.** Create a new manufacturing
   revision using the chosen model placement, measured/predicted stock and
   retained fixture geometry; regenerate the selected operations and export the
@@ -317,7 +354,9 @@ machine run.
   work offset. Target the actual FreeCAD release and document structure. Current
   inputs missing: the user's native part/CAM document and installed FreeCAD
   version. The present STL/ASC exchange is available; automatic Job updates are
-  not implemented.
+  not implemented. The CAD-side peer has offered STL/STEP/FCStd material for
+  `THREE_AXIS_GLUE_A`, a two-setup wood-cutting dice job. Its files and FreeCAD
+  version have not yet arrived on this host.
 - [ ] **Generate and check continuation/location programs.** Use the retained
   setup, current stock, desired geometry and tool/holder/fixture data to prepare
   the next operation, with an explicit collision/clearance model and the normal
@@ -335,3 +374,15 @@ machine run.
   reviewed subsequent operation. Exact machine sequences and fixtures must be
   known before execution. Numerical examples and builds do not satisfy this
   physical milestone. Keep failed or unmeasured stages explicitly open.
+- [ ] **Receive and prepare the dice wood-cutting job.** Preserve the CAD-side
+  `THREE_AXIS_GLUE_A` bundle with file hashes, units, original targets, OP1/OP2
+  geometry, intermediate stock, carrier assembly, transforms and stable feature
+  IDs. The durable handoff directory is
+  `/home/kit/cnc-jobs/cnc-polyhedral-dice`; revision folders belong under
+  `incoming`, and directional message folders under `coordination`. Establish
+  actual stock/material, tool and holder geometry, workholding and the
+  CAD-to-machine relationship before producing a setup-specific machining
+  proposal. The supplied dimensions, bond layer and reference cutter are CAD
+  data, not measurements of the current setup. The correspondence authorizes
+  file collaboration only, with no motion, probing, homing, energization,
+  restart or machine-control changes.

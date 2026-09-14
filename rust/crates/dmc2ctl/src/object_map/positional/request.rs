@@ -4,6 +4,7 @@ use super::{
     geometry::{Pose, V},
 };
 use std::collections::BTreeSet;
+pub const SCHEMA: &str = "DMC2_POSITIONAL_REQUEST_V1";
 pub const KEYS: &[&str] = &[
     "design",
     "model_role",
@@ -124,7 +125,7 @@ pub fn vector(s: &str, label: &str) -> Result<V, Error> {
 }
 impl Request {
     pub fn read(raw: &[u8]) -> Result<Self, Error> {
-        let (f, body) = record::decode(raw, "DMC2_POSITIONAL_REQUEST_V1", KEYS)?;
+        let (f, body) = record::decode(raw, SCHEMA, KEYS)?;
         let positive = |key: &str| -> Result<f64, Error> {
             let v = scalar(&f[key], key)?;
             if v > 0. {
