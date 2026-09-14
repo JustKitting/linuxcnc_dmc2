@@ -8,7 +8,9 @@ use super::model::{close, xyz, Mode, Phase, Request, Sample, Settings};
 enum Cycle<'a> {
     Ready,
     Coarse(&'a Fields),
+    CoarseBackedOff(&'a Fields),
     Measured,
+    MeasuredBackedOff,
     Finished,
 }
 
@@ -23,7 +25,7 @@ pub fn samples(
     if first["kind"] != "start" {
         return Err("The mapper ledger must begin with its settings.".into());
     }
-    let mut samples = Vec::new();
+    let mut samples: Vec<Sample> = Vec::new();
     let mut cycle = Cycle::Ready;
     for r in &records[1..] {
         let kind = r["kind"].as_str();
@@ -50,29 +52,55 @@ pub fn samples(
             }
         }
         match kind {
-            "recontact" | "withdrawal-release" => {
-                let expected_sample = match cycle {
-                    Cycle::Coarse(coarse) if kind == "withdrawal-release" => number(coarse, "sample")? as usize,
-                    Cycle::Measured => samples.len() - 1,
-                    Cycle::Ready if s.mode == Mode::Outline && phase == Phase::Finished => samples.len(),
-                    _ => return Err("A withdrawal event is outside a retained probing cycle; Abort then Pendant Mode.".into()),
+            "recontact" | "withdrawal-release" | "withdrawal-complete" => {
+                let (expected_sample, expected_target) = match &cycle {
+                    Cycle::Coarse(coarse) | Cycle::CoarseBackedOff(coarse) => {
+                        let expected = if s.full_outline_backoff() && phase.is_outline() {
+                            Some(super::withdrawal::target(
+                                s,
+                                super::withdrawal::request(coarse)?,
+                                xyz(coarse, "machine_", "_exact")?,
+                            )?)
+                        } else {
+                            None
+                        };
+                        (number(coarse, "sample")? as usize, expected)
+                    }
+                    Cycle::Measured | Cycle::MeasuredBackedOff => {
+                        let sample = samples.last().ok_or("Withdrawal has no retained sample.")?;
+                        let expected = if s.full_outline_backoff() && phase.is_outline() {
+                            Some(super::withdrawal::target(
+                                s,
+                                sample.request,
+                                sample
+                                    .trigger
+                                    .ok_or("A miss cannot authorize a contact backoff.")?,
+                            )?)
+                        } else {
+                            None
+                        };
+                        (samples.len() - 1, expected)
+                    }
+                    Cycle::Ready if s.mode == Mode::Outline && phase == Phase::Finished => {
+                        (samples.len(), None)
+                    }
+                    _ => return Err(
+                        "Withdrawal is outside a retained probing cycle; Abort then Pendant Mode."
+                            .into(),
+                    ),
                 };
-                let from = xyz(r, "from_", "")?;
-                let target = xyz(r, "target_", "")?;
-                s.bounds(from)?;
-                s.bounds(target)?;
-                if index != expected_sample
-                    || !close(target[2], s.origin[2])
-                    || !close(from[0], target[0])
-                    || !close(from[1], target[1])
-                    || target[2] <= from[2]
-                    || !(close(number(r, "feed")?, s.feeds[1])
-                        || close(number(r, "feed")?, s.feeds[2]))
-                {
-                    return Err("Withdrawal record does not match its sample, upward path, clearance or feed; Abort then Pendant Mode.".into());
+                if index != expected_sample {
+                    return Err("Withdrawal sample differs from its retained contact; Abort then Pendant Mode.".into());
                 }
-                // Withdrawal events retain their own exact positions. They do
-                // not replace the top/side measurement or advance the survey.
+                super::withdrawal::validate(r, s, expected_target)?;
+                if kind == "withdrawal-complete" {
+                    cycle = match cycle {
+                        Cycle::Coarse(coarse) | Cycle::CoarseBackedOff(coarse) => Cycle::CoarseBackedOff(coarse),
+                        Cycle::Measured | Cycle::MeasuredBackedOff => Cycle::MeasuredBackedOff,
+                        Cycle::Ready => Cycle::Ready,
+                        _ => return Err("Withdrawal completion has no recoverable capture state; Abort then Pendant Mode.".into()),
+                    };
+                }
             }
             "travel" => (),
             "touch" | "miss" => {
@@ -93,7 +121,10 @@ pub fn samples(
                     continue;
                 }
                 match (&cycle,kind) {
-                    (Cycle::Coarse(coarse),"touch") if stage == 1.0 => {
+                    (Cycle::Coarse(coarse) | Cycle::CoarseBackedOff(coarse),"touch") if stage == 1.0 => {
+                        if s.full_outline_backoff() && phase.is_outline() && !matches!(cycle,Cycle::CoarseBackedOff(_)) {
+                            return Err("Fine outline touch began before the full probe-diameter backoff was retained; Abort then Pendant Mode.".into());
+                        }
                         for field in ["phase","edge","approach_x","approach_y","target_x","target_y","target_z"] {
                             if !close(number(r,field)?,number(coarse,field)?) { return Err("Fine touch does not repeat the retained coarse target and direction.".into()); }
                         }
@@ -135,7 +166,7 @@ pub fn samples(
                 };
                 let returned = xyz(r, "work_", "")?;
                 s.bounds(returned)?;
-                if !matches!(cycle, Cycle::Measured)
+                if !matches!(cycle, Cycle::Measured | Cycle::MeasuredBackedOff)
                     || index + 1 != sample_count
                     || phase != sample.request.phase
                     || (returned[2] - clearance).abs() > s.step[2] / 2.0 + 1e-9
@@ -144,6 +175,15 @@ pub fn samples(
                         "The previous sample lacks its matching released endpoint at the planned Z plane."
                             .into(),
                     );
+                }
+                if s.full_outline_backoff() && phase.is_outline() && sample.trigger.is_some() {
+                    let expected =
+                        super::withdrawal::target(s, sample.request, sample.trigger.unwrap())?;
+                    if !matches!(cycle, Cycle::MeasuredBackedOff)
+                        || !s.endpoint_matches(returned, expected)
+                    {
+                        return Err("Outline ready was reported before a full probe-diameter backoff; Abort then Pendant Mode.".into());
+                    }
                 }
                 sample.returned = Some(returned);
                 cycle = Cycle::Ready;

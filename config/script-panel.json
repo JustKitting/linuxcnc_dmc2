@@ -54,71 +54,28 @@
       ]
     },
     {
-      "key": "auto-map",
-      "operation": "program.auto-map",
-      "requires_beginning": true,
-      "description": "Start clear above the block. Brackets the first edge, probes inward at the last top-contact Z, then follows local contacts around the outline at fixed Z. Trace step sets the local search radius; Outline resolution sets candidate spacing and closing-touch tolerance. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
-      "parameters": [
-        {
-          "pin": "auto-map-drop-mm",
-          "label": "Maximum descent from starting Z",
-          "kind": "positive-mm",
-          "default": "12.7",
-          "increment": "1"
-        },
-        {
-          "pin": "auto-map-grid-mm",
-          "label": "Trace step / local search radius",
-          "kind": "positive-mm",
-          "default": "1",
-          "increment": "1"
-        },
-        {
-          "pin": "auto-map-resolution-mm",
-          "label": "Outline resolution",
-          "kind": "positive-mm",
-          "default": "0.1",
-          "increment": "0.1"
-        },
-        {
-          "pin": "auto-map-usable-reach-mm",
-          "label": "Mounted usable probe reach",
-          "kind": "positive-mm",
-          "default": {"reference": "xyz-probe-reach-mm"},
-          "increment": "1"
-        },
-        {
-          "pin": "auto-map-reach-reserve-mm",
-          "label": "Probe reach reserve",
-          "kind": "positive-mm",
-          "default": "2",
-          "increment": "1"
-        }
-      ]
-    },
-    {
       "key": "rim",
       "operation": "program.rim",
       "requires_beginning": true,
-      "description": "Start clear above the block. Uses the retained plate envelope, binary edge searches and an outward grid; verifies the fitted faces. Starting Z is the clearance ceiling; every dip stays within its original descent budget. Then touches around the sides, backing off at each station. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
+      "description": "Start clear above the block. Finds the first edge, descends by Trace depth below the last top contact, then follows the local outline at fixed Z. Each contact gets a full probe-diameter backoff before the next inward touch. Trace step sets local candidate spacing; Outline resolution sets contour closure tolerance. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
       "parameters": [
         {
           "pin": "rim-drop-mm",
-          "label": "Maximum descent from starting Z",
+          "label": "Maximum initial top-search descent",
           "kind": "positive-mm",
           "default": "12.7",
           "increment": "1"
         },
         {
           "pin": "rim-grid-mm",
-          "label": "Grid / station spacing",
+          "label": "Trace step / local search radius",
           "kind": "positive-mm",
           "default": "1",
           "increment": "1"
         },
         {
           "pin": "rim-resolution-mm",
-          "label": "Boundary bracket resolution",
+          "label": "Outline resolution",
           "kind": "positive-mm",
           "default": "0.1",
           "increment": "0.1"
@@ -138,17 +95,10 @@
           "increment": "1"
         },
         {
-          "pin": "rim-side-depth-mm",
-          "label": "Side ball-centre depth below top",
+          "pin": "rim-trace-depth-mm",
+          "label": "Trace depth below last top contact",
           "kind": "positive-mm",
-          "default": "1",
-          "increment": "1"
-        },
-        {
-          "pin": "rim-backoff-mm",
-          "label": "Side clearance beyond estimated edge",
-          "kind": "positive-mm",
-          "default": "2",
+          "default": "12.7",
           "increment": "1"
         }
       ]

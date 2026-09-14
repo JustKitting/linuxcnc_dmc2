@@ -209,8 +209,16 @@ pub fn validate(workflow: Workflow, request: &str, sequence: u64) -> Result<(), 
         (Workflow::Mapper, "start") => super::mapper_schema::START_FIELDS,
         (
             Workflow::Mapper,
-            "touch" | "miss" | "travel" | "obstruction" | "ready" | "recovery" | "result"
-            | "recontact" | "withdrawal-release",
+            "touch"
+            | "miss"
+            | "travel"
+            | "obstruction"
+            | "ready"
+            | "recovery"
+            | "result"
+            | "recontact"
+            | "withdrawal-release"
+            | "withdrawal-complete",
         ) => super::mapper_schema::EVENT_FIELDS,
         (Workflow::Block, "start") => super::block_schema::START_FIELDS,
         (Workflow::ToolSetter, "start") => &[

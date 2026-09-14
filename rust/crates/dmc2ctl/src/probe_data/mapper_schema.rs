@@ -109,13 +109,20 @@ pub(super) fn validate(kind: &str, fields: &BTreeMap<&str, &str>) -> Result<(), 
     {
         return Err("Mapper contact classification disagrees with the original G38 result.".into());
     }
-    if matches!(kind, "recontact" | "withdrawal-release")
-        && (n("stage") != -1.0
-            || n("target_x") != n("from_x")
-            || n("target_y") != n("from_y")
-            || n("target_z") <= n("from_z"))
-    {
-        return Err("A withdrawal event must describe upward Z-only travel with unchanged XY and no measurement stage.".into());
+    if matches!(
+        kind,
+        "recontact" | "withdrawal-release" | "withdrawal-complete"
+    ) {
+        let complete = kind == "withdrawal-complete";
+        let upward = n("target_x") == n("from_x")
+            && n("target_y") == n("from_y")
+            && (n("target_z") > n("from_z") || (complete && n("target_z") == n("from_z")));
+        let lateral = Phase::read(n("phase"))?.is_outline()
+            && n("target_z") == n("from_z")
+            && (complete || n("target_x") != n("from_x") || n("target_y") != n("from_y"));
+        if n("stage") != -1.0 || !(upward || lateral) {
+            return Err("Withdrawal must retain an upward Z path or fixed-Z outline return, with no measurement stage.".into());
+        }
     }
     if kind == "miss" && n("stage") != 0.0 {
         return Err("A failed fine touch cannot be accepted as air.".into());

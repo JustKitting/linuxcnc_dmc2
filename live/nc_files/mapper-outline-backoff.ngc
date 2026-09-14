@@ -1,0 +1,15 @@
+o<mapper-outline-backoff> sub
+(Last original G38 contact has already been retained and read back.)
+(Return by the retained probe diameter along the reverse approach at the trace Z.)
+#<dx> = [#<_mp_ax> - #1]
+#<dy> = [#<_mp_ay> - #2]
+#<length> = SQRT[#<dx>**2 + #<dy>**2]
+o<mob_direction> if [#<length> LE 0]
+    (ABORT,The outline contact has no horizontal approach direction. Abort then Pendant Mode.)
+o<mob_direction> endif
+#<bx> = [#5061 + #<_mp_backoff> * #<dx> / #<length>]
+#<by> = [#5062 + #<_mp_backoff> * #<dy> / #<length>]
+(Full reverse approach: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+o<mapper-move> call [#<bx>] [#<by>] [#3] [5] [#<_mp_fine>]
+o<mapper-outline-backoff> endsub
+M2

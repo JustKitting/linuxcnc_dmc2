@@ -13,3 +13,8 @@ coarse-feed
 downward-feed
 fine-feed
 travel-feed
+backoff-mm
+x-min
+x-max
+y-min
+y-max

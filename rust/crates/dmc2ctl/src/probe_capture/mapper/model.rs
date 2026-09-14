@@ -1,4 +1,4 @@
-//! Retained-data model for the two automatic stock scans. No machine commands.
+//! Retained-data model for current rim traces and historical mapper ledgers.
 use super::super::ledger::{number, Fields};
 use std::collections::BTreeMap;
 
@@ -10,6 +10,38 @@ pub enum Mode {
 }
 pub use dmc2ctl::probe_data::mapper_schema::Phase;
 
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum OutlineRevision {
+    ContactPlane,
+    BelowContact,
+}
+#[derive(Clone, Copy, Debug)]
+pub struct OutlinePolicy {
+    pub revision: OutlineRevision,
+    pub handoff_mm: f64,
+}
+impl OutlinePolicy {
+    pub fn read(text: &str) -> Result<Self, String> {
+        let (header, revision) = match text.lines().next() {
+            Some("DMC2_OUTLINE_POLICY_V1") => ("DMC2_OUTLINE_POLICY_V1", OutlineRevision::ContactPlane),
+            Some("DMC2_OUTLINE_POLICY_V2") => ("DMC2_OUTLINE_POLICY_V2", OutlineRevision::BelowContact),
+            _ => return Err("Unsupported outline policy. Correct config/mapper-outline.txt then start a new Run; Pendant Mode remains available.".into()),
+        };
+        let fields = data(text, header, &["handoff_mm"])?;
+        let handoff_mm = number(&fields, "handoff_mm")?;
+        if handoff_mm <= 0.0 {
+            return Err(
+                "The first-edge handoff must be positive; correct the outline policy before Run."
+                    .into(),
+            );
+        }
+        Ok(Self {
+            revision,
+            handoff_mm,
+        })
+    }
+}
+
 #[derive(Clone, Debug)]
 pub struct Settings {
     pub mode: Mode,
@@ -19,13 +51,14 @@ pub struct Settings {
     pub max: [f64; 3],
     pub grid: f64,
     pub resolution: f64,
-    pub floor: f64,
+    pub floor: f64,       // initial top-search floor
+    pub reach_floor: f64, // starting Z minus usable reach after reserve
     pub radius: f64,
     pub side_depth: f64,
     pub backoff: f64,
     pub feeds: [f64; 3], // horizontal coarse, fine, travel, mm/min
     pub downward_feed: f64,
-    pub outline_handoff: Option<f64>,
+    pub outline: Option<OutlinePolicy>,
     pub step: [f64; 3],
 }
 
@@ -54,7 +87,7 @@ impl Settings {
         start: &Fields,
         plate: &Fields,
         policy: &Fields,
-        outline: Option<&Fields>,
+        outline: Option<OutlinePolicy>,
     ) -> Result<Self, String> {
         let n = |k: &str| number(start, k);
         let xyz = |prefix: &str| -> Result<[f64; 3], String> {
@@ -121,10 +154,11 @@ impl Settings {
             grid: n("grid")?,
             resolution: n("resolution")?,
             floor: origin[2] - n("drop")?,
+            reach_floor: origin[2] - (n("usable_reach")? - n("reach_reserve")?),
             side_depth: n("side_depth")?,
             backoff: n("backoff")?,
             downward_feed: number(policy, "downward_feed")?,
-            outline_handoff: outline.map(|v| number(v, "handoff_mm")).transpose()?,
+            outline,
             feeds: [
                 number(policy, "coarse_feed")?,
                 number(policy, "fine_feed")?,
@@ -161,16 +195,44 @@ impl Settings {
         }
         if result.mode == Mode::Outline
             && !result
-                .outline_handoff
-                .is_some_and(|v| v.is_finite() && v > 0.0)
+                .outline
+                .is_some_and(|v| v.handoff_mm.is_finite() && v.handoff_mm > 0.0)
         {
             return Err("A positive first-edge handoff distance is required in this run's outline policy snapshot.".into());
+        }
+        if result.full_outline_backoff() && result.side_depth <= 0.0 {
+            return Err(
+                "Set a positive Trace depth below last top contact in Scripts before Run.".into(),
+            );
         }
         result.bounds(origin)?;
         result.bounds([origin[0], origin[1], result.floor])?;
         Ok(result)
     }
 
+    pub fn full_outline_backoff(&self) -> bool {
+        self.mode == Mode::Outline
+            && self
+                .outline
+                .is_some_and(|p| p.revision == OutlineRevision::BelowContact)
+    }
+    pub fn trace_z(&self, top: f64) -> f64 {
+        top - if self.full_outline_backoff() {
+            self.side_depth
+        } else {
+            0.0
+        }
+    }
+    pub fn outline_backoff(&self) -> f64 {
+        if self.full_outline_backoff() {
+            self.radius * 2.0
+        } else {
+            self.grid
+        }
+    }
+    pub fn endpoint_matches(&self, actual: [f64; 3], target: [f64; 3]) -> bool {
+        (0..3).all(|i| (actual[i] - target[i]).abs() <= self.step[i] / 2.0 + 1e-9)
+    }
     pub fn coarse_feed(&self, phase: Phase) -> f64 {
         if phase == Phase::Rim || phase.is_outline() {
             self.feeds[0]
@@ -188,11 +250,16 @@ impl Settings {
                 return Err(format!("Required {axis}={} machine mm is outside this scan's plate/travel envelope. No substitute target was issued. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.", p[i] + self.offset[i]));
             }
         }
-        if (p[2] < self.floor && !close(p[2], self.floor))
+        let floor = if self.full_outline_backoff() {
+            self.reach_floor
+        } else {
+            self.floor
+        };
+        if (p[2] < floor && !close(p[2], floor))
             || (p[2] > self.origin[2] && !close(p[2], self.origin[2]))
         {
             return Err(
-                "A requested target exceeds the original starting-Z descent envelope.".into(),
+                "A requested target exceeds the retained descent/reach envelope. Correct initial search, Trace depth or mounted reach in Scripts; Abort then Pendant Mode.".into(),
             );
         }
         Ok(())
@@ -236,6 +303,11 @@ impl Request {
             ("downward-feed", s.downward_feed),
             ("fine-feed", s.feeds[1]),
             ("travel-feed", s.feeds[2]),
+            ("backoff-mm", s.outline_backoff()),
+            ("x-min", s.min[0]),
+            ("x-max", s.max[0]),
+            ("y-min", s.min[1]),
+            ("y-max", s.max[1]),
         ]
     }
 }

@@ -14,12 +14,13 @@ pub(super) fn fixture(mode: Mode) -> Settings {
         grid: 2.0,
         resolution: 0.1,
         floor: 1.0,
+        reach_floor: 0.0,
         radius: 1.0,
         side_depth: 1.0,
         backoff: 2.0,
         feeds: [800.0, 50.0, 1500.0],
         downward_feed: 400.0,
-        outline_handoff: None,
+        outline: None,
         step: [0.001; 3],
     }
 }

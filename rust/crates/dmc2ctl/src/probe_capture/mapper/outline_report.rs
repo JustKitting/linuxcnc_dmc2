@@ -53,7 +53,7 @@ pub fn export(
             let plane = top
                 .map(|r| {
                     ledger::number(r, "machine_z_exact")
-                        .map(|z| (z - settings.offset[2]).to_string())
+                        .map(|z| settings.trace_z(z - settings.offset[2]).to_string())
                 })
                 .transpose()?
                 .unwrap_or_else(|| "null".into());

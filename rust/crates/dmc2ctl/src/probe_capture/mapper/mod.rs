@@ -10,9 +10,10 @@ mod search;
 mod state;
 #[cfg(test)]
 mod tests;
+mod withdrawal;
 
 use super::{ledger, plan_bank, schema::Workflow, storage};
-use model::{data, Mode, Phase, Request, Settings};
+use model::{data, Mode, OutlinePolicy, Phase, Request, Settings};
 pub(super) use report::export;
 use std::{fs, path::Path};
 
@@ -48,7 +49,7 @@ pub(super) fn begin(root: &Path, output: &Path) -> Result<(), String> {
     policy(&feeds)?;
     let outline = fs::read_to_string(root.join("config/mapper-outline.txt"))
         .map_err(|e| format!("Reading the outline search policy: {e}"))?;
-    data(&outline, "DMC2_OUTLINE_POLICY_V1", &["handoff_mm"])?;
+    OutlinePolicy::read(&outline)?;
     storage::begin(output, Workflow::Mapper)?;
     let path = storage::active_path(output, Workflow::Mapper, 0)?;
     ledger::publish(&path.with_extension("plate.txt"), plate.as_bytes())?;
@@ -75,16 +76,14 @@ fn read(path: &Path) -> Result<(Vec<ledger::Fields>, Settings), String> {
             .map_err(|e| format!("Reading this run's feed snapshot: {e}"))?,
     )?;
     let outline = if ledger::number(start, "mode")? == 2.0 {
-        Some(data(
+        Some(OutlinePolicy::read(
             &fs::read_to_string(path.with_extension("outline.txt"))
                 .map_err(|e| format!("Reading this run's outline policy snapshot: {e}"))?,
-            "DMC2_OUTLINE_POLICY_V1",
-            &["handoff_mm"],
         )?)
     } else {
         None
     };
-    let settings = Settings::read(start, &plate, &policy, outline.as_ref())?;
+    let settings = Settings::read(start, &plate, &policy, outline)?;
     Ok((records, settings))
 }
 

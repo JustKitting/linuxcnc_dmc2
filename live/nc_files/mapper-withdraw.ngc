@@ -1,0 +1,54 @@
+o<mapper-withdraw> sub
+(Arguments: exact target XYZ, withdrawal feed. Caller validates the allowed path.)
+#<tx> = #1
+#<ty> = #2
+#<tz> = #3
+#<feed> = #4
+o<mw_loop> while [[ABS[#<tx>-#<_x>] GT [#<_mp_step_x>/2]] OR [ABS[#<ty>-#<_y>] GT [#<_mp_step_y>/2]] OR [ABS[#<tz>-#<_z>] GT [#<_mp_step_z>/2]]]
+    #<_mp_fx> = #<_x>
+    #<_mp_fy> = #<_y>
+    #<_mp_fz> = #<_z>
+    #<_mp_tx> = #<tx>
+    #<_mp_ty> = #<ty>
+    #<_mp_tz> = #<tz>
+    #<_mp_feed> = #<feed>
+    #<_mp_stage> = -1
+    #<before> = [[#<tx>-#<_x>]**2 + [#<ty>-#<_y>]**2 + [#<tz>-#<_z>]**2]
+    o<mw_active> if [#<_hal[motion.probe-input]> NE 0]
+        (Complete the retained withdrawal: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X; upward return is +Z.)
+        G38.5 X#<tx> Y#<ty> Z#<tz> F#<feed>
+        #<detected> = #5070
+        o<mw_release> if [#<detected> EQ 1]
+            o<mapper-record> call [8]
+        o<mw_release> else
+            o<mapper-record> call [2]
+        o<mw_release> endif
+    o<mw_active> else
+        (Continue to the same endpoint: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X; upward return is +Z.)
+        G38.3 X#<tx> Y#<ty> Z#<tz> F#<feed>
+        #<detected> = #5070
+        o<mw_recontact> if [#<detected> EQ 1]
+            o<mapper-record> call [7]
+        o<mw_recontact> else
+            o<mapper-record> call [2]
+        o<mw_recontact> endif
+    o<mw_active> endif
+    #<after> = [[#<tx>-#<_x>]**2 + [#<ty>-#<_y>]**2 + [#<tz>-#<_z>]**2]
+    o<mw_progress> if [#<after> GE #<before>]
+        (ABORT,Withdrawal made no reported progress toward its retained endpoint. Captures retained; Abort then Pendant Mode.)
+    o<mw_progress> endif
+o<mw_loop> endwhile
+o<mw_active_at_end> if [#<_hal[motion.probe-input]> NE 0]
+    (ABORT,Full withdrawal endpoint reached but the probe remains triggered. No next approach issued; Abort then Pendant Mode.)
+o<mw_active_at_end> endif
+#<_mp_fx> = #<_x>
+#<_mp_fy> = #<_y>
+#<_mp_fz> = #<_z>
+#<_mp_tx> = #<tx>
+#<_mp_ty> = #<ty>
+#<_mp_tz> = #<tz>
+#<_mp_feed> = #<feed>
+#<_mp_stage> = -1
+o<mapper-record> call [9]
+o<mapper-withdraw> endsub
+M2

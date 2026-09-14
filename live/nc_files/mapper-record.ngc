@@ -1,5 +1,5 @@
 o<mapper-record> sub
-(Durable events: 0 touch, 1 miss, 2 travel, 3 obstruction, 4 ready, 5 recovery, 6 result, 7 recontact, 8 withdrawal release.)
+(Durable events: 0 touch, 1 miss, 2 travel, 3 obstruction, 4 ready, 5 recovery, 6 result, 7 recontact, 8 withdrawal release, 9 full withdrawal endpoint.)
 #<ok> = 0
 #<x> = #<_x>
 #<y> = #<_y>
@@ -34,6 +34,8 @@ o<mr_kind> elseif [#1 EQ 7]
     (LOG,kind=recontact)
 o<mr_kind> elseif [#1 EQ 8]
     (LOG,kind=withdrawal-release)
+o<mr_kind> elseif [#1 EQ 9]
+    (LOG,kind=withdrawal-complete)
 o<mr_kind> endif
 (LOG,sample=%d#<_mp_sample>)
 (LOG,phase=%d#<_mp_phase>)

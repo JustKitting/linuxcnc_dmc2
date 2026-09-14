@@ -51,7 +51,7 @@ impl From<TraceError> for Progress {
 
 pub struct Outline {
     pub points: Vec<[f64; 3]>, // original fine machine-coordinate triggers, ordered
-    pub plane: f64,            // work-coordinate Z of the last top contact
+    pub plane: f64,            // retained top Z minus the selected trace depth
 }
 
 struct Reader<'a> {
@@ -145,11 +145,14 @@ fn endpoint(sample: &Sample) -> Result<Point, Progress> {
 }
 
 pub fn run(s: &Settings, samples: &[Sample]) -> Result<Outline, Progress> {
-    let handoff = s.outline_handoff.ok_or_else(|| {
-        Progress::Invalid(
+    let handoff =
+        s.outline
+            .ok_or_else(|| {
+                Progress::Invalid(
             "The outline policy snapshot is missing. Reopen the script and start a new Run.".into(),
         )
-    })?;
+            })?
+            .handoff_mm;
     let mut r = Reader {
         s,
         samples,
@@ -181,7 +184,7 @@ pub fn run(s: &Settings, samples: &[Sample]) -> Result<Outline, Progress> {
             outside = mid;
         }
     }
-    let plane = top[2];
+    let plane = s.trace_z(top[2]);
     let first = r.local(Phase::OutlineEnter, outside, inside, plane)?;
     let mut contact = xy(point(first, s)?);
     let start = contact;
@@ -211,12 +214,22 @@ pub fn run(s: &Settings, samples: &[Sample]) -> Result<Outline, Progress> {
             return Err(TraceError::RepeatedRegion.into());
         }
         // Withdraw along the reverse of the actual last approach, at fixed Z.
-        let anchor = add(contact, scale(outward, s.grid));
-        let retreat = r.local(Phase::OutlineBackoff, current, anchor, plane)?;
-        if retreat.trigger.is_some() {
-            return Err(TraceError::BlockedBackoff.into());
+        let anchor = add(contact, scale(outward, s.outline_backoff()));
+        if s.full_outline_backoff() {
+            if !s.endpoint_matches(
+                [current[0], current[1], plane],
+                [anchor[0], anchor[1], plane],
+            ) {
+                return Err(Progress::Invalid("The last contact has not completed its full probe-diameter backoff. No next candidate was issued; Abort then Pendant Mode.".into()));
+            }
+        } else {
+            // Historical ledgers retain their original, separately planned retreat.
+            let retreat = r.local(Phase::OutlineBackoff, current, anchor, plane)?;
+            if retreat.trigger.is_some() {
+                return Err(TraceError::BlockedBackoff.into());
+            }
+            current = endpoint(retreat)?;
         }
-        current = endpoint(retreat)?;
         let mut found = None;
         for sector in 1..=sectors {
             let candidate = add(
@@ -247,7 +260,7 @@ pub fn run(s: &Settings, samples: &[Sample]) -> Result<Outline, Progress> {
             && length(sub(contact, start)) <= s.grid
             && dot(outward, first_outward) > 0.0
         {
-            let approach = add(start, scale(first_outward, s.grid));
+            let approach = add(start, scale(first_outward, s.outline_backoff()));
             let target = sub(start, scale(first_outward, s.resolution));
             let closing = r.local(Phase::OutlineClose, approach, target, plane)?;
             let measured = point(closing, s)?;

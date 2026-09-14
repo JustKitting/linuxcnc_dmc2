@@ -1,7 +1,7 @@
 //! Independent polygon-ray fixtures exercise the production planner only.
 //! These numerical checks provide no evidence of physical probe behaviour.
 use super::{
-    model::{Mode, Phase, Sample},
+    model::{Mode, OutlinePolicy, OutlineRevision, Phase, Sample},
     outline,
     search::Progress,
     tests::fixture,
@@ -48,9 +48,19 @@ fn contains(p: P, polygon: &[P]) -> bool {
     }
     inside
 }
-fn replay(polygon: &[P]) -> outline::Outline {
+fn replay(polygon: &[P], revision: OutlineRevision) -> outline::Outline {
     let mut s = fixture(Mode::Outline);
-    s.outline_handoff = Some(25.4);
+    s.outline = Some(OutlinePolicy {
+        revision,
+        handoff_mm: 25.4,
+    });
+    s.grid = 1.0;
+    s.origin[2] = 30.0;
+    s.max[2] = 40.0;
+    s.reach_floor = 0.0;
+    s.side_depth = 12.7;
+    let top = 24.0;
+    let plane = s.trace_z(top);
     let mut samples = Vec::new();
     let mut tracing = false;
     loop {
@@ -64,7 +74,7 @@ fn replay(polygon: &[P]) -> outline::Outline {
                 assert!(result
                     .points
                     .iter()
-                    .all(|p| (p[2] - s.offset[2] - 8.0).abs() < 1e-9));
+                    .all(|p| (p[2] - s.offset[2] - plane).abs() < 1e-9));
                 return result;
             }
             Err(Progress::Invalid(e)) => panic!("sample {}: {e}", samples.len()),
@@ -83,22 +93,41 @@ fn replay(polygon: &[P]) -> outline::Outline {
                 tracing |= request.phase.is_outline();
                 let target = [request.target[0], request.target[1]];
                 let point = if request.phase.is_outline() {
-                    assert_eq!(request.target[2], 8.0);
+                    assert_eq!(request.target[2], plane);
                     hit(request.approach, target, polygon)
                 } else {
                     assert!(target[0] <= s.origin[0]); // no opposite-edge search
                     contains(target, polygon).then_some(target)
                 };
-                let trigger =
-                    point.map(|p| [p[0] + s.offset[0], p[1] + s.offset[1], 8.0 + s.offset[2]]);
+                let trigger = point.map(|p| {
+                    [
+                        p[0] + s.offset[0],
+                        p[1] + s.offset[1],
+                        (if request.phase.is_outline() {
+                            plane
+                        } else {
+                            top
+                        }) + s.offset[2],
+                    ]
+                });
                 let returned = if request.phase.is_outline() {
                     if let Some(p) = point {
                         let d = sub(request.approach, target);
                         let len = d[0].hypot(d[1]);
                         [
-                            p[0] + d[0] / len * s.step[0],
-                            p[1] + d[1] / len * s.step[1],
-                            8.0,
+                            p[0] + d[0] / len
+                                * if s.full_outline_backoff() {
+                                    s.outline_backoff()
+                                } else {
+                                    s.step[0]
+                                },
+                            p[1] + d[1] / len
+                                * if s.full_outline_backoff() {
+                                    s.outline_backoff()
+                                } else {
+                                    s.step[1]
+                                },
+                            plane,
                         ]
                     } else {
                         request.target
@@ -127,7 +156,8 @@ fn traces_rotated_and_concave_outlines_without_opposite_search_or_grid() {
             ]
         })
         .collect();
-    replay(&rectangle);
+    replay(&rectangle, OutlineRevision::ContactPlane);
+    replay(&rectangle, OutlineRevision::BelowContact);
     let notch = [
         [-11.0, -7.0],
         [11.0, -7.0],
@@ -138,7 +168,7 @@ fn traces_rotated_and_concave_outlines_without_opposite_search_or_grid() {
         [-3.0, 7.0],
         [-11.0, 7.0],
     ];
-    let result = replay(&notch);
+    let result = replay(&notch, OutlineRevision::BelowContact);
     let work: Vec<P> = result
         .points
         .iter()

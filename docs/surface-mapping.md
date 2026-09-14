@@ -50,8 +50,7 @@ shows a **22 mm new stylus** measured from its seating shoulder to ball bottom,
 and **26 mm from body underside to ball bottom for the old stylus assembly**.
 At the operator's request, the new stylus's 22 mm specification supplies the
 editable reach default. It is stored once at `defaults.xyz-probe-reach-mm` in
-`config/script-panel.json` and shared with Automatic block map and Automatic rim
-trace. The 2 mm reserve remains separate, leaving 20 mm from that nominal reach.
+`config/script-panel.json` and shared with Automatic rim trace. The 2 mm reserve remains separate, leaving 20 mm from that nominal reach.
 Saved unset zeros inherit the default; explicit nonzero settings are retained.
 This default records a product dimension, not a newly measured calibration.
 The [product specification](https://www.amazon.com/dp/B0CC5BFFZW) gives a nominal

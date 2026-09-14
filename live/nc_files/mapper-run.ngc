@@ -22,6 +22,8 @@ G21 G90 G94 G17 G40 G80 G61.1
 #<_mp_oz> = [#<_abs_z> - #<_z>]
 #<_mp_clear> = #<_z>
 #<_mp_floor> = [#<_z> - #2]
+#<_mp_step_x> = [1 / ABS[#<_ini[joint_0]scale>]]
+#<_mp_step_y> = [1 / ABS[#<_ini[joint_1]scale>]]
 #<_mp_step_z> = [1 / ABS[#<_ini[joint_2]scale>]]
 #<_mp_mode> = #1
 #<_mp_sequence> = 0
@@ -93,6 +95,11 @@ o<mp_loop> while [1]
     #<_mp_downward> = #<_hal[axisui.mapper-plan-downward-feed]>
     #<_mp_fine> = #<_hal[axisui.mapper-plan-fine-feed]>
     #<_mp_travel> = #<_hal[axisui.mapper-plan-travel-feed]>
+    #<_mp_backoff> = #<_hal[axisui.mapper-plan-backoff-mm]>
+    #<_mp_x_min> = #<_hal[axisui.mapper-plan-x-min]>
+    #<_mp_x_max> = #<_hal[axisui.mapper-plan-x-max]>
+    #<_mp_y_min> = #<_hal[axisui.mapper-plan-y-min]>
+    #<_mp_y_max> = #<_hal[axisui.mapper-plan-y-max]>
     o<mp_still_fresh> if [#<_hal[axisui.mapper-plan-sequence]> NE #<_mp_sequence>]
         (ABORT,The mapper plan changed while being read. Abort then Pendant Mode.)
     o<mp_still_fresh> endif
@@ -122,6 +129,10 @@ o<mp_loop> while [1]
         o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<_mp_clear>] [0] [#<_mp_travel>]
         #<return_z> = #<_mp_clear>
         o<mp_side> if [[#<_mp_phase> EQ 4] OR [#<_mp_phase> EQ 6]]
+            o<mp_trace_depth_floor> if [#<_mp_phase> EQ 6]
+                (The Rust plan checked last top contact minus Trace depth against the retained reach and travel envelope.)
+                #<_mp_floor> = #<tz>
+            o<mp_trace_depth_floor> endif
             (Outside-edge descent holds XY at the retained target Z and downward search feed.)
             o<mapper-move> call [#<_x>] [#<_y>] [#<tz>] [0] [#<_mp_downward>]
             #<return_z> = #<tz>
@@ -134,12 +145,22 @@ o<mp_loop> while [1]
     o<mapper-move> call [#<tx>] [#<ty>] [#<tz>] [2] [#<_mp_coarse>]
     o<mp_coarse_hit> if [#<_mp_hit> EQ 1]
         (Release along reverse approach. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
-        o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [1] [#<_mp_fine>]
+        o<mp_full_coarse_backoff> if [#<outline_local> EQ 1]
+            o<mapper-outline-backoff> call [#<tx>] [#<ty>] [#<tz>]
+        o<mp_full_coarse_backoff> else
+            o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [1] [#<_mp_fine>]
+        o<mp_full_coarse_backoff> endif
         (Same target, slow re-touch. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
         o<mapper-move> call [#<tx>] [#<ty>] [#<tz>] [3] [#<_mp_fine>]
     o<mp_coarse_hit> endif
     (Withdraw on the same normal before lifting: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
-    o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [1] [#<_mp_fine>]
+    o<mp_full_fine_backoff> if [#<outline_local> EQ 1]
+        o<mp_fine_was_hit> if [#<_mp_hit> EQ 1]
+            o<mapper-outline-backoff> call [#<tx>] [#<ty>] [#<tz>]
+        o<mp_fine_was_hit> endif
+    o<mp_full_fine_backoff> else
+        o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [1] [#<_mp_fine>]
+    o<mp_full_fine_backoff> endif
     o<mp_return_policy> if [#<outline_local> EQ 0]
         #<withdraw_action> = 4
         o<mp_horizontal_backoff> if [#<_mp_phase> EQ 4]
