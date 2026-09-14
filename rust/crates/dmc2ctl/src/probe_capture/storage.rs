@@ -133,6 +133,14 @@ pub(super) fn commit(
     if workflow == Workflow::Block && request.lines().any(|line| line == "kind=result") {
         super::block::export(&path, true)?;
     }
+    if workflow == Workflow::ToolSetter
+        && request.lines().any(|line| line == "kind=touch")
+        && request.lines().any(|line| line == "stage=1")
+    {
+        // Export only after the original fine trigger has been synced/read back.
+        // This adds no machine command and does not apply the saved offset.
+        super::tool_setter::export(&path)?;
+    }
     fs::remove_file(output.join(workflow.request()))
         .map_err(|e| io("consuming the saved capture request", e))?;
     save_active(output, workflow, lines[0], sequence + 1)?;

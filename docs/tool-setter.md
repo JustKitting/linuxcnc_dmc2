@@ -69,13 +69,13 @@ permission. Existing Abort, Clear Fault and Pendant Mode controls remain the
 operator recovery path. State-model tests do not establish physical stopping or
 operator-observed recovery; those require live observation.
 
-## Accepted tool-setter reference — 2026-09-13
+## Earlier top-height reference — superseded on 2026-09-13
 
-The user accepted this setter as the new tool-setter system. Its reference is
-stored in [tool-setter.json](../config/metrology/tool-setter.json), linked from
-`live_requirements.json`. The accepted height above the sampled machine plate
-is **63.995466247558595 mm**, using the measured height difference and nominal
-zero setter pretravel.
+The initial XYZ-probe top-height reference is preserved in
+[the historical reference](../config/metrology/references/tool-setter-top-height-2026-09-13.json).
+Its **63.995466247558595 mm** estimate used the measured height difference and
+nominal zero pretravel. The effective IN0 contact calibration below supersedes
+that estimate for current tool measurements.
 
 USER-OBSERVED ACTUAL: both recordings used the same XYZ probe with unchanged
 clamping depth and homed coordinate reference. All contacts were downward
@@ -123,6 +123,29 @@ samples, are archived losslessly in the repository:
 All rows report valid homed positions, with no cycle gaps or recorded
 transport/controller fault flags. The contemporaneous LinuxCNC journal reports
 `Probe tripped during a coordinate jog` at the manual contacts.
+
+## Current effective contact height — 2026-09-13
+
+The user selected **21.39 mm machine Z** as the plate-contact reference for the
+installed tool, after correcting the observed contact reading to 21.405 mm.
+The selection explicitly accounts for the button play and plate-contact
+allowance described by the user. The retained slow IN0 trigger gives:
+
+```text
+effective_setter_height = fine_trigger_machine_z - accepted_plate_contact_machine_z
+= 85.32116748046874 - 21.39
+= 63.931167480468744 mm (stored f64)
+```
+
+[The current reference](../config/metrology/tool-setter.json) and
+`[TOOL_SETTER] HEIGHT_ABOVE_PLATE_MM` now retain this effective trigger height.
+[The original coarse and fine contacts](../config/metrology/tool-offsets/tool-setter-1789346395947653909-1102463.txt)
+are archived unchanged, including the original trigger bits and 50 mm/min fine
+feed. Future tool measurements subtract this height from their own normal
+contact trigger; no additional play or pretravel term is subtracted. The
+21.39 mm value belongs to this measured tool's plate reference, while the setter
+height is the reusable calibration. No tool/work offset or machine command was
+applied by recording this calibration.
 
 ## Programs using this reference
 

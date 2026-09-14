@@ -4,6 +4,7 @@ mod block;
 use dmc2ctl::probe_data::{ledger, schema};
 mod storage;
 mod surface;
+mod tool_setter;
 
 use schema::Workflow;
 use std::env;
@@ -17,6 +18,28 @@ extern "C" {
 
 fn main() {
     let args: Vec<_> = env::args().skip(1).collect();
+    if args.first().map(String::as_str) == Some("--export-tool-offset") {
+        // Historical export is data-only and never opens the machine channel.
+        let result = match args.as_slice() {
+            [_, path] => tool_setter::export(std::path::Path::new(path)),
+            [_, path, ini, reference] => {
+                let path = std::path::Path::new(path);
+                tool_setter::snapshot(
+                    path,
+                    std::path::Path::new(ini),
+                    std::path::Path::new(reference),
+                    tool_setter::SnapshotTiming::AfterCapture,
+                )
+                .and_then(|_| tool_setter::export(path))
+            }
+            _ => Err("use --export-tool-offset <ledger> [<INI> <accepted-setter-reference.json>]; supply the reference files only for a historical ledger without its own snapshot".into()),
+        };
+        if let Err(error) = result {
+            eprintln!("Tool offset export failed; retained contacts were preserved: {error}");
+            std::process::exit(1);
+        }
+        return;
+    }
     if matches!(
         args.first().map(String::as_str),
         Some("--export-surface" | "--export-block")
@@ -64,7 +87,7 @@ fn main() {
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args == ["--help"] {
-        println!("dmc2-probe-capture is the synchronous M190 capture gate. Circle: P0 Q0 begins, P1 Q<sequence> saves. Surface: P2 Q0 begins, P3 Q<sequence> saves. Block: P4 Q0 begins, P5 Q<sequence> saves, P6 Q<sequence> publishes the next retained-data plan. Tool setter: P7 Q0 begins, P8 Q<sequence> saves. Records are durably saved and read back. --export-surface <ledger> and --export-block <ledger> export retained data without a machine connection. No machine commands are issued.");
+        println!("dmc2-probe-capture is the synchronous M190 capture gate. Circle: P0 Q0 begins, P1 Q<sequence> saves. Surface: P2 Q0 begins, P3 Q<sequence> saves. Block: P4 Q0 begins, P5 Q<sequence> saves, P6 Q<sequence> publishes the next retained-data plan. Tool setter: P7 Q0 snapshots calibration and begins; P8 Q<sequence> saves and exports the fine contact's plate-referenced Z tool offset. Records are durably saved and read back. --export-surface <ledger>, --export-block <ledger>, and --export-tool-offset <ledger> [<INI> <accepted-setter-reference.json>] export retained data without a machine connection. No machine commands are issued.");
         return Ok(());
     }
     if args.len() != 2 {
@@ -95,7 +118,16 @@ fn run() -> Result<(), String> {
         }
         5 => storage::commit(&output, Workflow::Block, sequence, trigger_position),
         6 => block::publish_next(&output, sequence),
-        7 if sequence == 0 => storage::begin(&output, Workflow::ToolSetter),
+        7 if sequence == 0 => {
+            storage::begin(&output, Workflow::ToolSetter)?;
+            let path = storage::active_path(&output, Workflow::ToolSetter, 0)?;
+            tool_setter::snapshot(
+                &path,
+                &root.join("live/dmc2.ini"),
+                &root.join("config/metrology/tool-setter.json"),
+                tool_setter::SnapshotTiming::BeforeContact,
+            )
+        }
         8 => storage::commit(&output, Workflow::ToolSetter, sequence, trigger_position),
         _ => Err("unknown capture action; reopen the selected probing script".to_owned()),
     }

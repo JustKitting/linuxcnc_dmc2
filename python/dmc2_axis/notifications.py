@@ -12,7 +12,7 @@ from .constants import (
     EXPECTED_JOG_STOP_MESSAGES,
     REQUIRED_LINUXCNC_VERSION,
 )
-from .error_journal import ErrorJournalReader
+from .error_journal import ErrorJournalEvent, ErrorJournalReader
 from .diagnostic_journal import (
     DiagnosticEvent,
     DiagnosticJournalReader,
@@ -32,10 +32,10 @@ from .ui_fault import AxisUiFault, AxisUiFaultKind
 
 
 @dataclass(frozen=True)
-class DiagnosticNotification:
-    """Retain presentation of one assertion even after its popup is dismissed."""
+class EventNotification:
+    """Identify one recorded event's popup even when AXIS reuses its frame."""
 
-    event: DiagnosticEvent
+    event: DiagnosticEvent | ErrorJournalEvent
     widgets: object
 
     def is_visible(self, notifications) -> bool:
@@ -109,7 +109,8 @@ def install_axis_ui_policy(
     notifications = namespace["notifications"]
     original_add = notifications.add
     live_plotter._dmc2_recovery_notification_add = original_add
-    active_diagnostic_notices: dict[tuple[object, ...], DiagnosticNotification] = {}
+    active_diagnostic_notices: dict[tuple[object, ...], EventNotification] = {}
+    error_notices: list[EventNotification] = []
     reveal_diagnostics = False
     checked_recovery_contract = None
     recovery_contract_error_identity = None
@@ -148,6 +149,9 @@ def install_axis_ui_policy(
         nonlocal recovery_contract_error_identity
         nonlocal reveal_diagnostics
         try:
+            error_notices[:] = [
+                notice for notice in error_notices if notice.is_visible(notifications)
+            ]
             try:
                 ensure_essential_recovery_controls(namespace)
             except Exception as controls_error:
@@ -277,6 +281,10 @@ def install_axis_ui_policy(
                                 f"sequence={event.sequence}; action: use the visible "
                                 "recovery controls and correct notification delivery"
                             )
+                        if severity == "error":
+                            error_notices.append(EventNotification(
+                                event, notifications.widgets[-1]
+                            ))
 
             while not diagnostic_poll_failed:
                 try:
@@ -491,7 +499,7 @@ def install_axis_ui_policy(
                         f"diagnostic={active_key!r}; action: use the visible "
                         "recovery controls and correct notification delivery"
                     )
-                active_diagnostic_notices[active_key] = DiagnosticNotification(
+                active_diagnostic_notices[active_key] = EventNotification(
                     diagnostic, notifications.widgets[-1]
                 )
             if (
@@ -540,7 +548,36 @@ def install_axis_ui_policy(
                 )
             )
 
+    def acknowledge_error_notifications():
+        """Acknowledge delivered history after an explicit successful clear.
+
+        Live diagnostic assertions have their own assertion/clear lifecycle.
+        This never edits a journal, changes a machine signal, or acknowledges
+        an event that has not yet been presented to the operator.
+        """
+        failures = []
+        for notice in tuple(error_notices):
+            try:
+                if notice.is_visible(notifications):
+                    notifications.remove(notice.widgets)
+            except Exception as error:
+                failures.append(f"event {notice.event.sequence}: {error}")
+            else:
+                error_notices.remove(notice)
+                print(
+                    "DMC2_ERROR_NOTIFICATION_ACK "
+                    f"sequence={notice.event.sequence} source=operator-clear-fault",
+                    flush=True,
+                )
+        if failures:
+            raise RuntimeError(
+                "Clear Fault recovered the controller, but these historical "
+                "popups could not be dismissed; use their close buttons or "
+                "retry Clear Fault: " + "; ".join(failures)
+            )
+
     notifications.add = add_with_delivery_status
+    live_plotter._dmc2_acknowledge_error_notifications = acknowledge_error_notifications
     live_plotter.error_task = filtered_error_task
     live_plotter._dmc2_diagnostic_reader = diagnostic_reader
     live_plotter._dmc2_active_diagnostic_notices = active_diagnostic_notices

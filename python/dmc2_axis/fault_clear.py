@@ -93,6 +93,17 @@ class ClearFaultBinding:
                 AxisUiFaultKind.CLEAR_FAULT_UI_COMMAND_FAILED, output.strip()))
         else:
             self.notice.clear()
+            acknowledge = getattr(
+                self.namespace["live_plotter"],
+                "_dmc2_acknowledge_error_notifications",
+                None,
+            )
+            if acknowledge is not None:
+                try:
+                    acknowledge()
+                except Exception as error:
+                    self.notice.present(fault=AxisUiFault(
+                        AxisUiFaultKind.CLEAR_FAULT_UI_COMMAND_FAILED, error))
             for line in output.splitlines():
                 if line.startswith("OPERATOR_MESSAGE="):
                     self.namespace["notifications"].add("info", line.partition("=")[2])
