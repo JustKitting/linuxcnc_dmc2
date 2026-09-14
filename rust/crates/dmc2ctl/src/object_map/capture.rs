@@ -1,11 +1,12 @@
 //! Import original G38 ledgers; endpoint fields never become contacts.
 use super::{
-    model::{CaptureState, Contact, Stage},
+    model::{CaptureIssue, CaptureIssueKind, CaptureState, Contact, Stage},
     record::quote,
     Error,
 };
 use crate::probe_data::{
     ledger::{self, number, Fields},
+    mapper_schema::CaptureFailure,
     schema::Workflow,
 };
 
@@ -16,6 +17,7 @@ pub struct Capture {
     pub contacts: Vec<Contact>,
     pub misses: usize,
     pub nominal_ball_diameter_mm: Option<f64>,
+    pub issues: Vec<CaptureIssue>,
 }
 
 impl Capture {
@@ -74,7 +76,7 @@ impl Capture {
         }
         let mut contacts = Vec::new();
         let mut misses = 0;
-        let mut quarantined = false;
+        let mut issues = Vec::new();
         let mut result = false;
         for (sequence, r) in records.iter().enumerate().skip(1) {
             if result || r["kind"] == "start" {
@@ -88,16 +90,26 @@ impl Capture {
                     "Record {sequence} lacks the original machine G38 source label."
                 ));
             }
+            let issue = if workflow == Workflow::Mapper {
+                CaptureFailure::from_event(&r["kind"], number(r, "stage")?)
+                    .map(CaptureIssueKind::Probe)
+            } else if r["kind"] == "obstruction" {
+                Some(CaptureIssueKind::Probe(CaptureFailure::UnexpectedContact))
+            } else if workflow == Workflow::Block
+                && r["kind"] == "miss"
+                && number(r, "phase")? == 2.0
+            {
+                Some(CaptureIssueKind::GaugeBlockSideMiss)
+            } else {
+                None
+            };
+            if let Some(kind) = issue {
+                issues.push(CaptureIssue { sequence, kind });
+            }
             match r["kind"].as_str() {
                 "result" => result = true,
-                "obstruction" => {
-                    quarantined = true;
-                }
                 "miss" => {
                     misses += 1;
-                    if workflow == Workflow::Block && number(r, "phase")? == 2.0 {
-                        quarantined = true;
-                    }
                 }
                 "touch" => {
                     let stage = match r["stage"].as_str() {
@@ -151,7 +163,7 @@ impl Capture {
                 _ => (), // Other schema-validated records remain in the raw ledger.
             }
         }
-        let state = if quarantined {
+        let state = if !issues.is_empty() {
             CaptureState::Quarantined
         } else if result {
             CaptureState::ResultUnreviewed
@@ -165,14 +177,16 @@ impl Capture {
             contacts,
             misses,
             nominal_ball_diameter_mm,
+            issues,
         })
     }
 
     pub fn summary(&self) -> String {
-        format!("\"workflow\":{},\"state\":{},\"records\":{},\"coarse_contacts\":{},\"fine_contacts\":{},\"misses\":{},\"nominal_ball_diameter_mm\":{},\"coordinate_frame\":\"linuxcnc-machine-trigger\",\"units\":\"mm\",\"ball_radius_compensation_applied\":false,\"mounting_offset_calibrated\":false,\"uncertainty_mm\":null",
+        format!("\"workflow\":{},\"state\":{},\"records\":{},\"coarse_contacts\":{},\"fine_contacts\":{},\"misses\":{},\"nominal_ball_diameter_mm\":{},\"coordinate_frame\":\"linuxcnc-machine-trigger\",\"units\":\"mm\",\"ball_radius_compensation_applied\":false,\"mounting_offset_calibrated\":false,\"uncertainty_mm\":null,\"issues\":[{}]",
             quote(self.workflow.name()), quote(self.state.name()), self.records.len(),
             self.contacts.iter().filter(|p| p.stage == Stage::Coarse).count(),
             self.contacts.iter().filter(|p| p.stage == Stage::Fine).count(), self.misses,
-            self.nominal_ball_diameter_mm.map(|v| v.to_string()).unwrap_or_else(|| "null".into()))
+            self.nominal_ball_diameter_mm.map(|v| v.to_string()).unwrap_or_else(|| "null".into()),
+            self.issues.iter().map(CaptureIssue::json).collect::<Vec<_>>().join(","))
     }
 }

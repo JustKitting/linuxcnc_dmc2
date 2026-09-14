@@ -107,7 +107,7 @@ The earlier gauge-block workflow samples sides at different heights, which can a
 
 The new object-map importer accepts mapper ledgers and retains their exact source payloads. Historical mapper ledgers do not contain a ball diameter in their start record, so their imported nominal diameter is `null`, not a value copied from today's configuration. Analysis requires its own explicit radius and calibration reference.
 
-A preserved partial or failed scan can still be inspected. A partial capture remains marked partial in an analysis. Obstructed captures remain quarantined and cannot supply fitted geometry through this interface. Neither a terminal program result nor a complete-looking contour is automatically accepted as metrology.
+A preserved partial or failed scan can still be inspected. A partial capture remains marked partial in an analysis. Captures containing an unexpected contact, contact recovery or a recorded missing required trigger remain quarantined and cannot supply fitted geometry through this interface. The importer retains the failure's record, reason and recovery instructions alongside the unchanged ledger. Neither a terminal program result nor a complete-looking contour is automatically accepted as metrology.
 
 ## Remaining-material models for later stages
 

@@ -4,6 +4,7 @@ use super::super::{
     schema::Workflow,
 };
 use super::model::{close, xyz, Mode, Phase, Request, Sample, Settings};
+use dmc2ctl::probe_data::mapper_schema::CaptureFailure;
 
 enum Cycle<'a> {
     Ready,
@@ -32,8 +33,8 @@ pub fn samples(
         if matches!(cycle, Cycle::Finished) {
             return Err("Records follow a terminal mapper result.".into());
         }
-        if matches!(kind, "obstruction" | "recovery") {
-            return Err("The scan was interrupted by an obstruction. Exact contacts remain in the ledger; start a new Run after operator recovery.".into());
+        if let Some(failure) = CaptureFailure::from_event(kind, number(r, "stage")?) {
+            return Err(format!("{} Record {}: {} Exact contacts remain in the ledger. Use Abort then Pendant Mode; recapture the required geometry after recovery.", failure.name(), r["sequence"], failure.message()));
         }
         let index = number(r, "sample")? as usize;
         let phase = Phase::read(number(r, "phase")?)?;

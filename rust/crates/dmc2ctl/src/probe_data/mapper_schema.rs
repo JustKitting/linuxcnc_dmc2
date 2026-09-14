@@ -1,6 +1,43 @@
 //! Exact numeric contract shared by M190 validation and retained-data replay.
 use std::collections::BTreeMap;
 
+/// Failures already encoded by the acquisition executor's retained events.
+/// A failed search endpoint must never become an air sample or a trigger.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum CaptureFailure {
+    UnexpectedContact,
+    ContactRecovery,
+    MissingCoarseTrigger,
+    MissingFineTrigger,
+}
+impl CaptureFailure {
+    pub fn from_event(kind: &str, stage: f64) -> Option<Self> {
+        match (kind, stage) {
+            ("obstruction", _) => Some(Self::UnexpectedContact),
+            ("recovery", _) => Some(Self::ContactRecovery),
+            ("travel", 0.0) => Some(Self::MissingCoarseTrigger),
+            ("travel", 1.0) => Some(Self::MissingFineTrigger),
+            _ => None,
+        }
+    }
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::UnexpectedContact => "unexpected-transfer-contact",
+            Self::ContactRecovery => "recovery-after-unexpected-contact",
+            Self::MissingCoarseTrigger => "coarse-trigger-not-retained",
+            Self::MissingFineTrigger => "fine-trigger-not-retained",
+        }
+    }
+    pub fn message(self) -> &'static str {
+        match self {
+            Self::UnexpectedContact => "An unexpected transfer contact interrupted the scan.",
+            Self::ContactRecovery => "The scan entered recovery after an unexpected contact.",
+            Self::MissingCoarseTrigger => "Coarse probing ended without its required original G38 trigger; the endpoint is not an air sample or contact.",
+            Self::MissingFineTrigger => "Fine probing ended without its required original G38 trigger; neither the endpoint nor the coarse touch is a fine measurement.",
+        }
+    }
+}
+
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 #[repr(u8)]
 pub enum Phase {

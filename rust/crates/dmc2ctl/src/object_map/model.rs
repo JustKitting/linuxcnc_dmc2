@@ -54,6 +54,36 @@ impl CaptureState {
     }
 }
 
+#[derive(Debug, Clone, Copy)]
+pub enum CaptureIssueKind {
+    Probe(crate::probe_data::mapper_schema::CaptureFailure),
+    GaugeBlockSideMiss,
+}
+impl CaptureIssueKind {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Probe(failure) => failure.name(),
+            Self::GaugeBlockSideMiss => "gauge-block-side-miss",
+        }
+    }
+    fn message(self) -> &'static str {
+        match self {
+            Self::Probe(failure) => failure.message(),
+            Self::GaugeBlockSideMiss => "An expected gauge-block side contact was not captured.",
+        }
+    }
+}
+#[derive(Debug)]
+pub struct CaptureIssue {
+    pub sequence: usize,
+    pub kind: CaptureIssueKind,
+}
+impl CaptureIssue {
+    pub fn json(&self) -> String {
+        format!("{{\"sequence\":{},\"kind\":{},\"message\":{},\"recovery\":\"Preserve this ledger for diagnosis. Recapture the required geometry after operator recovery; this snapshot cannot supply fitted geometry.\"}}", self.sequence, quote(self.kind.name()), quote(self.kind.message()))
+    }
+}
+
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Stage {
     Coarse,

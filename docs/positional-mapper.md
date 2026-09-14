@@ -229,8 +229,11 @@ motion-control path.
 
 ## Recorded TODOs — 2026-09-14
 
-These items are pending. Recording them does not change the current acquisition
-program or authorize a machine run.
+This is the continuing implementation list for the positional mapper and
+manufacturing-continuation work. An item stays open until its stated outcome is
+supported. Source implementation, installation, numerical results and physical
+acceptance are separate milestones. Recording a task does not authorize a
+machine run.
 
 - [ ] **Exponential edge bracketing, then binary refinement.** Replace the
   initial long traversal and repeated direction reversals with the user's
@@ -261,3 +264,70 @@ program or authorize a machine run.
   `tmp/output/mapper/mapper-1789419086126841028-1241227.txt`, records 405–409;
   paired comparison: records 359 and 363. No new allowance or retry behavior
   has been applied.
+- [ ] **Represent failed capture cycles explicitly.** A fine search reaching
+  its endpoint without contact is currently recorded as `travel` with fine
+  stage, followed by an interpreter abort. Shared Rust failure types now classify
+  missing coarse/fine triggers, unexpected transfer contacts and contact recovery.
+  Object-map import retains the issue's record, reason and recovery instructions
+  and quarantines the capture; acquisition replay uses the same classification.
+  Both standard binaries have been rebuilt and installed. File replay of the
+  retained failed run reports `fine-trigger-not-retained` at record 409, preserves
+  the original ledger byte for byte and exports labelled diagnostic contacts with
+  no ASC cloud. The readback is retained locally at
+  `/home/kit/cnc-backups/mapper-finish-pt50q0l_/capture-diagnosis/readback.json`.
+  This file result does not establish physical recovery or a corrected fine
+  approach. Those outcomes remain open with the fine-allowance work above. Source:
+  `object_map/capture.rs`, `probe_capture/mapper/state.rs`, and
+  `live/nc_files/mapper-move.ngc`.
+- [ ] **Extract reference features and measured stock.** Turn retained rim,
+  top and side observations into planes, rotated footprints, dimensions and
+  coverage with source-contact references. The existing named-face calculation
+  requires manual face assignments and assumes model-axis-parallel planes.
+  Add an explicit stock representation with observed, supported-empty and
+  unknown regions. Keep predicted stock from operation history separate from
+  measured stock; do not fill unobserved regions by implication.
+- [ ] **Validate placement and compare setups.** Retain named calibration
+  evidence and reference-frame relationships, calculate independent feature
+  prediction errors, and provide a reviewed placement state with an explicit
+  feature tolerance. Add repeatability and uncertainty analysis grounded in
+  repeated observations. Current local fit convergence alone does not accept a
+  placement or establish uncertainty. Relocation must create a new setup and
+  transform the same design-space feature coordinates through its new pose.
+- [ ] **Improve registration and mesh handling where required.** Add usable
+  initial alignment from identified features, expose competing symmetric
+  placements, and handle surface/mesh defects explicitly. Direct nearest-triangle
+  queries currently scale with every triangle for every selected contact and
+  iteration; add spatial indexing for representative large models without
+  changing contact provenance or fitting semantics. Mesh closure checks alone
+  do not establish absence of self-intersections.
+- [ ] **Connect mapper results to the operator workflow.** Provide normal UI
+  access to object/setup selection, retained captures, model revisions, analysis
+  parameters, residual inspection and named-location export. Analysis must run
+  outside machine control and remain cancellable without gating Clear Fault or
+  Pendant Mode. The current implementation supplies standard Rust CLI commands
+  and exchange files; a dedicated mapper UI is not implemented.
+- [ ] **Implement the FreeCAD setup adapter.** Create a new manufacturing
+  revision using the chosen model placement, measured/predicted stock and
+  retained fixture geometry; regenerate the selected operations and export the
+  result for review. Avoid applying a transform both to the model and through a
+  work offset. Target the actual FreeCAD release and document structure. Current
+  inputs missing: the user's native part/CAM document and installed FreeCAD
+  version. The present STL/ASC exchange is available; automatic Job updates are
+  not implemented.
+- [ ] **Generate and check continuation/location programs.** Use the retained
+  setup, current stock, desired geometry and tool/holder/fixture data to prepare
+  the next operation, with an explicit collision/clearance model and the normal
+  typed script-loading/recovery contract. Named coordinate CSV currently contains
+  no toolpath, tool selection, feed, offset command or operation history. Those
+  facts must come from the actual job before a cutting program is issued.
+- [ ] **Implement the additive continuation adapter.** Combine measured
+  geometry with the original slicer project/G-code and retained printer process
+  state. Distinguish a planar layer restart from nonplanar repair and incomplete
+  layers. Current inputs missing: printer/controller details and the original
+  job. No printer continuation program has been generated or executed.
+- [ ] **Run the practical acceptance sequence.** Obtain a matching real model
+  and units, establish the probe/reference convention, predict withheld features,
+  retain their actual contact errors, repeat after relocation, then evaluate a
+  reviewed subsequent operation. Exact machine sequences and fixtures must be
+  known before execution. Numerical examples and builds do not satisfy this
+  physical milestone. Keep failed or unmeasured stages explicitly open.
