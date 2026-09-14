@@ -1,3 +1,49 @@
+# Automatic block outline
+
+`Automatic block outline` in Scripts replaces the former automatic block map's
+four-boundary/grid/cuboid sequence for new runs. Start above the stock as before.
+It retains the original fine top trigger, brackets only the first edge in
+physical RIGHT / LinuxCNC -X, then approaches the known inside point in physical
+LEFT / LinuxCNC +X at the Z of the most recent successful top contact.
+
+`config/mapper-outline.txt` owns the 25.4 mm initial bracket handoff requested by
+the operator. Each run retains its own policy snapshot. Trace step uses the
+existing editable spacing value as its local search radius. Outline resolution
+controls the polygonal search circle's maximum chord sagitta and the final
+seam-contact tolerance; sector count follows from those two values, with sectors
+no larger than a quadrant. There is no fixed retry-count fault threshold.
+
+After each retained fine edge contact, release along the reverse approach and
+withdraw to the local search circle. Probe successive candidate chords around
+that contact at the same Z. Misses advance the local search; a collision sets
+the next contour point and its observed approach direction. This walks around
+convex and concave corners without first assuming a rectangle or visiting the
+opposite side. No Z lift is inserted between local outline stations.
+
+A nearby return with compatible approach direction is only a closure candidate.
+After traversing more than the local circle's circumference, independently
+re-touch the original seam and require agreement within Outline resolution.
+Only then record a closed contour and perform the existing final upward return
+to the starting clearance. Every contact is synced and read back before any
+following move; reported released endpoints remain separate from trigger XYZ.
+
+Feeds remain 400 mm/min downward search, 800 mm/min horizontal search,
+50 mm/min fine touch/release, and 1500 mm/min clearance travel. A radial withdrawal
+contact, missing local edge, repeated nonclosing region or mismatched seam
+produces a readable partial-result error with Abort and Pendant Mode recovery.
+Clear Fault retains its independent priority path.
+
+CSV retains all captures and movement records. JSON uses
+`dmc2.tactile-outline.v1` and contains ordered original fine machine-coordinate
+XYZ contacts, the fixed work-coordinate Z plane, closure status and any partial
+result reason. It applies no rectangle fit or nominal ball-radius correction.
+Earlier ledgers keep their original mode, planner and interpretation; the
+separate Automatic rim trace operation retains the earlier cuboid workflow.
+
+---
+
+The following describes the retained earlier mapper/rim workflow.
+
 # Automatic stock mapping and rim tracing
 
 The Scripts selector contains **Automatic block map** and **Automatic rim trace**.

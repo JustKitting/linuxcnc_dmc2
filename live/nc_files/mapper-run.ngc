@@ -23,6 +23,7 @@ G21 G90 G94 G17 G40 G80 G61.1
 #<_mp_clear> = #<_z>
 #<_mp_floor> = [#<_z> - #2]
 #<_mp_step_z> = [1 / ABS[#<_ini[joint_2]scale>]]
+#<_mp_mode> = #1
 #<_mp_sequence> = 0
 #<_mp_sample> = 0
 #<_mp_phase> = 0
@@ -98,17 +99,37 @@ o<mp_loop> while [1]
     o<mp_finished> if [#<_mp_phase> EQ 5]
         o<mp_loop> break
     o<mp_finished> endif
-    o<mp_at_clearance> if [ABS[#<_z> - #<_mp_clear>] GT [#<_mp_step_z> / 2]]
-        (ABORT,Probe is not at the starting-Z clearance plane. No lateral transfer was issued. Abort then Pendant Mode.)
-    o<mp_at_clearance> endif
-    (XY transfer at starting clearance: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
-    o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<_mp_clear>] [0] [#<_mp_travel>]
-    #<return_z> = #<_mp_clear>
-    o<mp_side> if [#<_mp_phase> EQ 4]
-        (Outside-edge descent holds XY; coarse probe feed, not clearance travel feed.)
-        o<mapper-move> call [#<_x>] [#<_y>] [#<tz>] [0] [#<_mp_downward>]
-        #<return_z> = #<tz>
-    o<mp_side> endif
+    (Typed outline phases: 6 first edge, 7 local candidate, 8 radial withdrawal, 9 seam check.)
+    #<outline_local> = [[#<_mp_phase> GE 6] AND [#<_mp_phase> LE 9]]
+    o<mp_local_entry> if [[#<outline_local> EQ 1] AND [#<_mp_phase> NE 6]]
+        o<mp_fixed_plane> if [[ABS[#<_z> - #<_mp_trace_z>] GT [#<_mp_step_z> / 2]] OR [ABS[#<tz> - #<_mp_trace_z>] GT [#<_mp_step_z> / 2]]]
+            (ABORT,Outline trace differs from its retained Z plane. No new move issued; Abort then Pendant Mode.)
+        o<mp_fixed_plane> endif
+        o<mp_seam_approach> if [#<_mp_phase> EQ 9]
+            (Local seam approach at fixed Z: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+            o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<tz>] [0] [#<_mp_coarse>]
+        o<mp_seam_approach> else
+            o<mp_local_origin> if [[ABS[#<_x> - #<_mp_ax>] GT [0.5 / ABS[#<_ini[joint_0]scale>]]] OR [ABS[#<_y> - #<_mp_ay>] GT [0.5 / ABS[#<_ini[joint_1]scale>]]]]
+                (ABORT,Outline candidate does not start at the retained released endpoint. Abort then Pendant Mode.)
+            o<mp_local_origin> endif
+        o<mp_seam_approach> endif
+        #<return_z> = #<_mp_trace_z>
+    o<mp_local_entry> else
+        o<mp_at_clearance> if [ABS[#<_z> - #<_mp_clear>] GT [#<_mp_step_z> / 2]]
+            (ABORT,Probe is not at starting-Z clearance. No lateral transfer issued; Abort then Pendant Mode.)
+        o<mp_at_clearance> endif
+        (XY transfer at starting clearance: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+        o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<_mp_clear>] [0] [#<_mp_travel>]
+        #<return_z> = #<_mp_clear>
+        o<mp_side> if [[#<_mp_phase> EQ 4] OR [#<_mp_phase> EQ 6]]
+            (Outside-edge descent holds XY at the retained target Z and downward search feed.)
+            o<mapper-move> call [#<_x>] [#<_y>] [#<tz>] [0] [#<_mp_downward>]
+            #<return_z> = #<tz>
+            o<mp_save_trace_z> if [#<_mp_phase> EQ 6]
+                #<_mp_trace_z> = #<tz>
+            o<mp_save_trace_z> endif
+        o<mp_side> endif
+    o<mp_local_entry> endif
     (Top -Z or inward side touch: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
     o<mapper-move> call [#<tx>] [#<ty>] [#<tz>] [2] [#<_mp_coarse>]
     o<mp_coarse_hit> if [#<_mp_hit> EQ 1]
@@ -119,17 +140,23 @@ o<mp_loop> while [1]
     o<mp_coarse_hit> endif
     (Withdraw on the same normal before lifting: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
     o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [1] [#<_mp_fine>]
-    #<withdraw_action> = 4
-    o<mp_horizontal_backoff> if [#<_mp_phase> EQ 4]
-        #<withdraw_action> = 0
-    o<mp_horizontal_backoff> endif
-    (Complete the backoff: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X. Top backoff is UP / LinuxCNC +Z only.)
-    o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [#<withdraw_action>] [#<_mp_travel>]
-    (Return UP / LinuxCNC +Z, XY unchanged; retain recontacts and continue upward.)
-    o<mapper-move> call [#<_x>] [#<_y>] [#<_mp_clear>] [4] [#<_mp_travel>]
+    o<mp_return_policy> if [#<outline_local> EQ 0]
+        #<withdraw_action> = 4
+        o<mp_horizontal_backoff> if [#<_mp_phase> EQ 4]
+            #<withdraw_action> = 0
+        o<mp_horizontal_backoff> endif
+        (Complete backoff: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X. Top backoff is UP / LinuxCNC +Z only.)
+        o<mapper-move> call [#<_mp_ax>] [#<_mp_ay>] [#<return_z>] [#<withdraw_action>] [#<_mp_travel>]
+        (Return UP / LinuxCNC +Z, XY unchanged; retain recontacts and continue upward.)
+        o<mapper-move> call [#<_x>] [#<_y>] [#<_mp_clear>] [4] [#<_mp_travel>]
+    o<mp_return_policy> endif
     o<mapper-record> call [4]
-    (DEBUG,Mapper sample %d#<_mp_sample> retained; phase %d#<_mp_phase>. Returned to starting clearance.)
+    (DEBUG,Mapper sample %d#<_mp_sample> retained; phase %d#<_mp_phase>. Next plan uses this released endpoint.)
 o<mp_loop> endwhile
+(After a closed outline, make the existing final UP / LinuxCNC +Z return once; XY unchanged.)
+o<mp_outline_final> if [#<_mp_mode> EQ 2]
+    o<mapper-move> call [#<_x>] [#<_y>] [#<_mp_clear>] [4] [#<_mp_travel>]
+o<mp_outline_final> endif
 M65 P1
 M66 P5 L0
 o<mp_release_selection> if [#5399 NE 0]

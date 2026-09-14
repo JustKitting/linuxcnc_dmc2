@@ -11,7 +11,7 @@ use super::{
 };
 use std::path::Path;
 
-fn quoted(s: &str) -> String {
+pub(super) fn quoted(s: &str) -> String {
     let mut out = String::from("\"");
     for c in s.chars() {
         match c {
@@ -30,6 +30,9 @@ fn quoted(s: &str) -> String {
 
 pub(crate) fn export(path: &Path, require_result: bool) -> Result<(), String> {
     let (records, settings) = read(path)?;
+    if settings.mode == Mode::Outline {
+        return super::outline_report::export(path, &records, &settings, require_result);
+    }
     let result = state::samples(&records, &settings, require_result).and_then(|samples| {
         let mut survey = Survey::new(&settings, &samples);
         match survey.run() {
@@ -41,35 +44,7 @@ pub(crate) fn export(path: &Path, require_result: bool) -> Result<(), String> {
     if require_result {
         result.as_ref().map_err(Clone::clone)?;
     }
-    let mut csv = String::from("sequence,sample,phase,edge,stage,kind,position_source,machine_x_mm,machine_y_mm,machine_z_mm,from_work_x_mm,from_work_y_mm,from_work_z_mm,target_work_x_mm,target_work_y_mm,target_work_z_mm,feed_mm_min\n");
-    for r in records.iter().skip(1) {
-        let trigger = Workflow::Mapper.requires_exact_trigger(&r["kind"]);
-        let p = xyz(r, "machine_", if trigger { "_exact" } else { "" })?;
-        csv.push_str(&format!(
-            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
-            r["sequence"],
-            r["sample"],
-            r["phase"],
-            r["edge"],
-            r["stage"],
-            r["kind"],
-            if trigger {
-                "original_G38_trigger"
-            } else {
-                "reported_endpoint_not_a_trigger"
-            },
-            p[0],
-            p[1],
-            p[2],
-            r["from_x"],
-            r["from_y"],
-            r["from_z"],
-            r["target_x"],
-            r["target_y"],
-            r["target_z"],
-            r["feed"]
-        ));
-    }
+    let csv = event_csv(&records)?;
     let ended = records.last().is_some_and(|r| r["kind"] == "result");
     let issue = result
         .as_ref()
@@ -103,4 +78,37 @@ pub(crate) fn export(path: &Path, require_result: bool) -> Result<(), String> {
         &path.with_extension(format!("{stem}json")),
         metadata.as_bytes(),
     )
+}
+
+pub(super) fn event_csv(records: &[ledger::Fields]) -> Result<String, String> {
+    let mut csv = String::from("sequence,sample,phase,edge,stage,kind,position_source,machine_x_mm,machine_y_mm,machine_z_mm,from_work_x_mm,from_work_y_mm,from_work_z_mm,target_work_x_mm,target_work_y_mm,target_work_z_mm,feed_mm_min\n");
+    for r in records.iter().skip(1) {
+        let trigger = Workflow::Mapper.requires_exact_trigger(&r["kind"]);
+        let p = xyz(r, "machine_", if trigger { "_exact" } else { "" })?;
+        csv.push_str(&format!(
+            "{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{},{}\n",
+            r["sequence"],
+            r["sample"],
+            r["phase"],
+            r["edge"],
+            r["stage"],
+            r["kind"],
+            if trigger {
+                "original_G38_trigger"
+            } else {
+                "reported_endpoint_not_a_trigger"
+            },
+            p[0],
+            p[1],
+            p[2],
+            r["from_x"],
+            r["from_y"],
+            r["from_z"],
+            r["target_x"],
+            r["target_y"],
+            r["target_z"],
+            r["feed"]
+        ));
+    }
+    Ok(csv)
 }

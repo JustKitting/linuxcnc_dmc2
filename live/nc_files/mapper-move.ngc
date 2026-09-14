@@ -61,7 +61,7 @@ o<mm_release> else
         o<mm_contact> if [#<_mp_hit> EQ 1]
             o<mm_obstruction> if [#4 EQ 0]
                 o<mapper-record> call [3]
-                o<mm_outside_z> if [[#<_mp_phase> EQ 4] AND [#1 EQ #<_mp_fx>] AND [#2 EQ #<_mp_fy>] AND [#3 LT #<_mp_fz>]]
+                o<mm_outside_z> if [[[#<_mp_phase> EQ 4] OR [#<_mp_phase> EQ 6]] AND [#1 EQ #<_mp_fx>] AND [#2 EQ #<_mp_fy>] AND [#3 LT #<_mp_fz>]]
                     (User-requested outside-edge Z recovery: retain trigger first, release UP then return to starting clearance; cancel.)
                     (UP / LinuxCNC +Z only; XY unchanged.)
                     o<mapper-move> call [#<_x>] [#<_y>] [#<_mp_clear>] [1] [#<_mp_fine>]

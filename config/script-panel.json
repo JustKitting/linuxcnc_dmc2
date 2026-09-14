@@ -57,7 +57,7 @@
       "key": "auto-map",
       "operation": "program.auto-map",
       "requires_beginning": true,
-      "description": "Start clear above the block. Uses the retained plate envelope, binary edge searches and an outward grid; verifies the fitted faces. Starting Z is the clearance ceiling; every dip stays within its original descent budget. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
+      "description": "Start clear above the block. Brackets the first edge, probes inward at the last top-contact Z, then follows local contacts around the outline at fixed Z. Trace step sets the local search radius; Outline resolution sets candidate spacing and closing-touch tolerance. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
       "parameters": [
         {
           "pin": "auto-map-drop-mm",
@@ -68,14 +68,14 @@
         },
         {
           "pin": "auto-map-grid-mm",
-          "label": "Grid / station spacing",
+          "label": "Trace step / local search radius",
           "kind": "positive-mm",
           "default": "1",
           "increment": "1"
         },
         {
           "pin": "auto-map-resolution-mm",
-          "label": "Boundary bracket resolution",
+          "label": "Outline resolution",
           "kind": "positive-mm",
           "default": "0.1",
           "increment": "0.1"

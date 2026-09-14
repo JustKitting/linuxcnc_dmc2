@@ -6,17 +6,9 @@ use std::collections::BTreeMap;
 pub enum Mode {
     Surface,
     Rim,
+    Outline,
 }
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-#[repr(u8)]
-pub enum Phase {
-    Reference,
-    Boundary,
-    Grid,
-    Verify,
-    Rim,
-    Finished,
-}
+pub use dmc2ctl::probe_data::mapper_schema::Phase;
 
 #[derive(Clone, Debug)]
 pub struct Settings {
@@ -33,6 +25,7 @@ pub struct Settings {
     pub backoff: f64,
     pub feeds: [f64; 3], // horizontal coarse, fine, travel, mm/min
     pub downward_feed: f64,
+    pub outline_handoff: Option<f64>,
     pub step: [f64; 3],
 }
 
@@ -57,7 +50,12 @@ pub fn data(text: &str, magic: &str, required: &[&str]) -> Result<Fields, String
 }
 
 impl Settings {
-    pub fn read(start: &Fields, plate: &Fields, policy: &Fields) -> Result<Self, String> {
+    pub fn read(
+        start: &Fields,
+        plate: &Fields,
+        policy: &Fields,
+        outline: Option<&Fields>,
+    ) -> Result<Self, String> {
         let n = |k: &str| number(start, k);
         let xyz = |prefix: &str| -> Result<[f64; 3], String> {
             Ok([
@@ -111,6 +109,7 @@ impl Settings {
             mode: match n("mode")? {
                 0.0 => Mode::Surface,
                 1.0 => Mode::Rim,
+                2.0 => Mode::Outline,
                 _ => return Err("Unknown automatic mapper mode.".into()),
             },
             origin,
@@ -125,6 +124,7 @@ impl Settings {
             side_depth: n("side_depth")?,
             backoff: n("backoff")?,
             downward_feed: number(policy, "downward_feed")?,
+            outline_handoff: outline.map(|v| number(v, "handoff_mm")).transpose()?,
             feeds: [
                 number(policy, "coarse_feed")?,
                 number(policy, "fine_feed")?,
@@ -159,13 +159,20 @@ impl Settings {
         if result.mode == Mode::Rim && (result.side_depth <= 0.0 || result.backoff <= 0.0) {
             return Err("Set positive rim depth and backoff before Run.".into());
         }
+        if result.mode == Mode::Outline
+            && !result
+                .outline_handoff
+                .is_some_and(|v| v.is_finite() && v > 0.0)
+        {
+            return Err("A positive first-edge handoff distance is required in this run's outline policy snapshot.".into());
+        }
         result.bounds(origin)?;
         result.bounds([origin[0], origin[1], result.floor])?;
         Ok(result)
     }
 
     pub fn coarse_feed(&self, phase: Phase) -> f64 {
-        if phase == Phase::Rim {
+        if phase == Phase::Rim || phase.is_outline() {
             self.feeds[0]
         } else {
             self.downward_feed
@@ -237,6 +244,7 @@ impl Request {
 pub struct Sample {
     pub request: Request,
     pub trigger: Option<[f64; 3]>,
+    pub returned: Option<[f64; 3]>, // reported release/endpoint, never a trigger substitute
 }
 
 pub fn xyz(fields: &Fields, prefix: &str, suffix: &str) -> Result<[f64; 3], String> {

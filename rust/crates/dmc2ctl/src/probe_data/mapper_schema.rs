@@ -1,5 +1,43 @@
 //! Exact numeric contract shared by M190 validation and retained-data replay.
 use std::collections::BTreeMap;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
+pub enum Phase {
+    Reference = 0,
+    Boundary = 1,
+    Grid = 2,
+    Verify = 3,
+    Rim = 4,
+    Finished = 5,
+    OutlineEnter = 6,
+    OutlineAdvance = 7,
+    OutlineBackoff = 8,
+    OutlineClose = 9,
+}
+impl Phase {
+    pub fn read(value: f64) -> Result<Self, String> {
+        match value {
+            0.0 => Ok(Self::Reference),
+            1.0 => Ok(Self::Boundary),
+            2.0 => Ok(Self::Grid),
+            3.0 => Ok(Self::Verify),
+            4.0 => Ok(Self::Rim),
+            5.0 => Ok(Self::Finished),
+            6.0 => Ok(Self::OutlineEnter),
+            7.0 => Ok(Self::OutlineAdvance),
+            8.0 => Ok(Self::OutlineBackoff),
+            9.0 => Ok(Self::OutlineClose),
+            _ => Err("Unknown mapper phase; reopen the matching script before Run.".into()),
+        }
+    }
+    pub fn is_outline(self) -> bool {
+        matches!(
+            self,
+            Self::OutlineEnter | Self::OutlineAdvance | Self::OutlineBackoff | Self::OutlineClose
+        )
+    }
+}
 pub const START_FIELDS: &[&str] = &[
     "mode",
     "x",
@@ -58,8 +96,7 @@ pub(super) fn validate(kind: &str, fields: &BTreeMap<&str, &str>) -> Result<(), 
             return Err(format!("Mapper {key} is not a valid integer identifier."));
         }
     }
-    if n("phase") > 5.0
-        || n("phase") < 0.0
+    if Phase::read(n("phase")).is_err()
         || n("edge") > 3.0
         || n("sample") < 0.0
         || n("stage") > 1.0

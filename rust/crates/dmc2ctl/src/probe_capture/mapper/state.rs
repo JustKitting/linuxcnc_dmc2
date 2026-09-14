@@ -3,7 +3,7 @@ use super::super::{
     ledger::{number, Fields},
     schema::Workflow,
 };
-use super::model::{close, xyz, Phase, Request, Sample, Settings};
+use super::model::{close, xyz, Mode, Phase, Request, Sample, Settings};
 
 enum Cycle<'a> {
     Ready,
@@ -34,15 +34,7 @@ pub fn samples(
             return Err("The scan was interrupted by an obstruction. Exact contacts remain in the ledger; start a new Run after operator recovery.".into());
         }
         let index = number(r, "sample")? as usize;
-        let phase = match number(r, "phase")? {
-            0.0 => Phase::Reference,
-            1.0 => Phase::Boundary,
-            2.0 => Phase::Grid,
-            3.0 => Phase::Verify,
-            4.0 => Phase::Rim,
-            5.0 => Phase::Finished,
-            _ => return Err("Invalid mapper phase.".into()),
-        };
+        let phase = Phase::read(number(r, "phase")?)?;
         if Workflow::Mapper.requires_exact_trigger(kind) {
             if r.get("exact_source").map(String::as_str)
                 != Some("emcStatus.motion.traj.probedPosition;machine-mm")
@@ -62,6 +54,7 @@ pub fn samples(
                 let expected_sample = match cycle {
                     Cycle::Coarse(coarse) if kind == "withdrawal-release" => number(coarse, "sample")? as usize,
                     Cycle::Measured => samples.len() - 1,
+                    Cycle::Ready if s.mode == Mode::Outline && phase == Phase::Finished => samples.len(),
                     _ => return Err("A withdrawal event is outside a retained probing cycle; Abort then Pendant Mode.".into()),
                 };
                 let from = xyz(r, "from_", "")?;
@@ -115,6 +108,7 @@ pub fn samples(
                 let target = xyz(r, "target_", "")?;
                 s.bounds(target)?;
                 samples.push(Sample {
+                    returned: None,
                     request: Request {
                         phase,
                         edge: number(r, "edge")? as i32,
@@ -130,15 +124,28 @@ pub fn samples(
                 cycle = Cycle::Measured;
             }
             "ready" => {
+                let sample_count = samples.len();
+                let sample = samples
+                    .last_mut()
+                    .ok_or("A mapper ready record has no measured sample.")?;
+                let clearance = if sample.request.phase.is_outline() {
+                    sample.request.target[2]
+                } else {
+                    s.origin[2]
+                };
+                let returned = xyz(r, "work_", "")?;
+                s.bounds(returned)?;
                 if !matches!(cycle, Cycle::Measured)
-                    || index + 1 != samples.len()
-                    || (number(r, "work_z")? - s.origin[2]).abs() > s.step[2] / 2.0 + 1e-9
+                    || index + 1 != sample_count
+                    || phase != sample.request.phase
+                    || (returned[2] - clearance).abs() > s.step[2] / 2.0 + 1e-9
                 {
                     return Err(
-                        "The previous sample lacks its matching return to starting-Z clearance."
+                        "The previous sample lacks its matching released endpoint at the planned Z plane."
                             .into(),
                     );
                 }
+                sample.returned = Some(returned);
                 cycle = Cycle::Ready;
             }
             "result" => {

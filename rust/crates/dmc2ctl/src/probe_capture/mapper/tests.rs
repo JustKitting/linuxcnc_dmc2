@@ -4,7 +4,7 @@ use super::{
     search::{Progress, Survey},
 };
 
-fn fixture(mode: Mode) -> Settings {
+pub(super) fn fixture(mode: Mode) -> Settings {
     Settings {
         mode,
         origin: [0.0, 0.0, 10.0],
@@ -19,6 +19,7 @@ fn fixture(mode: Mode) -> Settings {
         backoff: 2.0,
         feeds: [800.0, 50.0, 1500.0],
         downward_feed: 400.0,
+        outline_handoff: None,
         step: [0.001; 3],
     }
 }
@@ -46,7 +47,11 @@ fn rotated_stock_replay_reaches_face_checks_and_rim_inside_original_envelope() {
                     y + settings.offset[1],
                     8.0 + settings.offset[2],
                 ]);
-                samples.push(Sample { request, trigger });
+                samples.push(Sample {
+                    request,
+                    trigger,
+                    returned: None,
+                });
                 assert!(samples.len() < 2000, "finite fixture did not terminate");
             }
             Err(Progress::Invalid(e)) => panic!("{e}"),
@@ -76,6 +81,7 @@ fn contact_at_plate_boundary_never_becomes_a_measured_stock_edge() {
         samples.push(Sample {
             request,
             trigger: Some([20.0, 30.0, 48.0]),
+            returned: None,
         });
     }
     assert!(matches!(

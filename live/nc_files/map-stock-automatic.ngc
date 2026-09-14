@@ -4,7 +4,7 @@
 (DMC2 REQUIRES running-session;estop-clear;machine-on;interpreter-idle;all-homed)
 (DMC2 RECOVERY abort-task)
 (DMC2 END)
-(Automatic block map: start clear above the stock.)
+(Automatic block outline: first edge then local fixed-Z contour trace.)
 (Physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
 o<auto-map-preview> if [#<_task> EQ 0]
     (PREVIEW,stop)
@@ -14,7 +14,7 @@ o<auto-map-valid> if [#<_hal[axisui.auto-map-parameters-valid]> NE 1]
     (ABORT,Correct the settings in Scripts before Run. Pendant Mode remains available.)
 o<auto-map-valid> endif
 (X increasing: physical LEFT / LinuxCNC +X; decreasing: physical RIGHT / LinuxCNC -X.)
-#<arg0> = [0]
+#<arg0> = [2]
 #<arg1> = [#<_hal[axisui.auto-map-drop-mm]>]
 #<arg2> = [#<_hal[axisui.auto-map-grid-mm]>]
 #<arg3> = [#<_hal[axisui.auto-map-resolution-mm]>]

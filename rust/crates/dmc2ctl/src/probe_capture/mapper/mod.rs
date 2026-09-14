@@ -1,6 +1,10 @@
 //! Automatic stock geometry. M190 publishes data; LinuxCNC owns motion.
 mod dimensions;
 mod model;
+mod outline;
+mod outline_report;
+#[cfg(test)]
+mod outline_tests;
 mod report;
 mod search;
 mod state;
@@ -8,7 +12,7 @@ mod state;
 mod tests;
 
 use super::{ledger, plan_bank, schema::Workflow, storage};
-use model::{data, Phase, Request, Settings};
+use model::{data, Mode, Phase, Request, Settings};
 pub(super) use report::export;
 use std::{fs, path::Path};
 
@@ -42,10 +46,14 @@ pub(super) fn begin(root: &Path, output: &Path) -> Result<(), String> {
     let feeds = fs::read_to_string(root.join("config/mapper-feeds.txt"))
         .map_err(|e| format!("Reading the mapper feed settings: {e}"))?;
     policy(&feeds)?;
+    let outline = fs::read_to_string(root.join("config/mapper-outline.txt"))
+        .map_err(|e| format!("Reading the outline search policy: {e}"))?;
+    data(&outline, "DMC2_OUTLINE_POLICY_V1", &["handoff_mm"])?;
     storage::begin(output, Workflow::Mapper)?;
     let path = storage::active_path(output, Workflow::Mapper, 0)?;
     ledger::publish(&path.with_extension("plate.txt"), plate.as_bytes())?;
-    ledger::publish(&path.with_extension("feeds.txt"), feeds.as_bytes())
+    ledger::publish(&path.with_extension("feeds.txt"), feeds.as_bytes())?;
+    ledger::publish(&path.with_extension("outline.txt"), outline.as_bytes())
 }
 
 fn read(path: &Path) -> Result<(Vec<ledger::Fields>, Settings), String> {
@@ -66,7 +74,17 @@ fn read(path: &Path) -> Result<(Vec<ledger::Fields>, Settings), String> {
         &fs::read_to_string(path.with_extension("feeds.txt"))
             .map_err(|e| format!("Reading this run's feed snapshot: {e}"))?,
     )?;
-    let settings = Settings::read(start, &plate, &policy)?;
+    let outline = if ledger::number(start, "mode")? == 2.0 {
+        Some(data(
+            &fs::read_to_string(path.with_extension("outline.txt"))
+                .map_err(|e| format!("Reading this run's outline policy snapshot: {e}"))?,
+            "DMC2_OUTLINE_POLICY_V1",
+            &["handoff_mm"],
+        )?)
+    } else {
+        None
+    };
+    let settings = Settings::read(start, &plate, &policy, outline.as_ref())?;
     Ok((records, settings))
 }
 
@@ -80,8 +98,12 @@ pub(super) fn publish_next(output: &Path, sequence: u64) -> Result<(), String> {
             return Err("The mapper sequence is stale or the run has already ended. Start a new Run after recovery.".into());
         }
         let samples = state::samples(&records, &settings, false)?;
-        let mut survey = search::Survey::new(&settings, &samples);
-        let request = match survey.run() {
+        let progress = if settings.mode == Mode::Outline {
+            outline::run(&settings, &samples).map(|_| ())
+        } else {
+            search::Survey::new(&settings, &samples).run().map(|_| ())
+        };
+        let request = match progress {
             Err(search::Progress::Need(p)) => p,
             Err(search::Progress::Invalid(error)) => {
                 return match export(&path, false) {
