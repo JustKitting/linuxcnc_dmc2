@@ -25,8 +25,8 @@
       "id": "xyz_normal_soft_limits_mm",
       "blocking": true,
       "status": "accepted_provisional",
-      "value": {"x": [0.0, 300.0], "y": [0.0, 173.0], "z": [0.0, 135.0]},
-      "reason": "The user accepted these conservative values derived from the published DMC2 Mini cutting region."
+      "value": {"x": [0.0, 300.0], "y": [-27.0, 173.0], "z": [0.0, 135.0]},
+      "reason": "The user accepted the original conservative X/Z bounds. On 2026-09-14 the user accepted Y -27..173 mm after manually identifying an approximate endpoint at machine Y -28.0116029663086 mm; the selected boundary leaves 1.011602966308601 mm inside that point. The captured values and rounding are retained in config/metrology/references/y-travel-2026-09-14.json."
     },
     {
       "id": "xyz_home_switch_coordinates_mm",

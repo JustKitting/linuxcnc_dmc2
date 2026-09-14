@@ -1,0 +1,48 @@
+{
+  "schema": "dmc2-axis-travel-reference-v1",
+  "status": "user_accepted_reference",
+  "axis": "Y",
+  "accepted_date": "2026-09-14",
+  "operator_observation": "ok this is aboput the reral m,aximum",
+  "operator_acceptance": "done and yes",
+  "units": "mm",
+  "coordinate_frame": "LinuxCNC machine Y",
+  "negative_direction": "away from the Y home switch",
+  "capture": {
+    "time_utc": "2026-09-14T15:30:55.751441+00:00",
+    "source": "LinuxCNC NML live status after the operator identified the approximate endpoint",
+    "kind": "stationary endpoint position, not a probe or switch trigger",
+    "position_y": -28.011602928884532,
+    "actual_position_y": -28.0116029663086,
+    "joint_velocity": 0.0,
+    "joint_homed": true,
+    "joint_fault": false,
+    "negative_hard_limit_active": false,
+    "positive_hard_limit_active": false,
+    "work_offset_y": 0.0,
+    "g92_offset_y": 0.0,
+    "tool_offset_y": 0.0,
+    "original_record": "/home/kit/cnc-backups/dmc2-y-endpoint-atp13a_3.json",
+    "original_record_sha256": "b9e76737363f816e5381742897fc1b7f83a9330675f8d4ce4dccc38d57ef4d8b",
+    "readback": "The retained actual and commanded Y coordinates matched a fresh stationary LinuxCNC status read."
+  },
+  "selection": {
+    "home_y": 173.0,
+    "requested_buffer_mm": 1.0,
+    "buffer_source": "Earlier user request to give the machine a 1 mm buffer from each limit",
+    "available_travel_mm": 201.0116029663086,
+    "formula": "rounded_travel = floor((home_y - actual_position_y) - requested_buffer_mm); minimum_y = home_y - rounded_travel",
+    "rounded_travel_mm": 200.0,
+    "minimum_y": -27.0,
+    "maximum_y": 173.0,
+    "clearance_from_marked_endpoint_mm": 1.011602966308601,
+    "acceptance_scope": "Permanent Y minimum -27 mm, applied after the operator moved inward past it"
+  },
+  "runtime_reference": {
+    "path": "live/dmc2.ini",
+    "axis_section": "AXIS_Y",
+    "joint_section": "JOINT_1",
+    "key": "MIN_LIMIT",
+    "meaning": "INI values configure LinuxCNC; this record retains the operator observation and accepted selection."
+  }
+}
