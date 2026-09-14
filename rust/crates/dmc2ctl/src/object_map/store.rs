@@ -146,7 +146,7 @@ impl Store {
     fn object_path(&self, id: &Id) -> PathBuf {
         self.root.join(id.as_str())
     }
-    fn setup_path(&self, object: &Id, setup: &Id) -> PathBuf {
+    pub(super) fn setup_path(&self, object: &Id, setup: &Id) -> PathBuf {
         self.object_path(object).join("setups").join(setup.as_str())
     }
 
@@ -314,10 +314,23 @@ impl Store {
                 })
                 .collect::<Vec<_>>();
             setups.push(format!(
-                "{{{},\"registration\":{},\"captures\":[{}]}}",
+                "{{{},\"registration\":{},\"captures\":[{}],\"analysis_candidates\":[{}]}}",
                 named_json(&id, &name),
                 Registration::Unresolved.json(),
-                captures.join(",")
+                captures.join(","),
+                ids_in(&self.setup_path(object, &id).join("analyses"), true)?
+                    .iter()
+                    .map(|analysis| format!(
+                        "{{\"id\":{},\"manifest_present\":{}}}",
+                        quote(analysis.as_str()),
+                        self.setup_path(object, &id)
+                            .join("analyses")
+                            .join(analysis.as_str())
+                            .join("manifest.json")
+                            .is_file()
+                    ))
+                    .collect::<Vec<_>>()
+                    .join(",")
             ));
         }
         let designs = self

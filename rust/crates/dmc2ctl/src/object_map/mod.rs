@@ -3,6 +3,7 @@ mod capture;
 pub mod cli;
 mod exchange;
 mod model;
+mod positional;
 mod record;
 mod store;
 

@@ -1,10 +1,10 @@
-use super::{exchange, model::Id, store::Store, Error};
+use super::{exchange, model::Id, positional, store::Store, Error};
 use std::{
     ffi::OsString,
     path::{Path, PathBuf},
 };
 
-pub const USAGE: &str = "Usage: dmc2ctl object-map [--store DIRECTORY] COMMAND\n\nCommands:\n  list\n  create OBJECT_ID LABEL\n  show OBJECT_ID\n  add-setup OBJECT_ID SETUP_ID LABEL\n  import-capture OBJECT_ID SETUP_ID CAPTURE_ID LEDGER\n  attach-design OBJECT_ID REVISION_ID FCSTD_OR_STEP\n  export-freecad OBJECT_ID SETUP_ID NEW_DIRECTORY\n\nIDs use lowercase letters, digits, hyphens and underscores. Quote labels containing spaces.\nThe default store is var/objects beneath the DMC2 project.\nThese commands operate on retained files only. They issue no machine commands.\nCapture imports preserve original G38 ledgers; registration and CAM readiness remain unresolved.\n";
+pub const USAGE: &str = "Usage: dmc2ctl object-map [--store DIRECTORY] COMMAND\n\nCommands:\n  list\n  create OBJECT_ID LABEL\n  show OBJECT_ID\n  add-setup OBJECT_ID SETUP_ID LABEL\n  import-capture OBJECT_ID SETUP_ID CAPTURE_ID LEDGER\n  attach-design OBJECT_ID REVISION_ID FCSTD_STEP_OR_STL\n  export-freecad OBJECT_ID SETUP_ID NEW_DIRECTORY\n\nIDs use lowercase letters, digits, hyphens and underscores. Quote labels containing spaces.\nThe default store is var/objects beneath the DMC2 project.\nThese commands operate on retained files only. They issue no machine commands.\nCapture imports preserve original G38 ledgers; registration and CAM readiness remain unresolved.\n";
 
 pub fn default_store() -> PathBuf {
     if let Ok(executable) = std::env::current_exe() {
@@ -112,8 +112,11 @@ pub fn run(args: &[OsString], default_store: &Path) -> Result<String, Error> {
         (default_store.into(), args)
     };
     let store = Store { root };
+    if let Some(result) = positional::cli::dispatch(args, &store) {
+        return result;
+    }
     match parse(args)? {
-        Command::Help => Ok(USAGE.into()),
+        Command::Help => Ok(format!("{USAGE}{}", positional::cli::USAGE)),
         Command::List => store.list(),
         Command::Show { object } => store.show(&object),
         Command::Create { object, label } => {

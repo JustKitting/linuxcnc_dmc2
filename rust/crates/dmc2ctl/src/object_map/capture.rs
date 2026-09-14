@@ -15,7 +15,7 @@ pub struct Capture {
     pub records: Vec<Fields>,
     pub contacts: Vec<Contact>,
     pub misses: usize,
-    pub nominal_ball_diameter_mm: f64,
+    pub nominal_ball_diameter_mm: Option<f64>,
 }
 
 impl Capture {
@@ -24,10 +24,17 @@ impl Capture {
     }
 
     fn parse(text: &str) -> Result<Self, String> {
-        let workflow = [Workflow::Circle, Workflow::Surface, Workflow::Block]
-            .into_iter()
-            .find(|w| text.lines().next() == Some(w.ledger_magic()))
-            .ok_or("Only retained circle, surface and gauge-block G38 ledgers are supported.")?;
+        let workflow = [
+            Workflow::Circle,
+            Workflow::Surface,
+            Workflow::Block,
+            Workflow::Mapper,
+        ]
+        .into_iter()
+        .find(|w| text.lines().next() == Some(w.ledger_magic()))
+        .ok_or(
+            "Only retained circle, surface, gauge-block and mapper G38 ledgers are supported.",
+        )?;
         if !text.ends_with('\n') || !text.lines().any(|l| l == "units=mm,mm/min") {
             return Err("Capture units or its final record terminator are missing.".into());
         }
@@ -37,8 +44,13 @@ impl Capture {
             .first()
             .filter(|r| r["kind"] == "start")
             .ok_or("Capture has no initial setup record.")?;
-        let nominal_ball_diameter_mm = number(start, "ball_diameter")?;
-        if nominal_ball_diameter_mm <= 0.0 {
+        // Mapper V1 keeps the probe specification in a separate snapshot. Never
+        // invent a diameter from today's configuration for a historical capture.
+        let nominal_ball_diameter_mm = start
+            .get("ball_diameter")
+            .map(|_| number(start, "ball_diameter"))
+            .transpose()?;
+        if nominal_ball_diameter_mm.is_some_and(|v| v <= 0.0) {
             return Err("Capture ball diameter must be positive.".into());
         }
         // Reject ignored trailing/outside-record text; do not salvage a torn file.
@@ -68,16 +80,17 @@ impl Capture {
             if result || r["kind"] == "start" {
                 return Err("Capture has records after its result or a repeated setup.".into());
             }
+            if workflow.requires_exact_trigger(&r["kind"])
+                && r.get("exact_source").map(String::as_str)
+                    != Some("emcStatus.motion.traj.probedPosition;machine-mm")
+            {
+                return Err(format!(
+                    "Record {sequence} lacks the original machine G38 source label."
+                ));
+            }
             match r["kind"].as_str() {
                 "result" => result = true,
                 "obstruction" => {
-                    if r.get("exact_source").map(String::as_str)
-                        != Some("emcStatus.motion.traj.probedPosition;machine-mm")
-                    {
-                        return Err(
-                            "Obstruction is missing the original machine G38 source label.".into(),
-                        );
-                    }
                     quarantined = true;
                 }
                 "miss" => {
@@ -87,23 +100,20 @@ impl Capture {
                     }
                 }
                 "touch" => {
-                    if r.get("exact_source").map(String::as_str)
-                        != Some("emcStatus.motion.traj.probedPosition;machine-mm")
-                    {
-                        return Err(
-                            "Contact is missing the original machine G38 source label.".into()
-                        );
-                    }
                     let stage = match r["stage"].as_str() {
                         "0" => Stage::Coarse,
                         "1" => Stage::Fine,
-                        _ => unreachable!("schema validated stage"),
+                        _ => {
+                            return Err(format!(
+                                "Contact {sequence} has no coarse or fine measurement stage."
+                            ))
+                        }
                     };
                     let mut trigger_mm = [0.0; 3];
                     for (i, axis) in ["x", "y", "z"].iter().enumerate() {
                         trigger_mm[i] = number(r, &format!("machine_{axis}_exact"))?;
                     }
-                    let direction = if workflow == Workflow::Block {
+                    let direction = if matches!(workflow, Workflow::Block | Workflow::Mapper) {
                         let mut vector = [0.0; 3];
                         for (i, axis) in ["x", "y", "z"].iter().enumerate() {
                             vector[i] = number(r, &format!("target_{axis}"))?
@@ -162,6 +172,7 @@ impl Capture {
         format!("\"workflow\":{},\"state\":{},\"records\":{},\"coarse_contacts\":{},\"fine_contacts\":{},\"misses\":{},\"nominal_ball_diameter_mm\":{},\"coordinate_frame\":\"linuxcnc-machine-trigger\",\"units\":\"mm\",\"ball_radius_compensation_applied\":false,\"mounting_offset_calibrated\":false,\"uncertainty_mm\":null",
             quote(self.workflow.name()), quote(self.state.name()), self.records.len(),
             self.contacts.iter().filter(|p| p.stage == Stage::Coarse).count(),
-            self.contacts.iter().filter(|p| p.stage == Stage::Fine).count(), self.misses, self.nominal_ball_diameter_mm)
+            self.contacts.iter().filter(|p| p.stage == Stage::Fine).count(), self.misses,
+            self.nominal_ball_diameter_mm.map(|v| v.to_string()).unwrap_or_else(|| "null".into()))
     }
 }

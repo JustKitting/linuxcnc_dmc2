@@ -82,6 +82,7 @@ pub struct Contact {
 pub enum DesignFormat {
     FreeCad,
     Step,
+    Stl,
 }
 
 impl DesignFormat {
@@ -89,8 +90,9 @@ impl DesignFormat {
         match s.to_ascii_lowercase().as_str() {
             "fcstd" => Ok(Self::FreeCad),
             "step" | "stp" => Ok(Self::Step),
+            "stl" => Ok(Self::Stl),
             _ => Err(Error::Input(
-                "Design must be a native .FCStd or STEP file.".into(),
+                "Design must be a native .FCStd, STEP or STL file.".into(),
             )),
         }
     }
@@ -98,6 +100,7 @@ impl DesignFormat {
         match self {
             Self::FreeCad => "FCStd",
             Self::Step => "STEP",
+            Self::Stl => "stl",
         }
     }
 }

@@ -1,0 +1,86 @@
+solid synthetic_40_30_20_mm
+facet normal 0 0 0
+outer loop
+vertex 0.0 0.0 0.0
+vertex 0.0 30.0 0.0
+vertex 40.0 30.0 0.0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 0.0 0.0 0.0
+vertex 40.0 30.0 0.0
+vertex 40.0 0.0 0.0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 0.0 0.0 20.0
+vertex 40.0 0.0 20.0
+vertex 40.0 30.0 20.0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 0.0 0.0 20.0
+vertex 40.0 30.0 20.0
+vertex 0.0 30.0 20.0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 0.0 0.0 0.0
+vertex 40.0 0.0 0.0
+vertex 40.0 0.0 20.0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 0.0 0.0 0.0
+vertex 40.0 0.0 20.0
+vertex 0.0 0.0 20.0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 0.0 30.0 0.0
+vertex 0.0 30.0 20.0
+vertex 40.0 30.0 20.0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 0.0 30.0 0.0
+vertex 40.0 30.0 20.0
+vertex 40.0 30.0 0.0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 0.0 0.0 0.0
+vertex 0.0 0.0 20.0
+vertex 0.0 30.0 20.0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 0.0 0.0 0.0
+vertex 0.0 30.0 20.0
+vertex 0.0 30.0 0.0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 40.0 0.0 0.0
+vertex 40.0 30.0 0.0
+vertex 40.0 30.0 20.0
+endloop
+endfacet
+facet normal 0 0 0
+outer loop
+vertex 40.0 0.0 0.0
+vertex 40.0 30.0 20.0
+vertex 40.0 0.0 20.0
+endloop
+endfacet
+endsolid synthetic_40_30_20_mm

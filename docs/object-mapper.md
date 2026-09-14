@@ -1,5 +1,10 @@
 # Object mapper scaffold / FreeCAD exchange
 
+The [positional mapper runbook](positional-mapper.md) extends this store with
+STL inspection, mapper-ledger import, local pose fitting, stock-face dimensions
+and named coordinate exports. The [continuation research](probe-based-continuation.md)
+describes FreeCAD, remaining-material modelling and additive continuation.
+
 The standard Rust `native/bin/dmc2ctl object-map` command manages persistent
 objects, named setups, immutable capture snapshots and design revisions. Its
 dispatch occurs before any NML session is opened. These are file operations;
@@ -11,9 +16,9 @@ on the calling command's output, and do not create an AXIS error latch.
 ## Available scaffold
 
 - Create and list named objects, with independent setups for later placements.
-- Attach native FreeCAD `.FCStd` or STEP files as preserved design revisions.
+- Attach native FreeCAD `.FCStd`, STEP or STL files as preserved design revisions.
   Attachment copies the bytes; it does not parse or certify the CAD geometry.
-- Import existing circle, surface or gauge-block G38 ledgers. Each snapshot
+- Import existing circle, surface, gauge-block or mapper G38 ledgers. Each snapshot
   retains the original file bytes and source path, including trigger f64 bits,
   coarse and fine touches, misses, travel, settings and result records.
 - Export an individual setup to a new directory containing FreeCAD Points
@@ -81,11 +86,16 @@ and inspected as ledger/labelled CSV, but it produces no ASC. Invalid schemas,
 missing source labels, mismatched original trigger bits and torn records are
 rejected rather than repaired or replaced by stopped positions.
 
-Registration is explicitly `unresolved`, with `object_to_machine: null` and
+Accepted setup registration is explicitly `unresolved`, with `object_to_machine: null` and
 `residual_mm: null`. Probe uncertainty and reconstructed stock remain null;
 `cam_ready` is false. An identity transform or zero uncertainty would invent a
 measurement, so neither is a default. Setup labels are operator organisation,
 not evidence that relocation or machining physically happened.
+
+Named `analysis_candidates` now appear in each setup. Their presence does not
+accept a placement. `export-fit` exports a specific proposal with its STL,
+calibration request, source captures and residuals; the original `export-freecad`
+command continues to export the unmodified trigger envelopes.
 
 ## FreeCAD handoff and next implementation
 
@@ -101,11 +111,11 @@ FreeCAD's documented foundations are its
 and [native document format](https://github.com/FreeCAD/FreeCAD-documentation/blob/main/wiki/File_Format_FCStd.md).
 This scaffold does not execute FreeCAD or modify a CAM job.
 
-The next stages are feature fitting with compensation/provenance, measured
-reference-feature matching across setups, a reviewed placement transform,
-reconstructed stock, and integration that updates FreeCAD setup/operation inputs
-and regenerates toolpaths. No alignment acceptance tolerance, sampling extent,
-scan speed or other new physical setting is introduced by this scaffold.
+Local STL fitting with explicit compensation and provenance is now available
+through the positional commands. Reviewed placement acceptance, reconstructed
+stock volume and integration that updates FreeCAD setup/operation inputs and
+regenerates toolpaths remain future stages. No alignment acceptance tolerance,
+sampling extent, scan speed or other new physical setting is introduced here.
 
 Offline serialization and storage tests exercise data rejection, exact snapshot
 retention, independent setups and no-overwrite export. They are not evidence of
