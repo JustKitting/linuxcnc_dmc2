@@ -86,6 +86,7 @@ fn assess(points: &[cover::Sample], check: Option<f64>) -> Vec<query::Region> {
         &[],
     )
     .unwrap()
+    .regions
 }
 #[test]
 fn local_shortage_and_inwardness_do_not_become_a_solid() {
@@ -119,6 +120,7 @@ fn local_shortage_and_inwardness_do_not_become_a_solid() {
         },
         &settings(),
         &[],
+        None,
     )
     .unwrap();
     assert!(report.json.contains("\"solid_stock\":null"));
@@ -178,8 +180,8 @@ fn rigid_frame_change_preserves_local_distances() {
         &[],
     )
     .unwrap();
-    assert_eq!(result[0].state, query::State::LocallyInward);
-    assert!(result[0]
+    assert_eq!(result.regions[0].state, query::State::LocallyInward);
+    assert!(result.regions[0]
         .comparisons
         .iter()
         .all(|c| (c.distance + 1.).abs() < sr.convergence));

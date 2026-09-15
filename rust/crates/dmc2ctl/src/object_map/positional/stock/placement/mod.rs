@@ -162,12 +162,12 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
         &output.join("search-history.csv"),
         result.history.as_bytes(),
     )?;
-    if fitted.stop == search::Stop::Clearance {
-        save(
-            &output.join("pose-candidate.txt"),
-            &super::super::pose_record(pose)?,
-        )?;
-    }
+    // The best unresolved pose is needed by downstream material assessment too.
+    // Retaining it does not change the search outcome or accept the placement.
+    save(
+        &output.join("pose-candidate.txt"),
+        &super::super::pose_record(pose)?,
+    )?;
     let (state, message) = search::description(fitted.stop);
     let manifest = format!(
         "{{\"schema\":\"dmc2.footprint-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"design\":{},\"outline_analysis\":{},\"result\":{},\"source_outline\":{},\"cam_ready\":false}}\n",

@@ -3,7 +3,7 @@ use super::{
     material::{self, query::State},
     select::Selection,
 };
-use crate::object_map::{Error, record::quote};
+use crate::object_map::{record::quote, Error};
 pub struct Report {
     pub json: String,
     pub csv: String,
@@ -106,8 +106,13 @@ pub fn build(a: &material::Assessment, selected: &Selection) -> Result<Report, E
             regions.push(format!("{{\"region\":{i},\"source_triangle\":{},\"center_machine_mm\":{:?},\"radius_mm\":{},\"state\":{},\"recovery\":{},\"patch_requirements\":{:?},\"selected_repeat_proposals\":{:?},\"measurement_resolved\":false}}",cover.triangle,center,cover.radius,quote(state),quote(recovery),ids,observations));
         }
     }
+    let required_volume = a
+        .volume
+        .as_ref()
+        .map(|v| v.continuation(samples))
+        .unwrap_or_default();
     let json = format!(
-        "{{\"schema\":\"dmc2.observation-plan.v1\",\"state\":\"unreviewed-observation-proposals\",\"frame\":\"LinuxCNC machine-mm with each original work translation retained\",\"frame_reference\":{},\"x_directions\":\"physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X\",\"selection_objective\":\"Greedy coverage of distinct patch check/shortage requirements using original inward probing requests; deterministic source-order ties. Required triangle count does not weight selection. This is not a global minimum or an execution order.\",\"selected_priority_order\":{:?},\"execution_order\":null,\"patch_requirements\":[{needs}],\"unplanned_patch_requirements\":{:?},\"candidates\":[{}],\"unresolved_material_regions\":[{}],\"closed_volume_coverage\":\"unresolved\",\"interpretation\":\"Proposals retain prior exact approaches and settings, not current clearance, probe installation or operator authorization. A repeat produces a new independent observation only after exact trigger capture/readback. It cannot create missing spatial support, determine an unobserved normal, fill an unknown volume or clear a material shortage by itself. Unavailable approaches and computational coverage issues remain explicit. No design normal defines a probing direction and no old contact becomes a new check.\",\"cam_ready\":false,\"machine_action_authorized\":false}}\n",
+        "{{\"schema\":\"dmc2.observation-plan.v1\",\"state\":\"unreviewed-observation-proposals\",\"frame\":\"LinuxCNC machine-mm with each original work translation retained\",\"frame_reference\":{},\"x_directions\":\"physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X\",\"selection_objective\":\"Greedy coverage of distinct patch check/shortage requirements using original inward probing requests; deterministic source-order ties. Required triangle count does not weight selection. This is not a global minimum or an execution order.\",\"selected_priority_order\":{:?},\"execution_order\":null,\"patch_requirements\":[{needs}],\"unplanned_patch_requirements\":{:?},\"candidates\":[{}],\"unresolved_material_regions\":[{}],\"closed_volume_coverage\":\"unresolved\"{required_volume},\"interpretation\":\"Proposals retain prior exact approaches and settings, not current clearance, probe installation or operator authorization. A repeat produces a new independent observation only after exact trigger capture/readback. It cannot create missing spatial support, determine an unobserved normal, fill an unknown volume or clear a material shortage by itself. Unavailable approaches and computational coverage issues remain explicit. No design normal defines a probing direction and no old contact becomes a new check.\",\"cam_ready\":false,\"machine_action_authorized\":false}}\n",
         quote(&a.candidate.frame),
         selected.chosen,
         selected.pending,

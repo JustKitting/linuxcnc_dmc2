@@ -63,6 +63,10 @@ fn draft(raw: &[u8]) -> Result<&str, Error> {
             super::positional::stock::material::request::keys(),
         ),
         (
+            super::positional::stock::material::request::SWEEP_SCHEMA,
+            super::positional::stock::material::request::sweep_keys(),
+        ),
+        (
             super::positional::stock::material::request::LEGACY_SCHEMA,
             super::positional::stock::material::request::KEYS.to_vec(),
         ),

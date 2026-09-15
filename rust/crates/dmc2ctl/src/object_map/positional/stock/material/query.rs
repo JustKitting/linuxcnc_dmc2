@@ -45,6 +45,10 @@ pub struct Region {
     pub comparisons: Vec<Comparison>,
     pub no_contact: Vec<empty::Overlap>,
 }
+pub struct Run {
+    pub regions: Vec<Region>,
+    pub sweeps: Vec<std::sync::Arc<empty::Source>>,
+}
 pub fn run(
     cover: &[cover::Sample],
     samples: &[Sample],
@@ -53,7 +57,7 @@ pub fn run(
     pose: Pose,
     r: &Request,
     misses: &[surface::no_contact::Sweep],
-) -> Result<Vec<Region>, Error> {
+) -> Result<Run, Error> {
     let required = stations
         .len()
         .checked_mul(cover.len().saturating_add(samples.len()));
@@ -63,7 +67,7 @@ pub fn run(
     let local = surface::local::build(samples, stations, sr)?;
     let empty = empty::run(cover, &local, misses, sr, pose, r.empty)?;
     let mut result = Vec::with_capacity(cover.len());
-    for (sample, no_contact) in cover.iter().zip(empty) {
+    for (sample, no_contact) in cover.iter().zip(empty.regions) {
         let p = pose.point(sample.center);
         if !finite(p) {
             return Err(Error::Data("Candidate coordinates overflowed during material comparison. Inspect units and the retained pose.".into()));
@@ -135,5 +139,8 @@ pub fn run(
             no_contact,
         });
     }
-    Ok(result)
+    Ok(Run {
+        regions: result,
+        sweeps: empty.sources,
+    })
 }

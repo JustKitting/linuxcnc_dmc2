@@ -25,11 +25,12 @@ pub fn build(
     pose: Pose,
     r: &Request,
     misses: &[super::surface::no_contact::Sweep],
+    volume: Option<&super::volume::Assessment>,
 ) -> Result<Report, Error> {
     let version = r.empty.version();
     let (empty_header, empty_tail) = match r.empty {
         EmptySpace::Legacy => (String::new(), String::new()),
-        EmptySpace::RetainedSweeps { .. } => (
+        EmptySpace::RetainedSweeps { .. } | EmptySpace::RequiredVolume { .. } => (
             format!(",{}", empty::COLUMNS),
             ",".repeat(empty::COLUMNS.split(',').count()),
         ),
@@ -90,7 +91,7 @@ pub fn build(
         }
         let (empty_detail, empty_need) = match r.empty {
             EmptySpace::Legacy => (String::new(), String::new()),
-            EmptySpace::RetainedSweeps { .. } => (
+            EmptySpace::RetainedSweeps { .. } | EmptySpace::RequiredVolume { .. } => (
                 format!(",\"fragment_model_mm\":{:?},\"fragment_machine_mm\":{:?},\"no_contact_overlaps\":[{}]", sample.vertices,sample.vertices.map(|p|pose.point(p)),region.no_contact.iter().map(|o|o.json(samples)).collect::<Vec<_>>().join(",")),
                 format!(",\"no_contact_sources\":[{}]",region.no_contact.iter().map(|o|format!("{{\"source\":{},\"relation\":\"{}\"}}",o.source.sweep.reference(),o.relation())).collect::<Vec<_>>().join(",")),
             ),
@@ -105,6 +106,9 @@ pub fn build(
             needs.push(format!("{{\"kind\":{},\"message\":{},\"region\":{i},\"source_triangle\":{source_tri},\"region_center_machine_mm\":{},\"region_radius_mm\":{},\"required_facet_outward_normal\":{},\"stock_normal_inferred_from_design\":false,\"machine_action_authorized\":false{empty_need}}}",quote(state),quote(message),json(p),sample.radius,json(n)));
         }
     }
+    if let Some(volume) = volume {
+        needs.extend(volume.needs(samples));
+    }
     needs.push("{\"kind\":\"closed-material-coverage-unresolved\",\"message\":\"Local comparisons cannot establish enclosed material, underside coverage or cavities. Complete and review the stock boundary/support model before containment or cutting.\",\"machine_action_authorized\":false}".into());
     let needs = format!("{{\"schema\":\"dmc2.candidate-measurement-needs.{version}\",\"candidate_analysis\":{},\"surface_analysis\":{},\"needs\":[{}],\"execution\":\"unplanned-observation-regions\",\"machine_commands_issued\":false}}\n",quote(r.candidate.as_str()),quote(r.surface.as_str()),needs.join(","));
     let counts = counts
@@ -114,8 +118,12 @@ pub fn build(
         .join(",");
     let empty_model = match r.empty {
         EmptySpace::Legacy => String::new(),
-        EmptySpace::RetainedSweeps { .. } => format!(",\"no_contact_model\":{{\"retained_sweeps\":[{}],\"formula\":\"signed_separation = distance(actual transformed triangle fragment, finite retained centre path) - eroded_ball_radius\",\"interpretation\":\"Negative separation establishes a required-fragment intersection under the retained probe/error model; zero is its boundary. Original contact conflicts remain explicit. No intersection does not establish material presence, closed stock, unseen cavities or physical calibration. A covering ball is not used as the required triangle.\"}}",misses.iter().map(|s|s.json()).collect::<Vec<_>>().join(",")),
+        EmptySpace::RetainedSweeps { .. } | EmptySpace::RequiredVolume { .. } => format!(",\"no_contact_model\":{{\"retained_sweeps\":[{}],\"formula\":\"signed_separation = distance(actual transformed triangle fragment, finite retained centre path) - eroded_ball_radius\",\"interpretation\":\"Negative separation establishes a required-fragment intersection under the retained probe/error model; zero is its boundary. Original contact conflicts remain explicit. No intersection does not establish material presence, closed stock, unseen cavities or physical calibration. A covering ball is not used as the required triangle.\"}}",misses.iter().map(|s|s.json()).collect::<Vec<_>>().join(",")),
     };
+    let empty_model = empty_model
+        + &volume
+            .map(|v| format!(",\"required_volume_assessment\":{}", v.json(samples)))
+            .unwrap_or_default();
     let json=format!("{{\"schema\":\"dmc2.material-check.{version}\",\"state\":\"material-coverage-unresolved\",\"frame\":\"LinuxCNC machine-mm\",\"model_to_machine\":{},\"region_counts\":{{{counts}}},\"covered_regions\":{},\"checked_local_deficit_lower_max_mm\":{worst_lower},\"checked_local_deficit_upper_max_mm\":{worst_upper},\"regions\":[{}],\"measurement_needs\":{},\"solid_stock\":null,\"unmeasured_volume\":\"unknown\",\"cam_ready\":false{empty_model},\"interpretation\":\"Full 3D subtriangle covers are compared only inside measured local planar support and the explicit normal band. Minimum local clearance bounds are [-d-radius-allowance,-d+allowance], where d=(candidate-center minus surface-point) dot outward-normal. A shortage is a local model/clearance result; inwardness does not establish material or a closed volume. All eligible local comparisons and independent check conflicts remain retained. Region centers and required-facet normals describe data needs, not probe endpoints, measured stock normals or approved hardware actions.\"}}\n",pose.json(),regions.len(),rows.join(","),needs);
     Ok(Report {
         json,

@@ -17,6 +17,19 @@ pub struct Source {
     pub sweep: surface::no_contact::Sweep,
     pub conflicts: Vec<Conflict>,
 }
+impl Source {
+    pub fn conflicts_json(
+        &self,
+        samples: &[crate::object_map::positional::probe::Sample],
+    ) -> String {
+        use super::super::report::reference;
+        self.conflicts.iter().map(|c| format!("{{\"patch_source\":{},\"contact_source\":{},\"contact_surface_machine_mm\":{},\"fitted_outward_normal\":{}}}",reference(&samples[c.patch]),reference(&samples[c.contact]),json(c.surface),json(c.normal))).collect::<Vec<_>>().join(",")
+    }
+}
+pub struct Run {
+    pub regions: Vec<Vec<Overlap>>,
+    pub sources: Vec<Arc<Source>>,
+}
 pub struct Overlap {
     pub source: Arc<Source>,
     pub distance: f64,
@@ -37,8 +50,7 @@ impl Overlap {
         )
     }
     pub fn json(&self, samples: &[crate::object_map::positional::probe::Sample]) -> String {
-        use super::super::report::reference;
-        let conflicts = self.source.conflicts.iter().map(|c| format!("{{\"patch_source\":{},\"contact_source\":{},\"contact_surface_machine_mm\":{},\"fitted_outward_normal\":{}}}",reference(&samples[c.patch]),reference(&samples[c.contact]),json(c.surface),json(c.normal))).collect::<Vec<_>>().join(",");
+        let conflicts = self.source.conflicts_json(samples);
         format!("{{\"retained_sweep\":{},\"relation\":\"{}\",\"distance_to_finite_center_path_mm\":{},\"signed_separation_mm\":{},\"contact_conflicts\":[{conflicts}]}}",self.source.sweep.json(),self.relation(),self.distance,self.separation)
     }
     pub fn relation(&self) -> &'static str {
@@ -58,9 +70,12 @@ pub fn run(
     sr: &surface::request::Request,
     pose: Pose,
     policy: EmptySpace,
-) -> Result<Vec<Vec<Overlap>>, Error> {
-    let EmptySpace::RetainedSweeps { comparisons } = policy else {
-        return Ok(cover.iter().map(|_| Vec::new()).collect());
+) -> Result<Run, Error> {
+    let Some(comparisons) = policy.comparisons() else {
+        return Ok(Run {
+            regions: cover.iter().map(|_| Vec::new()).collect(),
+            sources: Vec::new(),
+        });
     };
     if matches!(sr.no_contact, surface::request::NoContactModel::Legacy) {
         return Err(Error::Input("This material request requires the source surface's explicit no-contact probe/error model. Prepare a new surface analysis with its retained miss selection and evidence-based allowance, then reassess; no empty-space model was inferred from live configuration.".into()));
@@ -113,5 +128,8 @@ pub fn run(
         }
         result.push(overlaps);
     }
-    Ok(result)
+    Ok(Run {
+        regions: result,
+        sources,
+    })
 }

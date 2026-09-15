@@ -1,5 +1,5 @@
 use super::super::geometry::*;
-use super::{Mesh, Triangle, intersection, solid::Solid};
+use super::{intersection, solid::Solid, Mesh, Triangle};
 
 pub(in crate::object_map::positional) fn mesh(v: &[V], faces: &[[usize; 3]]) -> Mesh {
     let mut raw = String::from("solid numerical\n");
@@ -106,57 +106,109 @@ fn shared_simplex_only_and_intersection_degeneracies() {
 fn open_pinched_separate_and_intersecting_boundaries_are_rejected() {
     let tetra = [[0, 2, 1], [0, 1, 3], [0, 3, 2], [1, 2, 3]];
     let a = [[0., 0., 0.], [4., 0., 0.], [0., 4., 0.], [0., 0., 4.]];
-    assert!(
-        Solid::new(&mesh(&a, &tetra[..3]), 128)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("open edges")
-    );
+    assert!(Solid::new(&mesh(&a, &tetra[..3]), 128)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("open edges"));
     let mut v = a.to_vec();
     v.extend(a.map(|p| p.map(|x| -x)));
     let mut f = tetra.to_vec();
     f.extend(tetra.map(|[a, b, c]| [a + 4, c + 4, b + 4]));
-    assert!(
-        Solid::new(&mesh(&v, &f), 128)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("pinches")
-    );
+    assert!(Solid::new(&mesh(&v, &f), 128)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("pinches"));
     let mut v = a.to_vec();
     v.extend(a.map(|p| p.map(|x| x + 10.)));
     let mut f = tetra.to_vec();
     f.extend(tetra.map(|p| p.map(|i| i + 4)));
-    assert!(
-        Solid::new(&mesh(&v, &f), 128)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("disconnected")
-    );
+    assert!(Solid::new(&mesh(&v, &f), 128)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("disconnected"));
     let base = box_mesh([0.; 3], [1.; 3]);
     let mut raw = base
         .transformed_stl(Pose::from_euler([0.; 3], [0.; 3]))
         .unwrap();
     raw = raw.replace("vertex 1 1 1\n", "vertex 0.5 0.5 -0.5\n");
     let folded = Mesh::read(raw.as_bytes(), 1.).unwrap();
-    assert!(
-        Solid::new(&folded, 288)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("intersect beyond")
-    );
+    assert!(Solid::new(&folded, 288)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("intersect beyond"));
 }
 #[test]
 fn topology_budget_is_not_an_acceptance_shortcut() {
     let mesh = box_mesh([-1.; 3], [1.; 3]);
-    assert!(
-        Solid::new(&mesh, 1)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("max_topology_visits")
-    );
+    assert!(Solid::new(&mesh, 1)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("max_topology_visits"));
+}
+
+fn assembled(parts: &[(&Mesh, bool, V)]) -> Mesh {
+    let mut vertices = Vec::new();
+    let mut faces = Vec::new();
+    for (part, reverse, translation) in parts {
+        for triangle in part.triangles() {
+            let first = vertices.len();
+            vertices.extend(triangle.v.map(|p| add(p, *translation)));
+            faces.push(if *reverse {
+                [first, first + 2, first + 1]
+            } else {
+                [first, first + 1, first + 2]
+            });
+        }
+    }
+    mesh(&vertices, &faces)
+}
+
+#[test]
+fn required_material_keeps_separate_bodies_and_the_gap_between_them() {
+    let unit = box_mesh([-1.; 3], [1.; 3]);
+    let shift = [2. * (unit.max[0] - unit.min[0]), 0., 0.];
+    let mesh = assembled(&[(&unit, false, [0.; 3]), (&unit, false, shift)]);
+    let n = mesh.triangles().len();
+    let solid = Solid::required(&mesh, 2 * n * n, n).unwrap();
+    assert_eq!(solid.shells.len(), 2);
+    assert_eq!(solid.structure_winding_terms, n);
+    for p in [[0.; 3], shift] {
+        assert_eq!(solid.distance(p).unwrap().inward, 1.);
+    }
+    assert_eq!(solid.distance(scale(shift, 0.5)).unwrap().inward, -1.);
+    assert!(Solid::new(&mesh, 2 * n * n)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("disconnected"));
+}
+
+#[test]
+fn required_cavity_orientation_is_retained_instead_of_filled() {
+    let outer = box_mesh([-2.; 3], [2.; 3]);
+    let inner = box_mesh([-1.; 3], [1.; 3]);
+    let hollow = assembled(&[(&outer, false, [0.; 3]), (&inner, true, [0.; 3])]);
+    let n = hollow.triangles().len();
+    let solid = Solid::required(&hollow, 2 * n * n, n).unwrap();
+    assert_eq!(solid.distance([0.; 3]).unwrap().inward, -1.);
+    assert_eq!(solid.distance([1.5, 0., 0.]).unwrap().inward, 0.5);
+    assert_eq!(solid.distance([3., 0., 0.]).unwrap().inward, -1.);
+    assert!(solid.shells[0].signed_volume > 0.);
+    assert!(solid.shells[1].signed_volume < 0.);
+    let filled_twice = assembled(&[(&outer, false, [0.; 3]), (&inner, false, [0.; 3])]);
+    assert!(Solid::required(&filled_twice, 2 * n * n, n)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("surrounding winding"));
+    assert!(Solid::required(&hollow, 2 * n * n, n - 1)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("max_winding_terms"));
 }

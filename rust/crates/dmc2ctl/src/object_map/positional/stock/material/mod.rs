@@ -5,6 +5,7 @@ mod report;
 pub(in crate::object_map) mod request;
 #[cfg(test)]
 mod tests;
+mod volume;
 use super::super::{cover, retained::Bundle};
 use super::{candidate::Candidate, surface};
 use crate::object_map::{
@@ -21,6 +22,7 @@ pub(super) struct Assessment {
     pub surface: surface::Loaded,
     pub covers: Vec<cover::Sample>,
     pub regions: Vec<query::Region>,
+    pub volume: Option<volume::Assessment>,
 }
 fn assess(store: &Store, object: &Id, setup: &Id, raw: &[u8]) -> Result<Assessment, Error> {
     let request = request::Request::read(raw)?;
@@ -33,7 +35,7 @@ fn assess(store: &Store, object: &Id, setup: &Id, raw: &[u8]) -> Result<Assessme
         request.samples,
         cover::Metric::Spatial,
     )?;
-    let regions = query::run(
+    let queried = query::run(
         &covers,
         &surface.contacts,
         &surface.stations,
@@ -42,12 +44,20 @@ fn assess(store: &Store, object: &Id, setup: &Id, raw: &[u8]) -> Result<Assessme
         &request,
         &surface.no_contact,
     )?;
+    let volume = volume::assess(
+        &candidate.mesh,
+        candidate.pose,
+        &queried.sweeps,
+        &queried.regions,
+        request.empty,
+    )?;
     Ok(Assessment {
         request,
         candidate,
         surface,
         covers,
-        regions,
+        regions: queried.regions,
+        volume,
     })
 }
 fn report(a: &Assessment) -> Result<report::Report, Error> {
@@ -59,6 +69,7 @@ fn report(a: &Assessment) -> Result<report::Report, Error> {
         a.candidate.pose,
         &a.request,
         &a.surface.no_contact,
+        a.volume.as_ref(),
     )
 }
 fn manifest(object: &Id, setup: &Id, id: &Id, a: &Assessment, json: &str) -> String {

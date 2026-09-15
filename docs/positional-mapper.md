@@ -1363,7 +1363,8 @@ analysis; it does not establish CAM readiness or close the whole workflow.
 
 ## Required geometry against no-contact sweeps
 
-**Prepare material check** now creates `DMC2_MATERIAL_CHECK_REQUEST_V2`.
+V2 introduced `DMC2_MATERIAL_CHECK_REQUEST_V2` for **Prepare material check**;
+the current V3 extension is described below.
 **Check candidate material** compares the unchanged required geometry against
 both supported local surfaces and the finite no-contact sweeps retained by the
 selected surface analysis. A required fragment crossing recorded clear travel
@@ -1430,6 +1431,74 @@ initialization and introduces no gate on either recovery control. No machine
 command or restart was issued. Physical error-model acceptance, occupied-volume
 coverage, placement acceptance and the native CAM Job remain outstanding.
 
+## Required material volume and retained imperfect placements
+
+**Prepare material check** now creates `DMC2_MATERIAL_CHECK_REQUEST_V3`.
+The same standard material operation adds an explicit
+`required_occupancy_model=oriented-material-boundary`, `max_topology_visits`
+and `max_winding_terms`. The model describes the unchanged required operation
+geometry. It does not describe the measured stock, infer a rectangular blank,
+or accept a placement. Every physical/model field and computation budget in a
+new draft remains unset until supplied in the request.
+
+The shared Rust geometry reader checks closed, embedded, consistently oriented
+material boundaries. Separate exterior bodies remain separate; nested cavity
+shells must have the opposite orientation. Original triangle identities and
+STL bytes remain retained. Nesting uses the signed solid-angle winding sum;
+the mathematical convention is described in the
+[libigl winding-number tutorial](https://libigl.github.io/tutorial/#generalized-winding-number).
+No body is deleted, merged or filled to make an input acceptable.
+
+V2's entire finite clear-sweep versus required-fragment comparison runs first.
+When a connected eroded sweep intersects no required boundary, its original
+probe-centre path start, transformed into model millimetres using the inverse
+candidate pose, witnesses whether that whole sweep is inside or outside the
+declared required material. This follows from connectedness and the absence of
+a boundary crossing. It closes the case where clear travel lies wholly inside
+required material despite touching none of its surface triangles. Original
+contact/model conflicts retain priority and their contradictory records.
+
+The V3 report and measurement needs retain the boundary components, original
+sweep, witness coordinates, nearest original triangle, winding and unresolved
+volume contradiction. Repeat and spatial planning carry these global needs
+without claiming that selected top observations resolve them. Existing surface
+CSV rows keep their V2 meaning; global volume evidence is in the JSON reports.
+The FreeCAD scene retains its outer format and exact material/source bundles.
+Historical V1/V2 assessments reproduce their previous calculation bytes.
+
+The standard footprint operation now also saves its best unreviewed pose for
+every search outcome. Previously it saved a reusable pose only when horizontal
+clearance was met, leaving further material assessment unable to inspect an
+imperfect candidate. Search bounds, deficits, outcome and `cam_ready=false`
+remain explicit. Older unsuccessful analyses are preserved; rerun their
+requests under new analysis IDs to retain the pose through this path.
+
+The release command binary is built and installed. Numerical file examples
+retained a wholly contained sweep as a volume contradiction, distinguished an
+outside sweep and an interior cavity, preserved separate bodies and retained
+contact conflicts. Incorrect nested orientation and insufficient budgets
+returned named errors before analysis publication. Repeat/spatial reports
+retained the same unresolved global evidence; the scene copied all 37 material
+and 23 stock files byte for byte. All 1,957 files from the copied historical
+store remained unchanged, and all three request versions loaded exactly.
+
+The delivered OP1 `stage1_after_wood_connected.stl` and OP2
+`stage2_targets_combined.stl` also passed through the standard import, placement
+and material path at explicitly synthetic poses. Their 21,330 and 44,426
+original triangles remained unchanged; the required-boundary reports retained
+one OP1 body and all seven OP2 bodies. These are geometry/file results, not
+physical stock registration or evidence that the dice fit the current material.
+Readbacks are retained in
+`/home/kit/cnc-backups/mapper-required-volume-bxz8yb4c/`, including
+`installation.json`, `volume-readback.json`, `continuation-readback.json` and
+the `cad-op1-volume-readback.json` / `cad-op2-volume-readback.json` files.
+
+The full mapping-to-cutting pipeline remains unfinished. Partial measured-stock
+constraints still need to drive placement search; connected top/side/base
+support, physical acquisition/registration, the native FreeCAD CAM Job and
+cutting/location programs remain open. The new material checks are a step in
+that workflow, not its completion.
+
 ## Recorded TODOs — 2026-09-14
 
 This is the continuing implementation list for the positional mapper and
@@ -1489,9 +1558,11 @@ machine run.
   the standard material operation, with explicit overlap/boundary/conflict
   states and source retention through follow-up planning and the FreeCAD scene;
   see [Required geometry against no-contact sweeps](#required-geometry-against-no-contact-sweeps).
+  V3 now distinguishes a sweep wholly inside declared required material from
+  one outside it, retaining separate bodies, cavities and source conflicts;
+  see [Required material volume and retained imperfect placements](#required-material-volume-and-retained-imperfect-placements).
   Still needed: a supported occupied-volume model joining top, side and base
-  evidence, including creases and inaccessible regions; distinguish a sweep
-  wholly inside required material from one outside it; use these constraints
+  evidence, including creases and inaccessible regions; use these constraints
   in placement search without deforming the required machining geometry.
   Absence of a surface intersection must not be used as material acceptance.
   Physical probe/error-model and setup-registration acceptance remain open.
@@ -1679,7 +1750,9 @@ machine run.
   object-map numerical checks report passes. Full 3D containment, integration
   with supported volume, actual setup constraints and physical acceptance remain
   open; neither the horizontal result nor these checks establishes them. See
-  the footprint runbook and the retained file readback above. The standard
+  the footprint runbook and the retained file readback above. Every new
+  footprint outcome now retains its best unreviewed pose, including unresolved
+  clearance, so further material assessment can inspect it. The standard
   `prepare-volume-placement` / `fit-volume-placement` path now adds bounded XYZ
   translation/rotation search against a reproduced, explicitly enclosed stock
   model, without resizing required geometry. It shares search mechanics and the
