@@ -1,4 +1,5 @@
 pub(super) mod fit;
+pub(super) mod local;
 mod plane;
 pub(super) mod report;
 pub(in crate::object_map) mod request;
@@ -46,4 +47,33 @@ impl Reason {
 }
 pub fn build(samples: &[Sample], r: &request::Request) -> Result<super::report::Report, Error> {
     report::build(samples, &fit::run(samples, r), r)
+}
+
+pub struct Loaded {
+    pub source: super::super::retained::Bundle,
+    pub request: request::Request,
+    pub contacts: Vec<Sample>,
+    pub stations: Vec<Station>,
+}
+pub fn load(
+    store: &crate::object_map::store::Store,
+    object: &crate::object_map::model::Id,
+    setup: &crate::object_map::model::Id,
+    id: &crate::object_map::model::Id,
+) -> Result<Loaded, Error> {
+    let source =
+        super::super::retained::Bundle::read(&super::super::folder(store, object, setup, id)?)?;
+    let request = request::Request::read(source.get("request.txt")?)?;
+    let captures = store.captures(object, setup)?;
+    let contacts = request.probe.samples(&captures, &request.selected)?;
+    source.check_captures(&captures, &contacts)?;
+    let stations = fit::run(&contacts, &request);
+    let report = report::build(&contacts, &stations, &request)?;
+    source.require_equal("stock-surface.machine-mm.json", report.json.as_bytes())?;
+    Ok(Loaded {
+        source,
+        request,
+        contacts,
+        stations,
+    })
 }

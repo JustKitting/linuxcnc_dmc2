@@ -508,6 +508,87 @@ checks reported passes. These are numerical and file observations only.
 Artifacts: `/home/kit/cnc-backups/mapper-material-prtkle5x/round-trip-readback.json`,
 `compatibility-readback.json`, and `frame-mismatch.stderr` in the same directory.
 
+## Reconstruct the measured stock surface
+
+**Prepare stock reconstruction** and **Reconstruct stock surface** now turn a
+retained 3D surface analysis into an indexed surface estimate and an STL. The
+shape comes from the measured local patches. Calculation bounds crop the
+numerical domain; they do not assert a rectangular stock shape or force measured
+wood onto the required machining geometry.
+
+```sh
+native/bin/dmc2ctl object-map prepare-stock-mesh part first surfaces-a > /tmp/mesh-request.txt
+native/bin/dmc2ctl object-map reconstruct-stock-mesh part first mesh-a /tmp/mesh-request.txt
+native/bin/dmc2ctl object-map show-fit part first mesh-a
+native/bin/dmc2ctl object-map export-fit part first mesh-a /tmp/mesh-a
+```
+
+`DMC2_STOCK_MESH_REQUEST_V1` uses these explicit fields. The prepared draft fills
+only the selected source identity. Other values must come from the intended
+calculation and retained support, rather than new machine defaults.
+
+| Field | Meaning |
+|---|---|
+| `surface_analysis` | Retained 3D patch analysis in this object/setup |
+| `bounds_min_mm`, `bounds_max_mm` | Finite calculation bounds in LinuxCNC machine millimetres, with positive span on each axis |
+| `grid_spacing_mm` | Maximum lattice interval; actual axis intervals divide the requested bounds evenly |
+| `normal_band_mm` | Distance from a checked local plane over which its field estimate is allowed |
+| `max_interpolation_residual_mm` | Maximum facet-vertex disagreement with a common supporting measured patch |
+| `max_grid_vertices` | Explicit lattice memory/computation budget |
+| `max_field_comparisons` | Budget for local field lookups, independent checks and candidate-facet support comparisons |
+| `max_mesh_triangles` | Candidate-facet budget, including facets later retained as unsupported |
+
+Surface loading and local eligibility are shared with material comparison.
+Original capture bytes and the reproduced source report must match the retained
+analysis. Fits must converge within their source residual bound; independent
+checks stay separate. The nearest original fitting station determines each
+lattice value. If its fit, projected support, normal band or independent check
+is unresolved, that vertex stays unresolved; a farther eligible plane does not
+replace it.
+
+A conforming tetrahedral subdivision extracts linear sign crossings, reusing
+indexed intersections on common edges. Exact endpoint crossings share the
+original lattice vertex. Facet winding follows the local field's outward
+orientation. Each exported triangle also needs a common checked patch agreeing
+with its orientation, containing its full projected area in the source hull and
+a single retained neighbour's support-gap disk, and bounding the triangle's
+plane disagreement. Missing-field tetrahedra and unsupported facets remain
+explicit gaps. No hole filling or deletion of original contacts occurs.
+
+The analysis retains the entire source bundle under `surface-source-`, together
+with its request and these reconstruction files:
+
+| File | Retained information |
+|---|---|
+| `stock-surface.machine-mm.stl` | Supported estimated facets; omitted when none are supported |
+| `residuals.csv` | Every lattice point, signed distance or unresolved state, and nearest original contact |
+| `mesh-vertices.csv` | Each generated vertex, original lattice endpoints and interpolation fraction |
+| `mesh-facets.csv` | Every candidate facet, vertex IDs, cell/tetrahedron identity and supporting original contact or unresolved support |
+| `unresolved-cells.csv` | Calculation regions containing missing field support |
+| `measurement-needs.json` | Reason counts, recovery explanations and links to the source-linked region tables |
+
+The manifest reports open boundary edges, nonmanifold edge incidence and winding
+conflicts. Closed edge incidence alone does not establish vertex manifoldness,
+absence of self-intersections, a solid or physical material. The STL is a
+measured-surface estimate for inspection and downstream modeling. Unobserved
+regions, sub-grid features and missing top/side/base connections remain explicit;
+`solid_stock` is null and `cam_ready` is false. Measurement regions are data for
+the acquisition planner, not motion endpoints or authorization to probe.
+
+The installed-binary file exercise reused the retained synthetic top grid. Its
+calculation box extended past the measured perimeter. The output contained 128
+facets covering the expected 16 mm² at Z=45 mm, with 32 open perimeter edges,
+440 unsupported lattice points and 320 unresolved cells. Every mesh vertex
+reproduced its retained grid interpolation; all ten source files and eighteen
+export files matched byte for byte. The previous material comparison reproduced
+all 31 non-manifest files unchanged; its manifest differed only by analysis ID.
+Forty-nine object-map numerical checks reported passes, including shared edges,
+lattice zeros, outward closed sphere incidence, missing field support and
+independent-check disagreement. These are numerical/file results, not physical
+stock evidence. Readback:
+`/home/kit/cnc-backups/mapper-stockmesh-uery5t54/round-trip-readback.json`.
+The standard binary is built and installed; the CNC session was not restarted.
+
 ## Fit, inspect and repeat without editing control code
 
 ```sh
@@ -758,6 +839,23 @@ machine run.
   These are source, build and file milestones. Physical surface observations,
   volume coverage, uncertainty and containment remain open. The existing CNC
   session was not restarted.
+- [ ] **Build the measured surface mesh and resolve stock volume.** The
+  standard `prepare-stock-mesh` / `reconstruct-stock-mesh` operations now extract
+  a source-linked mesh from the retained 3D patches, sharing local support and
+  check interpretation with material comparison. Explicit lattice bounds,
+  spacing and budgets produce indexed triangles, unresolved cells, unsupported
+  facet records and measurement-region needs. Original trigger sources remain
+  together through normal inspection/export. The installed-binary synthetic
+  file exercise retained the expected 16 mm² top, 128 facets and open perimeter;
+  source/export bytes matched and material replay remained unchanged. Forty-nine
+  object-map numerical checks reported passes. See the reconstruction runbook
+  and `/home/kit/cnc-backups/mapper-stockmesh-uery5t54/round-trip-readback.json`.
+  Still required: top/side/base connections and crease handling, distinction of
+  supported empty space from unknown volume, geometric solid validation,
+  multi-height acquisition and the physical material interpretation. Open edges
+  must not be silently capped, and edge incidence alone must not accept stock
+  containment. Connect the measurement regions to acquisition and the resulting
+  material model to placement/CAM; mesh export is a milestone within that flow.
 - [ ] **Optimize machining placement inside measured stock.** Fit the unchanged
   required geometry into the stock estimate using the allowed translations and
   rotations. Account for material shortage and unknown coverage separately;

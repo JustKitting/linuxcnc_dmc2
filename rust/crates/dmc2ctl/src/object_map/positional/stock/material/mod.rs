@@ -50,8 +50,11 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
     mesh.fitting_geometry()?;
     let transformed = mesh.transformed_stl(pose)?;
     candidate.require_equal("model-candidate.machine-mm.stl", transformed.as_bytes())?;
-    let source = Bundle::read(&super::super::folder(store, object, setup, &r.surface)?)?;
-    let sr = surface::request::Request::read(source.get("request.txt")?)?;
+    let loaded = surface::load(store, object, setup, &r.surface)?;
+    let source = &loaded.source;
+    let sr = &loaded.request;
+    let contacts = &loaded.contacts;
+    let stations = &loaded.stations;
     let (outline_fields, _) = record::decode(
         candidate.get("stock-source-request.txt")?,
         super::request::SCHEMA,
@@ -65,23 +68,14 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
     if outline_fields["frame_reference"] != surface_fields["frame_reference"] {
         return Err(Error::Data("The candidate outline and 3D surfaces declare different frame references. Resolve their actual setup relationship and retain matching source analyses before comparison; no implicit registration was applied.".into()));
     }
-    let captures = store.captures(object, setup)?;
-    let contacts = sr.probe.samples(&captures, &sr.selected)?;
-    source.check_captures(&captures, &contacts)?;
-    let stations = surface::fit::run(&contacts, &sr);
-    let surface_report = surface::report::build(&contacts, &stations, &sr)?;
-    source.require_equal(
-        "stock-surface.machine-mm.json",
-        surface_report.json.as_bytes(),
-    )?;
     let samples = cover::build(
         mesh.triangles(),
         r.radius,
         r.samples,
         cover::Metric::Spatial,
     )?;
-    let result = query::run(&samples, &contacts, &stations, &sr, pose, &r)?;
-    let report = report::build(&samples, &contacts, &result, mesh.triangles(), pose, &r)?;
+    let result = query::run(&samples, contacts, stations, sr, pose, &r)?;
+    let report = report::build(&samples, contacts, &result, mesh.triangles(), pose, &r)?;
     // Original candidate, source analysis and exact triggers survive together.
     save(&output.join("request.txt"), &raw)?;
     candidate.copy_to(&output, "candidate-source-")?;

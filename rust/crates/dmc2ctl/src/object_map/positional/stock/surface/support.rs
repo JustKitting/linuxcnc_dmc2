@@ -96,6 +96,25 @@ impl Support {
             .iter()
             .any(|p| ((p[0] - q[0]).hypot(p[1] - q[1]) + radius) * r.neighborhood <= r.support_gap)
     }
+    pub fn covers_points(&self, points: &[V], patch: &Patch, r: &Request) -> bool {
+        if points.is_empty() || points.iter().any(|p| !self.contains(*p, patch, r)) {
+            return false;
+        }
+        let projected = points
+            .iter()
+            .map(|p| {
+                let d = sub(*p, patch.center).map(|x| x / r.neighborhood);
+                [dot(d, self.u), dot(d, self.v)]
+            })
+            .collect::<Vec<_>>();
+        // The hull and a single neighbour's support disk are convex. If
+        // they contain all facet vertices, they contain its entire projection.
+        self.points.iter().any(|p| {
+            projected
+                .iter()
+                .all(|q| (p[0] - q[0]).hypot(p[1] - q[1]) * r.neighborhood <= r.support_gap)
+        })
+    }
     pub fn json(&self, patch: &Patch, r: &Request) -> String {
         let vertices = self
             .hull

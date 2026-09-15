@@ -2,6 +2,7 @@
 mod fit;
 pub(in crate::object_map) mod material;
 pub(in crate::object_map) mod placement;
+pub(in crate::object_map) mod reconstruction;
 mod report;
 mod request;
 mod surface;

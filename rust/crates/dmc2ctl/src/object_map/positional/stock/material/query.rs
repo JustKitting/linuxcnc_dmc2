@@ -1,7 +1,7 @@
-use super::super::super::{cover, geometry::*, probe::Sample, request::Use, Error};
-use super::super::fit::Stop;
+use super::super::super::{cover, geometry::*, probe::Sample, Error};
 use super::{request::Request, surface};
-use surface::{support::Support, Patch, Station};
+pub(super) use surface::local::Checks;
+use surface::Station;
 
 #[derive(Clone, Copy, PartialEq, Eq, Debug)]
 pub enum State {
@@ -24,21 +24,6 @@ impl State {
         }
     }
 }
-#[derive(Clone, Copy, PartialEq, Eq, Debug)]
-pub enum Checks {
-    Missing,
-    Disagrees,
-    Within,
-}
-impl Checks {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Missing => "missing",
-            Self::Disagrees => "disagrees",
-            Self::Within => "within-requested-residual",
-        }
-    }
-}
 pub struct Comparison {
     pub source: usize,
     pub checks: Checks,
@@ -52,13 +37,6 @@ pub struct Comparison {
 pub struct Region {
     pub state: State,
     pub comparisons: Vec<Comparison>,
-}
-struct Local<'a> {
-    station: &'a Station,
-    patch: &'a Patch,
-    support: Support,
-    checks: Checks,
-    check_sources: Vec<usize>,
 }
 pub fn run(
     cover: &[cover::Sample],
@@ -74,42 +52,7 @@ pub fn run(
     if required.is_none_or(|n| n > r.comparisons) {
         return Err(Error::Input("max_patch_comparisons cannot cover every selected patch, check and triangle region. Increase this computational budget or refine the explicitly selected source analyses; no region was dropped.".into()));
     }
-    let mut local = Vec::new();
-    for station in stations {
-        let Ok(patch) = &station.result else { continue };
-        if patch.stop != Stop::Converged
-            || patch.residuals.iter().any(|d| d.abs() > sr.max_residual)
-        {
-            continue;
-        }
-        let support = Support::new(samples, station, patch, sr);
-        let check_sources = samples
-            .iter()
-            .enumerate()
-            .filter(|(_, s)| {
-                s.usage == Use::Check
-                    && dot(s.approach, patch.normal) < 0.
-                    && support.contains(s.center, patch, sr)
-            })
-            .map(|(i, _)| i)
-            .collect::<Vec<_>>();
-        let checks = if check_sources.is_empty() {
-            Checks::Missing
-        } else if check_sources.iter().any(|i| {
-            dot(sub(samples[*i].center, patch.center), patch.normal).abs() > sr.max_residual
-        }) {
-            Checks::Disagrees
-        } else {
-            Checks::Within
-        };
-        local.push(Local {
-            station,
-            patch,
-            support,
-            checks,
-            check_sources,
-        });
-    }
+    let local = surface::local::build(samples, stations, sr);
     let mut result = Vec::with_capacity(cover.len());
     for sample in cover {
         let p = pose.point(sample.center);
