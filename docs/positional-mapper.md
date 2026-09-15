@@ -1534,7 +1534,8 @@ that workflow, not its completion.
   CAD-to-machine frames. Preserve OP1 `stage1_after` backing/envelopes; use the
   supplied OP2 frame without applying its flip again.
 - [ ] Generate cutting and continuation/location programs from those setups,
-  with actual tool, feed, offset and operation-history data; check stock,
+  with actual tool, feed, offset and operation-history data. Carry material
+  pause decisions into native CAM and cutting transitions; check stock,
   holder/fixture collisions and clearances through the standard loading path.
 - [ ] Demonstrate the entire UI workflow on real material: map, estimate stock,
   place the required geometry, generate CAM, review the program, cut, relocate

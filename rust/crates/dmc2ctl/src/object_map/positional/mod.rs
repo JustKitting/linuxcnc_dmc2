@@ -255,7 +255,9 @@ pub fn show(store: &Store, object: &Id, setup: &Id, id: &Id) -> Result<String, E
             .map_err(|e| Error::Data(format!("Analysis {name} is not UTF-8: {e}.")))
     };
     let manifest = text("manifest.json")?;
-    Ok(format!("{{\"schema\":\"dmc2.analysis-inspection.v1\",\"analysis_directory\":{},\"manifest_text\":{},\"residuals_csv\":{},\"request_text\":{},\"cam_ready\":false}}",quote(&dir.display().to_string()),quote(&manifest),quote(&text("residuals.csv")?),quote(&text("request.txt")?)))
+    let request = text("request.txt")?;
+    let pipeline = stock::material::inspect_pipeline(store, object, setup, id, request.as_bytes())?;
+    Ok(format!("{{\"schema\":\"dmc2.analysis-inspection.v1\",\"analysis_directory\":{},\"manifest_text\":{},\"residuals_csv\":{},\"request_text\":{},\"pipeline\":{},\"cam_ready\":false}}",quote(&dir.display().to_string()),quote(&manifest),quote(&text("residuals.csv")?),quote(&request),pipeline.unwrap_or_else(||"null".into())))
 }
 pub fn export(
     store: &Store,

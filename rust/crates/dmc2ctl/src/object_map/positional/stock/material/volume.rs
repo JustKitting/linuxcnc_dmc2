@@ -4,6 +4,7 @@ use super::{
     query::Region,
     request::{EmptySpace, OCCUPANCY},
 };
+use crate::object_map::pipeline::PauseReason;
 use crate::object_map::{
     positional::{
         geometry::*,
@@ -40,14 +41,20 @@ struct Sweep {
     relation: Relation,
 }
 impl Sweep {
-    fn need(&self) -> Option<(&'static str, &'static str)> {
+    fn pause_reason(&self) -> Option<PauseReason> {
         if !self.source.conflicts.is_empty() {
-            Some(("required-volume-no-contact-conflict", "This retained clear sweep conflicts with original surface contacts. Resolve the source probe/reference model before interpreting its required-material relation; no contradictory observation was discarded."))
+            Some(PauseReason::ConflictingMeasurements)
+        } else if matches!(self.relation, Relation::Inside { .. }) {
+            Some(PauseReason::InsufficientMaterial)
         } else {
-            match self.relation {
-                Relation::Inside { .. } => Some(("required-volume-no-contact-overlap", "A connected eroded clear sweep lies wholly inside the declared required material, without crossing its surface. Review the original miss, physical reference and candidate placement; surface-only clearance cannot resolve this volume contradiction.")),
-                _ => None,
-            }
+            None
+        }
+    }
+    fn need(&self) -> Option<(&'static str, &'static str)> {
+        match self.pause_reason() {
+            Some(PauseReason::ConflictingMeasurements) => Some(("required-volume-no-contact-conflict", "This retained clear sweep conflicts with original surface contacts. Resolve the source probe/reference model before interpreting its required-material relation; no contradictory observation was discarded.")),
+            Some(PauseReason::InsufficientMaterial) => Some(("required-volume-no-contact-overlap", "A connected eroded clear sweep lies wholly inside the declared required material, without crossing its surface. Review the original miss, physical reference and candidate placement; surface-only clearance cannot resolve this volume contradiction.")),
+            _ => None,
         }
     }
     fn json(&self, samples: &[Sample]) -> String {
@@ -72,6 +79,12 @@ pub struct Assessment {
     sweeps: Vec<Sweep>,
 }
 impl Assessment {
+    pub fn pipeline_blockers(&self, samples: &[Sample]) -> Vec<(PauseReason, String)> {
+        self.sweeps
+            .iter()
+            .filter_map(|s| s.pause_reason().map(|r| (r, s.json(samples))))
+            .collect()
+    }
     pub fn json(&self, samples: &[Sample]) -> String {
         let shells = self.shells.iter().map(|s|format!("{{\"first_required_triangle\":{},\"triangle_count\":{},\"signed_volume_model_mm3\":{},\"surrounding_winding\":{}}}",s.first_triangle,s.triangle_count,s.signed_volume,s.surrounding_winding.map(|v|v.to_string()).unwrap_or_else(||"null".into()))).collect::<Vec<_>>().join(",");
         format!("{{\"occupancy_model\":{},\"geometry_role\":\"unchanged-required-operation-material\",\"boundary\":{{\"shells\":[{shells}],\"vertices\":{},\"topology_visits\":{},\"triangle_pairs\":{},\"structure_winding_terms\":{},\"reserved_winding_terms\":{}}},\"sweeps\":[{}],\"interpretation\":\"The declared required boundary is closed, embedded and consistently oriented with material winding one and empty winding zero. Separate exterior bodies and oppositely oriented nested cavities remain explicit. After comparing the entire finite eroded sweep with every required triangle fragment, a boundary-disjoint connected sweep has one inside/outside relation, witnessed by its original centre-path start transformed back to model millimetres. This geometric result uses the retained probe/error model; it does not establish physical registration, measured stock occupancy or CAM readiness.\"}}",quote(OCCUPANCY),self.vertices,self.topology_visits,self.triangle_pairs,self.structure_winding_terms,self.reserved_winding_terms,self.sweeps.iter().map(|s|s.json(samples)).collect::<Vec<_>>().join(","))

@@ -1,5 +1,7 @@
 //! Candidate-directed local material assessment, outside the control process.
+mod decision;
 mod empty;
+pub(super) use decision::Decision;
 pub(super) mod query;
 mod report;
 pub(in crate::object_map) mod request;
@@ -106,7 +108,33 @@ pub(super) fn load(
         "manifest.json",
         manifest(object, setup, id, &a, &r.json).as_bytes(),
     )?;
+    if source.optional("pipeline-state.json").is_some() {
+        source.require_equal("pipeline-state.json", Decision::from(&a).json().as_bytes())?;
+    }
     Ok((source, a))
+}
+
+pub(in crate::object_map::positional) fn inspect_pipeline(
+    store: &Store,
+    object: &Id,
+    setup: &Id,
+    id: &Id,
+    raw: &[u8],
+) -> Result<Option<String>, Error> {
+    let schema = raw.split(|b| *b == b'\n').next().unwrap_or_default();
+    if [
+        request::LEGACY_SCHEMA,
+        request::SWEEP_SCHEMA,
+        request::SCHEMA,
+    ]
+    .iter()
+    .any(|s| s.as_bytes() == schema)
+    {
+        let (_, a) = load(store, object, setup, id)?;
+        Ok(Some(Decision::from(&a).json()))
+    } else {
+        Ok(None)
+    }
 }
 
 pub fn prepare(store: &Store, object: &Id, setup: &Id, candidate: &Id) -> Result<String, Error> {
@@ -136,6 +164,7 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
     let raw = read(input)?;
     let a = assess(store, object, setup, &raw)?;
     let report = report(&a)?;
+    let decision = Decision::from(&a);
     // Original candidate, source analysis and exact triggers survive together.
     save(&output.join("request.txt"), &raw)?;
     a.candidate.bundle.copy_to(&output, "candidate-source-")?;
@@ -149,10 +178,11 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
         &output.join("material-check.machine-mm.json"),
         report.json.as_bytes(),
     )?;
+    save(
+        &output.join("pipeline-state.json"),
+        decision.json().as_bytes(),
+    )?;
     let manifest = manifest(object, setup, id, &a, &report.json);
     save(&output.join("manifest.json"), manifest.as_bytes())?;
-    Ok(format!(
-        "{{\"analysis_directory\":{},\"state\":\"material-coverage-unresolved\",\"message\":\"Local material comparisons and candidate-directed measurement regions are retained. Inspect each shortage, missing support and independent check. Closed volume and cutting remain unresolved.\",\"cam_ready\":false}}",
-        record::quote(&output.display().to_string())
-    ))
+    decision.result(&output)
 }

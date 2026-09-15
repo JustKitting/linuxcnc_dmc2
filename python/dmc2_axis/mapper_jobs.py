@@ -65,7 +65,10 @@ def decoded(output, kind):
         return None, (("Request draft", output, True),)
     data = json.loads(output)
     if data.get("schema") == "dmc2.analysis-inspection.v1":
-        documents = (
+        pipeline = data.get("pipeline")
+        documents = (() if pipeline is None else (
+            ("Pipeline decision", json.dumps(pipeline, indent=2, ensure_ascii=False), False),
+        )) + (
             ("Analysis report", json.dumps(json.loads(data["manifest_text"]), indent=2, ensure_ascii=False), False),
             ("Residual rows", data["residuals_csv"], False),
             ("Retained request", data["request_text"], False),

@@ -41,7 +41,10 @@ impl Bundle {
         Ok(result)
     }
     pub fn get(&self, name: &str) -> Result<&[u8], Error> {
-        self.files.get(name).map(Vec::as_slice).ok_or_else(|| Error::Data(format!("The source analysis is missing {name}. Select the intended published analysis; do not reconstruct missing source data.")))
+        self.optional(name).ok_or_else(|| Error::Data(format!("The source analysis is missing {name}. Select the intended published analysis; do not reconstruct missing source data.")))
+    }
+    pub fn optional(&self, name: &str) -> Option<&[u8]> {
+        self.files.get(name).map(Vec::as_slice)
     }
     pub fn require_equal(&self, name: &str, bytes: &[u8]) -> Result<(), Error> {
         if self.get(name)? != bytes {
@@ -68,7 +71,10 @@ impl Bundle {
         let stem = format!("{prefix}capture-{}", capture.id.as_str());
         self.require_equal(&format!("{stem}.txt"), &capture.raw)?;
         self.check_context_at(capture, &stem)?;
-        self.require_equal(&format!("{stem}.context.json"), capture.context.json(&capture.capture).as_bytes())
+        self.require_equal(
+            &format!("{stem}.context.json"),
+            capture.context.json(&capture.capture).as_bytes(),
+        )
     }
     fn check_context_at(&self, capture: &CaptureSnapshot, stem: &str) -> Result<(), Error> {
         for (kind, bytes) in capture.context.snapshots() {

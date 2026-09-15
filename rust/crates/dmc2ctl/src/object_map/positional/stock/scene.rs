@@ -1,11 +1,10 @@
 //! Bind retained material/stock results for CAD inspection in one declared frame.
-use super::super::{folder, retained::Bundle};
-use super::{candidate::Candidate, material, reconstruction};
+use super::{material, reconstruction};
 use crate::object_map::{
-    Error,
     model::Id,
     record::quote,
-    store::{Store, save},
+    store::{save, Store},
+    Error,
 };
 use std::path::Path;
 
@@ -51,8 +50,9 @@ pub fn export(
     }
     let object_label = store.object_label(object)?;
     let setup_label = store.setup_label(object, setup)?;
-    let material = Bundle::read(&folder(store, object, setup, material_id)?)?;
-    let mr = material::request::Request::read(material.get("request.txt")?)?;
+    let (material, assessment) = material::load(store, object, setup, material_id)?;
+    let mr = &assessment.request;
+    let pipeline = material::Decision::from(&assessment).json();
     let loaded = reconstruction::load(store, object, setup, mesh_id)?;
     let stock = &loaded.bundle;
     let reconstructed = &loaded.estimated;
@@ -61,8 +61,7 @@ pub fn export(
     }
     // Both dependent records must carry exactly the same complete source bytes.
     material.require_source(&reconstructed.source.source, "surface-source-")?;
-    let candidate = Candidate::load(store, object, setup, &mr.candidate)?;
-    material.require_source(&candidate.bundle, "candidate-source-")?;
+    let candidate = &assessment.candidate;
     candidate.require_frame(&reconstructed.source.source)?;
     candidate.require_stock(mesh_id, stock)?;
     let pose = candidate.pose;
@@ -77,7 +76,7 @@ pub fn export(
     }
     let (stock_state, stock_message) = reconstructed.report.outcome.description();
     let scene = format!(
-        "{{\"schema\":\"dmc2.freecad-stock-scene.v1\",\"object\":{},\"object_label\":{},\"setup\":{},\"setup_label\":{},\"state\":\"unreviewed-stock-scene\",\"frame_reference\":{},\"frame_relationship_evidence\":\"Matching declared source references and exact retained source bytes; physical registration remains unaccepted.\",\"geometry\":[{}],\"required_design_revision\":{},\"original_design_stl\":\"material/candidate-source-source.stl\",\"original_design_mm_per_unit\":{},\"candidate_model_mm_to_machine_mm\":{},\"transform_convention\":\"Row-major matrix multiplying homogeneous column vectors. Convert original design coordinates to model millimetres before applying this candidate. Scene geometry is already in machine millimetres; import it at identity without applying this matrix or a setup flip again.\",\"candidate_pose_record\":\"material/candidate-source-pose-candidate.txt\",\"candidate_analysis\":{},\"material_analysis\":{},\"stock_mesh_analysis\":{},\"surface_analysis\":{},\"material_report\":\"material/material-check.machine-mm.json\",\"material_measurement_needs\":\"material/measurement-needs.json\",\"stock_report\":\"stock/manifest.json\",\"stock_measurement_needs\":\"stock/measurement-needs.json\",\"stock_state\":{},\"stock_message\":{},\"stock_reconstruction_replayed\":true,\"material_calculation_replayed\":false,\"material_report_interpretation\":\"Retained assessment with exact candidate/surface source binding; export does not rerun its local material comparison or accept containment.\",\"solid_stock\":null,\"placement_accepted\":false,\"native_cam_job\":null,\"cam_ready\":false,\"machine_action_authorized\":false}}\n",
+        "{{\"schema\":\"dmc2.freecad-stock-scene.v1\",\"object\":{},\"object_label\":{},\"setup\":{},\"setup_label\":{},\"state\":\"unreviewed-stock-scene\",\"frame_reference\":{},\"frame_relationship_evidence\":\"Matching declared source references and exact retained source bytes; physical registration remains unaccepted.\",\"geometry\":[{}],\"required_design_revision\":{},\"original_design_stl\":\"material/candidate-source-source.stl\",\"original_design_mm_per_unit\":{},\"candidate_model_mm_to_machine_mm\":{},\"transform_convention\":\"Row-major matrix multiplying homogeneous column vectors. Convert original design coordinates to model millimetres before applying this candidate. Scene geometry is already in machine millimetres; import it at identity without applying this matrix or a setup flip again.\",\"candidate_pose_record\":\"material/candidate-source-pose-candidate.txt\",\"candidate_analysis\":{},\"material_analysis\":{},\"stock_mesh_analysis\":{},\"surface_analysis\":{},\"material_report\":\"material/material-check.machine-mm.json\",\"material_measurement_needs\":\"material/measurement-needs.json\",\"stock_report\":\"stock/manifest.json\",\"stock_measurement_needs\":\"stock/measurement-needs.json\",\"stock_state\":{},\"stock_message\":{},\"stock_reconstruction_replayed\":true,\"material_calculation_replayed\":true,\"material_report_interpretation\":\"Replayed material assessment with exact candidate/surface source binding. Export is for inspection; it does not release a paused pipeline or accept containment.\",\"pipeline\":{pipeline},\"purpose\":\"inspection-only\",\"solid_stock\":null,\"placement_accepted\":false,\"native_cam_job\":null,\"cam_ready\":false,\"machine_action_authorized\":false}}\n",
         quote(object.as_str()),
         quote(&object_label),
         quote(setup.as_str()),
@@ -102,7 +101,7 @@ pub fn export(
     save(&output.join("README.txt"),b"DMC2 measured stock / required material scene\n\nOpen the files listed in manifest.json geometry as separate meshes in FreeCAD. Those files use LinuxCNC machine millimetres and identity import placement. The required material mesh already includes its candidate transform. Do not apply that transform, a work offset or a CAD setup flip again.\n\nThe original design STL and its unit conversion and candidate matrix are retained separately for native CAD/CAM integration. Required operation material and estimated measured stock have distinct roles. For an operation that retains backing or holding features, its required mesh must include them.\n\nInspect the material and stock reports and their measurement needs. An open or unsupported stock surface stays open or absent. The scene does not establish a stock solid, accepted placement, native CAM Job, tools, fixtures or a cutting program. Retained original records are in the source subdirectories.\n\nmanifest.json is published last. A directory without it is an interrupted export: preserve it and retry with a new output directory.\n")?;
     save(&output.join("manifest.json"), scene.as_bytes())?;
     Ok(format!(
-        "{{\"export\":{},\"state\":\"unreviewed-stock-scene\",\"message\":\"The stock surface and required material are exported in their declared common machine frame, with original sources and placement metadata. Inspect the scene and measurement needs; native CAM and physical placement remain unresolved.\",\"cam_ready\":false}}",
+        "{{\"export\":{},\"state\":\"unreviewed-stock-scene\",\"pipeline\":{pipeline},\"message\":\"The stock surface and required material are exported in their declared common machine frame, with original sources and placement metadata. Inspect the scene and measurement needs; native CAM and physical placement remain unresolved.\",\"cam_ready\":false}}",
         quote(&output.display().to_string())
     ))
 }
