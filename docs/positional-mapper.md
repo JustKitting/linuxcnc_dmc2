@@ -231,14 +231,15 @@ native/bin/dmc2ctl object-map export-fit part first surfaces-a /tmp/surfaces-a
 ```
 
 Preparation includes original fine contacts across the selected setup's
-nonquarantined captures. Retained mapper seam contacts become `check`; the other
+nonquarantined captures. Retained mapper seam contacts and Automatic top map's
+fine cell-centre contacts become `check`; the other
 fine contacts initially become `fit`. Edit those assignments and remove any
 unrelated captures from the request. The shared frame and probe calibration
 must apply to every selected row. Withhold independent contacts as `check`;
 `observe` reports residuals without changing the fitted surface. All selected
 original rows and source ledgers remain retained.
 
-The `DMC2_STOCK_SURFACE_REQUEST_V1` uses the same calibration fields and
+The new `DMC2_STOCK_SURFACE_REQUEST_V2` uses the same calibration fields and
 trigger-to-ball correction as the other analyses. Additional required settings:
 
 | Field | Meaning |
@@ -250,6 +251,12 @@ trigger-to-ball correction as the other analyses. Additional required settings:
 | `convergence_mm` | Maximum change in projected neighborhood points for numerical convergence |
 | `max_support_gap_mm` | Largest projected distance to a neighbor admitted to local check associations |
 | `max_fit_residual_mm` | Maximum local residual for check eligibility; excess remains a recorded measurement requirement |
+| `no_contact_model` | `eroded-probe-sweep`; explicitly accepts the conditional no-contact interpretation below |
+| `no_contact_allowance_mm` | Additional nonnegative bound on undetected contact/path-position error; together with declared pretravel it must be smaller than the ball radius |
+
+Historical V1 requests retain their original contact-only interpretation and
+report bytes. The normal request editor accepts both versions. Preparing a new
+request produces V2 and leaves its physical allowance unset.
 
 The local least-squares plane uses covariance eigenvectors. The need to choose
 neighborhood scale and resolve normal orientation is described in the
@@ -299,6 +306,55 @@ previously it added an empty selection row to prepared/reopened request text.
 The corrected surface request, existing outline draft and positional request
 all reopened byte for byte. Numerical checks reported 29 object-map passes;
 none of these results establishes physical stock, control recovery or machining.
+
+### Retained no-contact support
+
+V2 consumes every original coarse `miss` in captures referenced by selected
+fine contacts. Each miss must belong to a complete capture/return cycle, with
+its original acquisition companions, matching reported endpoint and coarse
+feed. Interrupted, quarantined or unsupported capture contexts produce a
+readable error before publishing the analysis. Fine misses, coarse contacts,
+and stopped positions cannot become substitute fine measurements.
+
+The model uses the finite reported segment in machine millimetres:
+
+```text
+ball-centre path = reported machine path + trigger_to_ball
+exclusion radius = ball_radius - pretravel - no_contact_allowance
+```
+
+There is no trigger on a miss. Its endpoints remain labelled reported travel;
+they do not receive a fabricated trigger correction. The erosion assumes the
+declared pretravel plus allowance bounds undetected contact and path-position
+error. No physical allowance is supplied by default. The swept ball constrains
+surface interpolation under that assumption; it does not certify empty stock
+volume or fill unmeasured regions.
+
+The shared support used by independent checks, material assessment and mesh
+reconstruction excludes intersections with these finite sweeps. Whole-facet
+intersection is checked: clear vertices cannot justify a triangle crossing a
+detected gap. Contact-driven plane coefficients and every original row remain
+retained. Conflicting contact/miss pairs carry both source identities, the
+patch source, its normal and the corrected contact position. A contradictory
+patch cannot supply checked material or reconstructed facets. Observation
+selection retains these conflicts as pending requirements; a proposed repeat
+of a positive contact alone does not resolve the contradictory miss/model.
+Nonfinite distance arithmetic propagates a source-named error with recovery.
+
+The standard binary is built and installed. Sixty-eight library numerical
+checks reported passes. Its synthetic file workflow retained twelve original
+fine triggers and one separate no-contact path through fitting and export.
+The gap reconstruction retained 108 facets and 25 excluded lattice vertices;
+the contact-only reference retained 128 facets. A conflicting model retained
+paired disagreements and produced no supported facets. Material comparison
+and observation selection retained the conflicts, with nine pending patch
+requirements and no selected repeat claimed to resolve them. An interrupted
+miss cycle was rejected without publishing an analysis. V1 report, CSV, ASC,
+request and refinement bytes reproduced unchanged. Readback:
+`/home/kit/cnc-backups/mapper-miss-support-w6q8lyxw/round-trip-readback.json`.
+These are source, build and numerical/file milestones. Physical no-contact
+error bounds, coverage, acquisition and recovery remain unobserved for this
+change; no machine action or restart was issued.
 
 ## Place a machining footprint inside the estimated outline
 
@@ -468,7 +524,7 @@ local shortage. These are conditional, floating-point model bounds, not a
 measurement uncertainty certificate or proof of physical material.
 
 The region states distinguish unsupported coverage, missing independent checks,
-check disagreement, local shortage, an unresolved clearance interval, and local
+check disagreement, contact/no-contact model conflict, local shortage, an unresolved clearance interval, and local
 inwardness. `measurement-needs.json` ties unresolved regions to their original
 triangle, machine-frame region centre and covering radius. The required facet's
 normal describes the design region; it is never substituted for a measured
@@ -944,11 +1000,15 @@ machine run.
   `/home/kit/cnc-backups/mapper-autotop-f_vl8pdz/round-trip-readback.json` and
   `interrupted-readback.json`. See [the acquisition runbook](automatic-stock-mapping.md#automatic-top-map).
   UI activation and physical observation remain open; no restart or motion was
-  issued. Also outstanding: consume measured misses/brackets to constrain
-  interpolation and prevent support across detected gaps, distinguish supported
-  empty regions from unknown volume, and select additional spatial samples
-  from material requirements. The current top map retains these observations
-  but the local plane fitter does not yet use misses as exclusion constraints.
+  issued. V2 surface requests now consume the retained coarse misses through
+  [shared no-contact support](#retained-no-contact-support), excluding detected
+  gaps from material checks and reconstruction without inventing surface hits.
+  The standard command binary is built and installed; source identities and
+  historical request replay survive the numerical file workflow. Still
+  outstanding: establish the physical error model, distinguish inferred empty
+  regions from unknown volume in the broader stock model, and select additional
+  spatial samples from material requirements. The top acquisition and these
+  constraints remain parts of the full workflow, not physical acceptance.
 - [ ] **Exponential edge bracketing, then binary refinement.** Source and
   standard capture binary now use versioned policy V4 for new runs: **1 mm,
   2 mm, 4 mm, …** offsets from the initial top sample, in physical RIGHT /

@@ -36,14 +36,19 @@ pub fn build(samples: &[Sample], stations: &[Station], r: &Request) -> Result<Re
             }
             Ok(p) => {
                 let max = p.residuals.iter().map(|x| x.abs()).fold(0_f64, f64::max);
-                let eligible = p.stop == Stop::Converged && max <= r.max_residual;
+                let support = Support::new(samples, station, p, r)?;
+                let eligible = p.stop == Stop::Converged
+                    && max <= r.max_residual
+                    && support.conflicts.is_empty();
                 if p.stop != Stop::Converged {
                     needs.push(need("surface-fit-unresolved","The local fit did not reach its requested step tolerance. Inspect its stopping reason and solve settings before reusing this patch.",&refs));
                 }
                 if max > r.max_residual {
                     needs.push(need("surface-shape-unresolved","Local contacts depart from the fitted plane beyond the requested residual. Refine the region or fitting scale; coherent shape and every original row remain retained.",&refs));
                 }
-                let support = Support::new(samples, station, p, r);
+                for conflict in &support.conflicts {
+                    needs.push(support.conflict_json(conflict, samples, station, p));
+                }
                 let rows=station.neighbours.iter().zip(&p.residuals).zip(&p.weights).map(|((i,d),w)|format!("{{\"source\":{},\"perpendicular_residual_mm\":{d},\"huber_weight\":{w}}}",reference(&samples[*i]))).collect::<Vec<_>>().join(",");
                 patches.push(format!("{{\"source\":{source},\"state\":\"estimated-local-plane\",\"fitted_center_machine_mm\":{},\"surface_machine_mm\":{},\"outward_normal\":{},\"weighted_covariance_eigenvalues_mm2\":{},\"stop\":{},\"iterations\":{},\"objective_start_mm2\":{},\"objective_end_mm2\":{},\"eligible_for_local_checks\":{eligible},\"support\":{},\"neighbourhood\":[{rows}]}}",json(p.center),json(p.surface),json(p.normal),json(p.variance),quote(p.stop.name()),p.iterations,p.objective_start,p.objective_end,support.json(p,r)));
                 supports.push((station, p, support, eligible));
@@ -54,12 +59,14 @@ pub fn build(samples: &[Sample], stations: &[Station], r: &Request) -> Result<Re
     let mut centers = String::new();
     let mut checks = Vec::new();
     for s in samples {
-        let nearest = supports
-            .iter()
-            .filter(|(_, p, support, eligible)| {
-                *eligible && dot(p.normal, s.approach) < 0. && support.contains(s.center, p, r)
-            })
-            .map(|(station, p, _, _)| (station, dot(sub(s.center, p.center), p.normal)))
+        let mut candidates = Vec::new();
+        for (station, p, support, eligible) in &supports {
+            if *eligible && dot(p.normal, s.approach) < 0. && support.contains(s.center, p, r)? {
+                candidates.push((*station, dot(sub(s.center, p.center), p.normal)));
+            }
+        }
+        let nearest = candidates
+            .into_iter()
             .min_by(|a, b| a.1.abs().total_cmp(&b.1.abs()));
         let association = nearest
             .map(|(p, d)| {
@@ -95,7 +102,22 @@ pub fn build(samples: &[Sample], stations: &[Station], r: &Request) -> Result<Re
         needs.push(need("independent-surface-check-missing","No contacts were withheld to check these surfaces. Retain independent observations in the same setup reference before accepting the estimate.","[]"));
     }
     let refinements=format!("{{\"schema\":\"dmc2.stock-measurement-needs.v1\",\"needs\":[{}],\"execution\":\"unplanned-observation-requirements\",\"machine_commands_issued\":false}}\n",needs.join(","));
-    let json=format!("{{\"schema\":\"dmc2.stock-surface.v1\",\"state\":\"unreviewed-stock-surface\",\"frame\":\"LinuxCNC machine-mm\",\"calibration_state\":{},\"patches\":[{}],\"independent_checks\":[{}],\"measurement_needs\":{},\"solid_stock\":null,\"unmeasured_volume\":\"unknown\",\"cam_ready\":false,\"correction_formula\":\"center = original_trigger + trigger_to_ball - pretravel * approach; local surface = fitted_center - ball_radius * fitted_outward_normal\",\"interpretation\":\"Local iterative Huber orthogonal plane fits of retained 3D ball-centre observations. Neighbourhood radius and approach grouping are explicit fit assumptions. Approach determines normal sign, not wall slope. All fit/check/observe rows remain retained; independent checks never drive fitting. Local planes approximate the offset surface and do not recover inaccessible concavities or prove material coverage. No nominal CAD, box dimensions, work offsets or machine commands are supplied by this analysis.\"}}\n",quote(r.probe.calibration.name()),patches.join(","),checks.join(","),refinements);
+    let (schema, no_contact) = match r.no_contact {
+        super::request::NoContactModel::Legacy => ("dmc2.stock-surface.v1", String::new()),
+        super::request::NoContactModel::ErodedProbeSweep { allowance } => {
+            let misses = stations
+                .first()
+                .map(|s| s.no_contact.as_ref())
+                .unwrap_or(&[]);
+            let observations = misses
+                .iter()
+                .map(|m| m.json())
+                .collect::<Vec<_>>()
+                .join(",");
+            ("dmc2.stock-surface.v2", format!(",\"no_contact_model\":{{\"kind\":\"eroded-probe-sweep\",\"ball_radius_mm\":{},\"pretravel_mm\":{},\"additional_allowance_mm\":{allowance},\"sweeps\":[{observations}],\"interpretation\":\"Use every original coarse miss in the selected captures with its matching reported endpoint and retained settings. Centre path = reported machine path + mounting vector. Eroded radius = ball radius - declared pretravel - additional allowance. This assumes their sum bounds undetected contact and path-position error; it is not certified empty space. Unmeasured volume remains unknown.\"}}",r.probe.radius,r.probe.pretravel))
+        }
+    };
+    let json=format!("{{\"schema\":\"{schema}\",\"state\":\"unreviewed-stock-surface\",\"frame\":\"LinuxCNC machine-mm\",\"calibration_state\":{},\"patches\":[{}],\"independent_checks\":[{}],\"measurement_needs\":{},\"solid_stock\":null,\"unmeasured_volume\":\"unknown\",\"cam_ready\":false,\"correction_formula\":\"center = original_trigger + trigger_to_ball - pretravel * approach; local surface = fitted_center - ball_radius * fitted_outward_normal\",\"interpretation\":\"Local iterative Huber orthogonal plane fits of retained 3D ball-centre observations. Neighbourhood radius and approach grouping are explicit fit assumptions. Approach determines normal sign, not wall slope. All fit/check/observe rows remain retained; independent checks never drive fitting. Local planes approximate the offset surface and do not recover inaccessible concavities or prove material coverage. No nominal CAD, box dimensions, work offsets or machine commands are supplied by this analysis.\"{no_contact}}}\n",quote(r.probe.calibration.name()),patches.join(","),checks.join(","),refinements);
     if [&json, &csv_rows].iter().any(|s| {
         s.contains("NaN")
             || s.contains(":inf")

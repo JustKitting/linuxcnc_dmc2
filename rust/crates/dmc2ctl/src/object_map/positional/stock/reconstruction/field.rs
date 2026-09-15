@@ -9,6 +9,8 @@ use std::collections::BTreeMap;
 pub enum Missing {
     Fit,
     Support,
+    NoContact,
+    NoContactConflict,
     Band,
     Check,
     CheckConflict,
@@ -18,6 +20,8 @@ impl Missing {
         match self {
             Self::Fit=>("nearest-local-fit-unresolved","Resolve the nearest retained patch's fit or spatial support. A farther patch was not substituted."),
             Self::Support=>("outside-local-measurement-support","Acquire or select measurements covering this region. No surface was extended across this unsupported location."),
+            Self::NoContact => surface::no_contact::Issue::Exclusion.description(),
+            Self::NoContactConflict => surface::no_contact::Issue::Conflict.description(),
             Self::Band=>("outside-local-normal-band","This point is outside the declared local distance band. Inspect the reconstruction region and measured support before changing that assumption."),
             Self::Check=>("nearest-local-check-missing","Retain independent observations checking this local patch before using it for the reconstructed surface."),
             Self::CheckConflict=>("nearest-local-check-disagreement","Resolve the retained independent check disagreement; the failing contact remains in the source bundle."),
@@ -52,7 +56,7 @@ pub fn run<'a>(
     if stations.is_empty() {
         return Err(Error::Data("The source surface has no fitting stations. Select retained fine contacts and calculate a surface analysis first.".into()));
     }
-    let local = surface::local::build(samples, stations, sr);
+    let local = surface::local::build(samples, stations, sr)?;
     let lookup = local
         .iter()
         .map(|l| (l.station.seed, l))
@@ -75,7 +79,11 @@ pub fn run<'a>(
             if !d.is_finite() {
                 return Err(Error::Data("Surface signed-distance arithmetic overflowed. Inspect source units and grid bounds.".into()));
             }
-            if !l.support.contains(p, l.patch, sr) {
+            if l.checks == Checks::NoContactConflict {
+                Err(Missing::NoContactConflict)
+            } else if l.support.excluded(p, l.patch)? {
+                Err(Missing::NoContact)
+            } else if !l.support.contains(p, l.patch, sr)? {
                 Err(Missing::Support)
             } else if d.abs() > r.band {
                 Err(Missing::Band)
@@ -83,6 +91,7 @@ pub fn run<'a>(
                 match l.checks {
                     Checks::Missing => Err(Missing::Check),
                     Checks::Disagrees => Err(Missing::CheckConflict),
+                    Checks::NoContactConflict => Err(Missing::NoContactConflict),
                     Checks::Within => Ok(d),
                 }
             }
@@ -102,24 +111,23 @@ impl Field<'_> {
         vertices: &[V; 3],
         sr: &surface::request::Request,
         r: &Request,
-    ) -> Option<usize> {
+    ) -> Result<Option<usize>, Error> {
         let normal = cross(sub(vertices[1], vertices[0]), sub(vertices[2], vertices[0]));
         let length = norm(normal);
         if length == 0. || !length.is_finite() {
-            return None;
+            return Ok(None);
         }
         let normal = normal.map(|v| v / length);
-        self.local
-            .iter()
-            .filter(|l| l.checks == Checks::Within)
-            .find(|l| {
-                dot(normal, l.patch.normal) > 0.
-                    && vertices.iter().all(|v| {
-                        dot(sub(*v, l.patch.surface), l.patch.normal).abs()
-                            <= r.residual.min(r.band)
-                    })
-                    && l.support.covers_points(vertices, l.patch, sr)
-            })
-            .map(|l| l.station.seed)
+        for l in self.local.iter().filter(|l| l.checks == Checks::Within) {
+            if dot(normal, l.patch.normal) > 0.
+                && vertices.iter().all(|v| {
+                    dot(sub(*v, l.patch.surface), l.patch.normal).abs() <= r.residual.min(r.band)
+                })
+                && l.support.covers_points(vertices, l.patch, sr)?
+            {
+                return Ok(Some(l.station.seed));
+            }
+        }
+        Ok(None)
     }
 }

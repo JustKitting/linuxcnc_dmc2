@@ -41,7 +41,7 @@ impl Triangle {
             n: c.map(|x| x / l),
         })
     }
-    fn nearest(self, p: V) -> V {
+    pub(in crate::object_map::positional) fn nearest(self, p: V) -> V {
         // Voronoi regions of the triangle, including edges/vertices.
         let [a, b, c] = self.v;
         let ab = sub(b, a);

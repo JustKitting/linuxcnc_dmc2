@@ -6,7 +6,7 @@ use super::super::super::{
 use super::*;
 use crate::object_map::model::{CaptureState, Id};
 use geometry::*;
-fn settings() -> request::Request {
+pub(super) fn settings() -> request::Request {
     // Existing unit-spaced stock fixtures use these mm-scale fit parameters.
     request::Request {
         probe: Probe {
@@ -23,6 +23,7 @@ fn settings() -> request::Request {
         support_gap: 3.,
         max_residual: 0.1,
         selected: Vec::new(),
+        no_contact: request::NoContactModel::Legacy,
     }
 }
 fn sample(i: usize, p: V, approach: V, usage: Use) -> Sample {
@@ -37,7 +38,7 @@ fn sample(i: usize, p: V, approach: V, usage: Use) -> Sample {
         feed: 50.,
     }
 }
-fn grid(height: impl Fn(f64, f64) -> f64) -> Vec<Sample> {
+pub(super) fn grid(height: impl Fn(f64, f64) -> f64) -> Vec<Sample> {
     let mut s = Vec::new();
     for x in -2..=2 {
         for y in -2..=2 {
@@ -56,7 +57,7 @@ fn tilted_plane_uses_3d_normal_for_ball_correction() {
     let r = settings();
     let samples = grid(|x, y| 2. * x + 3. * y + 5.);
     let normal = [-2., -3., 1.].map(|x| x / 14_f64.sqrt());
-    for station in fit::run(&samples, &r) {
+    for station in fit::run(&samples, &r, &[]) {
         let patch = station.result.unwrap();
         assert!(norm(sub(patch.normal, normal)) < r.convergence);
         assert!(norm(sub(patch.center, samples[station.seed].center)) < r.convergence);
@@ -75,7 +76,7 @@ fn single_rim_line_does_not_invent_wall_slope() {
     let samples = (0..9)
         .map(|i| sample(i, [i as f64, 0., 5.], [0., -1., 0.], Use::Fit))
         .collect::<Vec<_>>();
-    let stations = fit::run(&samples, &r);
+    let stations = fit::run(&samples, &r, &[]);
     assert!(stations
         .iter()
         .all(|p| matches!(p.result, Err(Reason::UnobservedNormal))));
@@ -88,14 +89,14 @@ fn single_rim_line_does_not_invent_wall_slope() {
 fn withheld_contact_disagreement_does_not_pull_surface() {
     let r = settings();
     let mut samples = grid(|_, _| 5.);
-    let before = fit::run(&samples, &r);
+    let before = fit::run(&samples, &r, &[]);
     samples.push(sample(
         samples.len(),
         [0., 0., 7.],
         [0., 0., -1.],
         Use::Check,
     ));
-    let after = fit::run(&samples, &r);
+    let after = fit::run(&samples, &r, &[]);
     for (a, b) in before.iter().zip(&after) {
         assert_eq!(
             a.result.as_ref().unwrap().center,
@@ -131,7 +132,7 @@ fn empty_space_between_neighborhoods_has_no_check_association() {
         [0., 0., -1.],
         Use::Check,
     ));
-    let report = build(&samples, &r).unwrap();
+    let report = build(&samples, &r, &[]).unwrap();
     assert!(report.json.contains("\"associated_patch\":null"));
     assert!(report
         .refinements
@@ -144,7 +145,7 @@ fn curved_surface_and_large_residual_remain_retained() {
     let middle = samples.len() / 2;
     samples[middle].center[2] += 2.;
     samples[middle].trigger = samples[middle].center;
-    let stations = fit::run(&samples, &r);
+    let stations = fit::run(&samples, &r, &[]);
     assert_eq!(stations.len(), samples.len());
     assert!(stations
         .iter()

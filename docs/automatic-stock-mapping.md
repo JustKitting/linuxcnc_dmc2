@@ -185,6 +185,11 @@ interrupted-cycle export retained its diagnostic without inferred coverage.
 Readbacks are under `/home/kit/cnc-backups/mapper-autotop-f_vl8pdz`.
 These are source, build and file results. The CNC was not restarted or run;
 the new UI controls require a later UI relaunch. Physical acquisition and
-recovery remain unobserved. Miss-constrained surface support, multi-height
-coverage and material-directed follow-up execution remain in the continuing
-TODOs; this top acquisition is one part of that workflow.
+recovery remain unobserved. V2 surface analysis now uses the retained coarse
+misses to constrain shared interpolation support, including full-facet gap
+checks and explicit contact/miss conflicts. The original capture cycles,
+companions and an explicit probe/error allowance define that interpretation;
+see [retained no-contact support](positional-mapper.md#retained-no-contact-support).
+No physical allowance or empty-volume certification is inferred. Multi-height
+coverage, additional spatial samples and material-directed follow-up execution
+remain in the continuing TODOs; this top acquisition is one part of that workflow.

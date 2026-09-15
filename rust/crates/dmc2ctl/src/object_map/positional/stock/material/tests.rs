@@ -32,6 +32,7 @@ fn source(check: Option<f64>) -> (Vec<Sample>, surface::request::Request) {
         support_gap: 3.,
         max_residual: 0.1,
         selected: vec![],
+        no_contact: surface::request::NoContactModel::Legacy,
     };
     (samples, r)
 }
@@ -68,7 +69,7 @@ fn region(p: V) -> cover::Sample {
 }
 fn assess(points: &[cover::Sample], check: Option<f64>) -> Vec<query::Region> {
     let (s, sr) = source(check);
-    let stations = surface::fit::run(&s, &sr);
+    let stations = surface::fit::run(&s, &sr, &[]);
     query::run(
         points,
         &s,
@@ -161,7 +162,7 @@ fn rigid_frame_change_preserves_local_distances() {
         sample.trigger = sample.center;
         sample.approach = mv(pose.r, sample.approach);
     }
-    let stations = surface::fit::run(&s, &sr);
+    let stations = surface::fit::run(&s, &sr, &[]);
     let result = query::run(
         &[region([0., 0., -1.])],
         &s,
@@ -194,7 +195,7 @@ fn vertical_geometry_gets_full_spatial_coverage() {
 #[test]
 fn comparison_budget_cannot_drop_regions() {
     let (s, sr) = source(Some(1.));
-    let stations = surface::fit::run(&s, &sr);
+    let stations = surface::fit::run(&s, &sr, &[]);
     let mut r = settings();
     r.comparisons = 1;
     let error = query::run(

@@ -69,7 +69,7 @@ impl Mesh {
         cell: usize,
         tetrahedron: usize,
         budget: usize,
-        support: &impl Fn(&[V; 3]) -> Option<usize>,
+        support: &impl Fn(&[V; 3]) -> Result<Option<usize>, Error>,
     ) -> Result<(), Error> {
         let p = vertices.map(|i| self.vertices[i].p);
         let normal = cross(sub(p[1], p[0]), sub(p[2], p[0]));
@@ -97,7 +97,7 @@ impl Mesh {
             vertices,
             cell,
             tetrahedron,
-            source: support(&vertices.map(|i| self.vertices[i].p)),
+            source: support(&vertices.map(|i| self.vertices[i].p))?,
         });
         Ok(())
     }
@@ -149,7 +149,7 @@ pub fn run(
     grid: &Grid,
     nodes: &[Node],
     budget: usize,
-    support: impl Fn(&[V; 3]) -> Option<usize>,
+    support: impl Fn(&[V; 3]) -> Result<Option<usize>, Error>,
 ) -> Result<Mesh, Error> {
     if nodes.len() != grid.count {
         return Err(Error::Data("Reconstruction field and lattice sizes disagree. Recalculate from the retained request; no mesh was published.".into()));

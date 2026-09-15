@@ -8,6 +8,7 @@ pub enum State {
     Unsupported,
     Unchecked,
     CheckConflict,
+    NoContactConflict,
     Shortage,
     BoundaryBand,
     LocallyInward,
@@ -18,6 +19,7 @@ impl State {
             Self::Unsupported => ("unobserved-local-coverage", "Acquire surface support around this required-geometry region; inspect the retained source's fit, support and normal band. This coordinate is a region of interest, not a probe endpoint."),
             Self::Unchecked => ("independent-support-check-missing", "Retain independent contacts checking these local patches before relying on their material comparison."),
             Self::CheckConflict => ("independent-support-check-disagreement", "Resolve the retained independent check disagreement before using these local material comparisons; no failing contact was removed."),
+            Self::NoContactConflict => surface::no_contact::Issue::Conflict.description(),
             Self::Shortage => ("local-clearance-shortage", "The required geometry lacks requested clearance under a checked local plane model. Inspect the source contacts and independent remeasurement before changing the candidate placement."),
             Self::BoundaryBand => ("local-clearance-bound-unresolved", "The cover/allowance interval crosses the requested clearance. Refine computational coverage or the measured surface allowance using evidence, then reassess."),
             Self::LocallyInward => ("locally-inward-only", "This region meets local checked-plane clearance. Closed boundary coverage, enclosed material and cavities remain unresolved; do not treat local inwardness as a solid."),
@@ -52,7 +54,7 @@ pub fn run(
     if required.is_none_or(|n| n > r.comparisons) {
         return Err(Error::Input("max_patch_comparisons cannot cover every selected patch, check and triangle region. Increase this computational budget or refine the explicitly selected source analyses; no region was dropped.".into()));
     }
-    let local = surface::local::build(samples, stations, sr);
+    let local = surface::local::build(samples, stations, sr)?;
     let mut result = Vec::with_capacity(cover.len());
     for sample in cover {
         let p = pose.point(sample.center);
@@ -65,7 +67,8 @@ pub fn run(
             if !d.is_finite() {
                 return Err(Error::Data("Local signed distance overflowed. Inspect source coordinate units and the retained pose.".into()));
             }
-            if d.abs() + sample.radius > r.band || !l.support.covers(p, sample.radius, l.patch, sr)
+            if d.abs() + sample.radius > r.band
+                || !l.support.covers(p, sample.radius, l.patch, sr)?
             {
                 continue;
             }
@@ -98,6 +101,11 @@ pub fn run(
             .collect::<Vec<_>>();
         let state = if comparisons.is_empty() {
             State::Unsupported
+        } else if comparisons
+            .iter()
+            .any(|c| c.checks == Checks::NoContactConflict)
+        {
+            State::NoContactConflict
         } else if comparisons.iter().any(|c| c.checks == Checks::Disagrees) {
             State::CheckConflict
         } else if checked.is_empty() {

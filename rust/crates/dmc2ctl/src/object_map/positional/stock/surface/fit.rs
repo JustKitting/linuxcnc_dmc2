@@ -129,7 +129,8 @@ fn local(
         objective_end: end,
     })
 }
-pub fn run(samples: &[Sample], r: &Request) -> Vec<Station> {
+pub fn run(samples: &[Sample], r: &Request, misses: &[super::no_contact::Sweep]) -> Vec<Station> {
+    let no_contact: std::sync::Arc<[super::no_contact::Sweep]> = misses.into();
     samples
         .iter()
         .enumerate()
@@ -150,6 +151,7 @@ pub fn run(samples: &[Sample], r: &Request) -> Vec<Station> {
                 seed,
                 neighbours,
                 result,
+                no_contact: no_contact.clone(),
             }
         })
         .collect()

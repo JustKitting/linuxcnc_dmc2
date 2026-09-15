@@ -9,16 +9,16 @@ pub(in crate::object_map) mod reconstruction;
 mod report;
 mod request;
 pub(in crate::object_map) mod scene;
-mod surface;
+pub(in crate::object_map) mod surface;
 #[cfg(test)]
 mod tests;
 pub(in crate::object_map) mod volume;
 use super::{
     super::{
-        Error,
         model::{CaptureState, Id, Stage},
         record,
-        store::{Store, read, save},
+        store::{read, save, Store},
+        Error,
     },
     folder,
 };
@@ -26,7 +26,7 @@ use crate::probe_data::{
     ledger::number,
     mapper_schema::Phase,
     mapper_settings::Mode,
-    mapper_trace::{Progress, outline, state},
+    mapper_trace::{outline, state, Progress},
     schema::Workflow,
 };
 use std::{collections::BTreeSet, path::Path};
@@ -66,12 +66,13 @@ pub fn prepare_surface(store: &Store, object: &Id, setup: &Id) -> Result<String,
             let independent = if c.capture.workflow == Workflow::Mapper {
                 let phase = Phase::read(
                     number(&c.capture.records[p.sequence], "phase").map_err(Error::Data)?,
-                ).map_err(Error::Data)?;
+                )
+                .map_err(Error::Data)?;
                 phase == Phase::OutlineClose
                     || (phase == Phase::Verify
-                        && Mode::read(
-                            number(&c.capture.records[0], "mode").map_err(Error::Data)?,
-                        ).map_err(Error::Data)? == Mode::FreeSurface)
+                        && Mode::read(number(&c.capture.records[0], "mode").map_err(Error::Data)?)
+                            .map_err(Error::Data)?
+                            == Mode::FreeSurface)
             } else {
                 false
             };
@@ -163,7 +164,8 @@ pub fn run(
         Model::Surface => {
             let req = surface::request::Request::read(&raw)?;
             let samples = req.probe.samples(&captures, &req.selected)?;
-            let report = surface::build(&samples, &req)?;
+            let misses = surface::no_contact::read(&captures, &samples, &req)?;
+            let report = surface::build(&samples, &req, &misses)?;
             (samples, report)
         }
     };

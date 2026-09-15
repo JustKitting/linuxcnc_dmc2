@@ -1,8 +1,8 @@
 //! File-selection and draft exchange for the offline AXIS editor.
 use super::{
-    Error,
     record::{self, quote},
     store::{read, save},
+    Error,
 };
 use std::{fs, path::Path};
 
@@ -46,6 +46,10 @@ fn draft(raw: &[u8]) -> Result<&str, Error> {
         ),
         super::positional::stock::Model::Outline.request_schema(),
         super::positional::stock::Model::Surface.request_schema(),
+        (
+            super::positional::stock::surface::request::LEGACY_SCHEMA,
+            super::positional::stock::surface::request::legacy_keys(),
+        ),
         (
             super::positional::stock::placement::request::SCHEMA,
             super::positional::stock::placement::request::KEYS.to_vec(),

@@ -4,8 +4,9 @@ use super::super::super::{
     Error,
 };
 use crate::object_map::record;
-pub const SCHEMA: &str = "DMC2_STOCK_SURFACE_REQUEST_V1";
-pub fn keys() -> Vec<&'static str> {
+pub const LEGACY_SCHEMA: &str = "DMC2_STOCK_SURFACE_REQUEST_V1";
+pub const SCHEMA: &str = "DMC2_STOCK_SURFACE_REQUEST_V2";
+pub fn legacy_keys() -> Vec<&'static str> {
     super::super::super::probe::keys(&[
         "neighborhood_mm",
         "max_approach_angle_deg",
@@ -15,6 +16,24 @@ pub fn keys() -> Vec<&'static str> {
         "max_support_gap_mm",
         "max_fit_residual_mm",
     ])
+}
+pub fn keys() -> Vec<&'static str> {
+    legacy_keys()
+        .into_iter()
+        .chain(["no_contact_model", "no_contact_allowance_mm"])
+        .collect()
+}
+pub fn decode(raw: &[u8]) -> Result<(std::collections::BTreeMap<String, String>, &[u8]), Error> {
+    if raw.starts_with(format!("{LEGACY_SCHEMA}\n").as_bytes()) {
+        record::decode(raw, LEGACY_SCHEMA, &legacy_keys())
+    } else {
+        record::decode(raw, SCHEMA, &keys())
+    }
+}
+#[derive(Clone, Copy)]
+pub enum NoContactModel {
+    Legacy,
+    ErodedProbeSweep { allowance: f64 },
 }
 pub struct Request {
     pub probe: Probe,
@@ -26,10 +45,24 @@ pub struct Request {
     pub support_gap: f64,
     pub max_residual: f64,
     pub selected: Vec<Selection>,
+    pub no_contact: NoContactModel,
 }
 impl Request {
     pub fn read(raw: &[u8]) -> Result<Self, Error> {
-        let (f, body) = record::decode(raw, SCHEMA, &keys())?;
+        let (f, body) = decode(raw)?;
+        let probe = Probe::read(&f)?;
+        let no_contact = if let Some(model) = f.get("no_contact_model") {
+            if model != "eroded-probe-sweep" {
+                return Err(Error::Input("no_contact_model must be eroded-probe-sweep. This assumes declared pretravel plus allowance bounds undetected contact and reported-position error; review that model in the request.".into()));
+            }
+            let allowance = scalar(&f["no_contact_allowance_mm"], "no_contact_allowance_mm")?;
+            if allowance < 0. || allowance + probe.pretravel >= probe.radius {
+                return Err(Error::Input("no_contact_allowance_mm must be nonnegative and, together with declared pretravel, smaller than ball_radius_mm. Enter an evidence-based allowance; no radius or measurement was substituted.".into()));
+            }
+            NoContactModel::ErodedProbeSweep { allowance }
+        } else {
+            NoContactModel::Legacy
+        };
         let positive = |k: &str| -> Result<f64, Error> {
             let v = scalar(&f[k], k)?;
             if v > 0. {
@@ -54,7 +87,8 @@ impl Request {
             return Err(Error::Input("Select at least three fine contacts for local plane fitting; each neighborhood also needs noncollinear support. Keep independent check contacts.".into()));
         }
         Ok(Self {
-            probe: Probe::read(&f)?,
+            probe,
+            no_contact,
             neighborhood: positive("neighborhood_mm")?,
             approach_cos: angle.to_radians().cos(),
             huber: positive("huber_mm")?,

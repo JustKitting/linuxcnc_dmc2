@@ -5,7 +5,7 @@ use super::{
     surface,
 };
 use crate::{
-    object_map::{Error, store::CaptureSnapshot},
+    object_map::{store::CaptureSnapshot, Error},
     probe_data::{
         mapper_settings::{Sample, Settings},
         mapper_trace::{observation::Retouch, state},
@@ -18,6 +18,7 @@ use std::collections::{BTreeMap, BTreeSet, BinaryHeap};
 pub enum Kind {
     MissingCheck,
     ConflictingCheck,
+    NoContactConflict,
     Shortage,
 }
 impl Kind {
@@ -25,6 +26,7 @@ impl Kind {
         match self {
             Self::MissingCheck => "acquire-independent-patch-check",
             Self::ConflictingCheck => "repeat-disagreeing-check",
+            Self::NoContactConflict => "review-contact-no-contact-conflict",
             Self::Shortage => "remeasure-local-shortage",
         }
     }
@@ -58,6 +60,7 @@ fn needs(a: &material::Assessment) -> Vec<Need> {
             let kind = match c.checks {
                 Checks::Missing => Some(Kind::MissingCheck),
                 Checks::Disagrees => Some(Kind::ConflictingCheck),
+                Checks::NoContactConflict => Some(Kind::NoContactConflict),
                 Checks::Within if r.state == State::Shortage && c.upper < a.request.clearance => {
                     Some(Kind::Shortage)
                 }
@@ -152,7 +155,7 @@ pub fn run(
         });
         runs.insert(c.id.as_str().to_owned(), parsed);
     }
-    let local = surface::local::build(samples, &a.surface.stations, &a.surface.request);
+    let local = surface::local::build(samples, &a.surface.stations, &a.surface.request)?;
     let by_seed = local
         .iter()
         .map(|l| (l.station.seed, l))
@@ -165,6 +168,10 @@ pub fn run(
             let l = by_seed.get(&need.seed).ok_or_else(|| Error::Data("A material requirement has no matching reproduced local patch. Recalculate its source analysis; no substitute normal was inferred.".into()))?;
             let residual = dot(sub(s.center, l.patch.center), l.patch.normal).abs();
             let relevant = match need.kind {
+                // Repeating a positive contact alone cannot resolve the
+                // contradictory no-contact path/model. Retain this need as
+                // pending; do not count a proposed retouch as its resolution.
+                Kind::NoContactConflict => false,
                 Kind::ConflictingCheck => {
                     l.check_sources.contains(&index) && residual > a.surface.request.max_residual
                 }
@@ -172,7 +179,7 @@ pub fn run(
                     s.usage != Use::Check
                         && residual <= a.surface.request.max_residual
                         && dot(s.approach, l.patch.normal) < 0.
-                        && l.support.contains(s.center, l.patch, &a.surface.request)
+                        && l.support.contains(s.center, l.patch, &a.surface.request)?
                 }
             };
             if relevant {

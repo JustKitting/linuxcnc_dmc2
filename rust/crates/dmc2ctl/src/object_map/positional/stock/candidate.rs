@@ -1,7 +1,7 @@
 //! A shared typed candidate reader for material checking and CAD scene export.
 use super::super::{folder, geometry::Pose, mesh::Mesh, read_pose, retained::Bundle};
 use super::{placement, surface, volume};
-use crate::object_map::{Error, model::Id, record, store::Store};
+use crate::object_map::{model::Id, record, store::Store, Error};
 enum Source {
     Footprint,
     Enclosed { stock: Id },
@@ -36,11 +36,8 @@ impl Candidate {
             )
         } else if schema == volume::request::SCHEMA.as_bytes() {
             let r = volume::request::Request::read(raw)?;
-            let (fields, _) = record::decode(
-                bundle.get("stock-source-surface-source-request.txt")?,
-                surface::request::SCHEMA,
-                &surface::request::keys(),
-            )?;
+            let (fields, _) =
+                surface::request::decode(bundle.get("stock-source-surface-source-request.txt")?)?;
             (
                 Source::Enclosed { stock: r.stock },
                 r.design,
@@ -68,11 +65,7 @@ impl Candidate {
         })
     }
     pub fn require_frame(&self, surface: &Bundle) -> Result<(), Error> {
-        let (fields, _) = record::decode(
-            surface.get("request.txt")?,
-            surface::request::SCHEMA,
-            &surface::request::keys(),
-        )?;
+        let (fields, _) = surface::request::decode(surface.get("request.txt")?)?;
         if self.frame != fields["frame_reference"] {
             return Err(Error::Data("The placement candidate and 3D surfaces declare different frame references. Resolve their actual setup relationship and retain matching analyses; no implicit registration was applied.".into()));
         }

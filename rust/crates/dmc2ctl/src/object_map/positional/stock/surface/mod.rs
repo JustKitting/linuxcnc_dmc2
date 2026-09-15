@@ -1,5 +1,6 @@
 pub(super) mod fit;
 pub(super) mod local;
+pub(super) mod no_contact;
 mod plane;
 pub(super) mod report;
 pub(in crate::object_map) mod request;
@@ -25,6 +26,7 @@ pub struct Station {
     pub seed: usize,
     pub neighbours: Vec<usize>,
     pub result: Result<Patch, Reason>,
+    pub no_contact: std::sync::Arc<[no_contact::Sweep]>,
 }
 #[derive(Clone, Copy, Debug)]
 pub enum Reason {
@@ -45,8 +47,12 @@ impl Reason {
         }
     }
 }
-pub fn build(samples: &[Sample], r: &request::Request) -> Result<super::report::Report, Error> {
-    report::build(samples, &fit::run(samples, r), r)
+pub fn build(
+    samples: &[Sample],
+    r: &request::Request,
+    misses: &[no_contact::Sweep],
+) -> Result<super::report::Report, Error> {
+    report::build(samples, &fit::run(samples, r, misses), r)
 }
 
 pub struct Loaded {
@@ -67,7 +73,18 @@ pub fn load(
     let captures = store.captures(object, setup)?;
     let contacts = request.probe.samples(&captures, &request.selected)?;
     source.check_captures(&captures, &contacts)?;
-    let stations = fit::run(&contacts, &request);
+    if matches!(
+        request.no_contact,
+        request::NoContactModel::ErodedProbeSweep { .. }
+    ) {
+        for c in &captures {
+            if contacts.iter().any(|s| s.capture == c.id) {
+                source.check_context(c)?;
+            }
+        }
+    }
+    let misses = no_contact::read(&captures, &contacts, &request)?;
+    let stations = fit::run(&contacts, &request, &misses);
     let report = report::build(&contacts, &stations, &request)?;
     source.require_equal("stock-surface.machine-mm.json", report.json.as_bytes())?;
     Ok(Loaded {
