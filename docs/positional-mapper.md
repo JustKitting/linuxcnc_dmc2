@@ -1508,17 +1508,19 @@ that workflow, not its completion.
 - [ ] Activate and observe the mapper pane, revised rim trace, automatic top map
   and top follow-ups through the normal UI, including contact capture,
   bracketing/refinement, missed contacts, cancellation, Clear Fault and Pendant Mode.
-- [ ] Add entry, transfer and recovery plans for side, multiheight and
-  mixed-setting follow-up measurements, with exact trigger capture/readback.
-- [ ] Make reconstruction and material deficits drive further probing, then
-  feed those observations back into the stock estimate. Cover gaps, conflicting
-  checks, wall slope and unresolved shape; adapt edge/ridge detection to this loop.
-- [ ] Connect measured top, side and base surfaces across creases and access
-  gaps. Represent supported material, measured empty space and unknown volume
-  separately, with uncertainty; do not fill missing coverage or impose a cuboid.
-- [ ] Use partial surface support and no-contact constraints directly in
-  placement optimization. Preserve required machining geometry; account for
-  local shortages, unknown coverage and actual setup clearances separately.
+- [ ] Observe the adaptive top/side acquisition's entry, transfer, trigger
+  capture, full withdrawal, cancellation and recovery on the machine.
+- [ ] Exercise the adaptive measurement/refit loop with actual stock, including
+  all-miss batches, check runs and acquisition at new depths. Refine acquisition
+  from observed performance, including expected information from misses and
+  repeated/redundant ray selection.
+- [ ] Calibrate the implicit stock model's length/noise parameters and sampling
+  resolution against independent top, side and base measurements, including
+  creases and access gaps. Retain uncertainty and avoid treating predicted
+  occupancy as measured geometry.
+- [ ] Reduce initial adaptive setup to the necessary physical inputs, connect
+  automatic initial acquisition and include actual workholding/fixture access
+  in both placement and probe-plan review.
 - [ ] Establish probe calibration and physical frame relationships between
   captures. Set evidence-based tolerances and quantify independent prediction
   errors, repeatability and uncertainty before accepting a placement.

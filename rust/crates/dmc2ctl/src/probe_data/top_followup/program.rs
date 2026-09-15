@@ -17,6 +17,9 @@ impl Plan {
                 role.description()
             ));
         }
+        if self.rows.directed() {
+            out.push_str("(Adaptive top/side observations: explicit ray geometry follows; each returns to starting clearance.)\n");
+        }
         out.push_str(&format!(
             "(Required starting work XYZ mm: {:?}; work-to-machine translation mm: {:?})\n",
             s.origin, s.offset
@@ -29,6 +32,18 @@ impl Plan {
         ));
         for (i, q) in self.requests()?.iter().enumerate() {
             let p = q.approach;
+            if self.rows.directed() {
+                out.push_str(&format!(
+                    "(Adaptive row {i}: phase {}; approach XY {:?}; target XYZ {:?})\n",
+                    q.phase as u8, p, q.target
+                ));
+                if q.target[0] > q.approach[0] {
+                    out.push_str("(This side approach: physical LEFT / LinuxCNC +X.)\n");
+                }
+                if q.target[0] < q.approach[0] {
+                    out.push_str("(This side approach: physical RIGHT / LinuxCNC -X.)\n");
+                }
+            }
             out.push_str(&format!(
                 "(Row {i}: work XY mm {:?}; clear Z {}; floor Z {})\n",
                 p, s.origin[2], s.floor

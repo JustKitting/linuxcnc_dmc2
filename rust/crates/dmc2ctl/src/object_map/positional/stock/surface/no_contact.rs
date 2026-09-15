@@ -84,6 +84,12 @@ impl Sweep {
             self.radius + radius,
         )
     }
+    pub fn ball_separation(&self, p: V, radius: f64) -> Result<f64, Error> {
+        geometry::point_segment(p, self.center_from, self.center_end)
+            .map(|d| d - self.radius - radius)
+            .filter(|d| d.is_finite())
+            .ok_or_else(|| Error::Data(format!("Support separation from {}:{} is nonfinite. Inspect source coordinates and the retained probe model before refining placement.", self.capture.as_str(), self.sequence)))
+    }
     pub fn overlaps_triangle(&self, triangle: Triangle) -> Result<bool, Error> {
         self.within(
             geometry::segment_triangle(self.center_from, self.center_end, triangle),

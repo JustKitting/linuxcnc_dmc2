@@ -1,9 +1,11 @@
 //! A shared typed candidate reader for material checking and CAD scene export.
 use super::super::{folder, geometry::Pose, mesh::Mesh, read_pose, retained::Bundle};
-use super::{placement, surface, volume};
+use super::{partial, placement, surface, volume};
 use crate::object_map::{model::Id, record, store::Store, Error};
 enum Source {
+    Adaptive,
     Footprint,
+    Partial,
     Enclosed { stock: Id },
 }
 pub(super) struct Candidate {
@@ -44,8 +46,21 @@ impl Candidate {
                 r.units,
                 fields["frame_reference"].clone(),
             )
+        } else if schema == partial::request::SCHEMA.as_bytes() {
+            let r = partial::request::Request::read(raw)?;
+            let (fields, _) = surface::request::decode(bundle.get("surface-source-request.txt")?)?;
+            (
+                Source::Partial,
+                r.design,
+                r.units,
+                fields["frame_reference"].clone(),
+            )
+        } else if schema == super::adaptive::request::SCHEMA.as_bytes() {
+            let r=super::adaptive::request::Request::read(raw)?;
+            let (fields,_)=surface::request::decode(bundle.get("surface-source-request.txt")?)?;
+            (Source::Adaptive,r.design,r.units,fields["frame_reference"].clone())
         } else {
-            return Err(Error::Input("Select a machining footprint or volume-placement candidate. Registration fits and stock estimates have different roles; no candidate type was inferred.".into()));
+            return Err(Error::Input("Select a machining footprint, partial-placement or volume-placement candidate. Registration fits and stock estimates have different roles; no candidate type was inferred.".into()));
         };
         let pose = read_pose(&dir.join("pose-candidate.txt"))?;
         let mesh = Mesh::read(bundle.get("source.stl")?, units)?;

@@ -205,6 +205,50 @@ impl Support {
                 .all(|q| (p[0] - q[0]).hypot(p[1] - q[1]) * r.neighborhood <= r.support_gap)
         }))
     }
+    /// Continuous lower support margin for a covering ball. Each component
+    /// is 1-Lipschitz in p; min/max preserve that movement bound. No patch is
+    /// silently dropped when a placement leaves its measured support domain.
+    pub fn margin(&self, p: V, radius: f64, patch: &Patch, r: &Request) -> Result<f64, Error> {
+        if self.hull.len() < 3 || self.points.is_empty() {
+            return Err(Error::Data("A retained placement comparison has no planar support hull. Recalculate its source surface and material assessment before refining placement.".into()));
+        }
+        let d = sub(p, patch.surface).map(|x| x / r.neighborhood);
+        let q = [dot(d, self.u), dot(d, self.v)];
+        let mut margin = f64::INFINITY;
+        if !q.iter().all(|x| x.is_finite()) || !radius.is_finite() {
+            return Err(Error::Data("Support coordinates overflowed. Inspect source units and placement bounds before retrying.".into()));
+        }
+        for (a, b) in self
+            .hull
+            .iter()
+            .zip(self.hull.iter().cycle().skip(1))
+            .take(self.hull.len())
+        {
+            let edge = (b[0] - a[0]).hypot(b[1] - a[1]);
+            let slack = cross2(*a, *b, q) / edge * r.neighborhood - radius;
+            if !slack.is_finite() || edge == 0. {
+                return Err(Error::Data("A retained support edge cannot supply a finite margin. Inspect source geometry and coordinate scale; no edge was omitted.".into()));
+            }
+            margin = margin.min(slack);
+        }
+        let mut nearby = f64::NEG_INFINITY;
+        for v in &self.points {
+            let slack = r.support_gap - (v[0] - q[0]).hypot(v[1] - q[1]) * r.neighborhood - radius;
+            if !slack.is_finite() {
+                return Err(Error::Data("A retained support-neighbour margin overflowed. Inspect source units and placement bounds; no neighbour was omitted.".into()));
+            }
+            nearby = nearby.max(slack);
+        }
+        margin = margin.min(nearby);
+        let projection = self.surface_projection(p, patch);
+        for sweep in self.no_contact.iter() {
+            margin = margin.min(sweep.ball_separation(projection, radius)?);
+        }
+        if !margin.is_finite() || !finite(p) {
+            return Err(Error::Data("Measured support margin overflowed. Inspect source units, cover radius and placement bounds before retrying.".into()));
+        }
+        Ok(margin)
+    }
     pub fn conflict_json(
         &self,
         c: &Conflict,

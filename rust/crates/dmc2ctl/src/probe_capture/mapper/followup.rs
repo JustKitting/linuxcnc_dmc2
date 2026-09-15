@@ -77,13 +77,15 @@ pub(super) fn export(
     let rows = samples.iter().enumerate().map(|(i,s)| {
         let reference = match &plan.rows {
             Rows::Repeats(rows) => { let r = &rows[i]; format!(",\"repeated_source\":{{\"proposal\":{},\"capture\":\"{}\",\"sequence\":{},\"phase\":{}}}",r.proposal,r.capture,r.sequence,r.request.phase as u8) },
-            Rows::Columns(_) => String::new(),
+            Rows::Columns(_) | Rows::Directed(_) => String::new(),
         };
         format!("{{\"row\":{i},\"source_sequence\":{},\"original_trigger_machine_mm\":{},\"miss\":{}{reference}}}",s.sequence,s.trigger.map(|p|format!("{p:?}")).unwrap_or_else(||"null".into()),s.trigger.is_none())
     }).collect::<Vec<_>>().join(",");
     let (schema, role) = if let Some(role) = plan.role {
         (
-            if plan.rows.repeated() {
+            if plan.rows.directed() {
+                "dmc2.measurement-followup-capture.v4"
+            } else if plan.rows.repeated() {
                 "dmc2.top-followup-capture.v3"
             } else {
                 "dmc2.top-followup-capture.v2"
@@ -97,7 +99,12 @@ pub(super) fn export(
     } else {
         ("dmc2.top-followup-capture.v1", String::new())
     };
-    let json = format!("{{\"schema\":\"{schema}\"{role},\"program_result_present\":{ended},\"requested_rows\":{},\"retained_rows\":[{rows}],\"interpretation\":\"Fresh top samples with the original acquisition frame and explicit plan order. Misses have no surface height. Import this ledger with its companions into the original object/setup, then prepare a new stock surface and material assessment. Coverage and cutting remain unresolved.\",\"cam_ready\":false}}\n",plan.rows.len());
+    let meaning = if plan.rows.directed() {
+        "Fresh adaptive top/side observations in the declared acquisition frame and explicit plan order. Misses have no trigger or surface height. Import the exact ledger and companions, then use Update fit from new measurements with the preceding cycle. This record does not approve cutting."
+    } else {
+        "Fresh top samples with the original acquisition frame and explicit plan order. Misses have no surface height. Import this ledger with its companions into the original object/setup, then prepare a new stock surface and material assessment. Coverage and cutting remain unresolved."
+    };
+    let json = format!("{{\"schema\":\"{schema}\"{role},\"program_result_present\":{ended},\"requested_rows\":{},\"retained_rows\":[{rows}],\"interpretation\":\"{meaning}\",\"cam_ready\":false}}\n",plan.rows.len());
     let stem = if require_result {
         String::new()
     } else {

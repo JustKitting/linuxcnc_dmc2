@@ -37,32 +37,44 @@ fn assess(store: &Store, object: &Id, setup: &Id, raw: &[u8]) -> Result<Assessme
         request.samples,
         cover::Metric::Spatial,
     )?;
-    let queried = query::run(
-        &covers,
-        &surface.contacts,
-        &surface.stations,
-        &surface.request,
-        candidate.pose,
-        &request,
-        &surface.no_contact,
-    )?;
-    let volume = volume::assess(
-        &candidate.mesh,
-        candidate.pose,
-        &queried.sweeps,
-        &queried.regions,
-        request.empty,
-    )?;
-    Ok(Assessment {
+    let pose = candidate.pose;
+    let mut a = Assessment {
         request,
         candidate,
         surface,
         covers,
-        regions: queried.regions,
-        volume,
-    })
+        regions: Vec::new(),
+        volume: None,
+    };
+    reposition(&mut a, pose)?;
+    Ok(a)
 }
-fn report(a: &Assessment) -> Result<report::Report, Error> {
+pub(super) fn reposition(
+    a: &mut Assessment,
+    pose: super::super::geometry::Pose,
+) -> Result<(), Error> {
+    let queried = query::run(
+        &a.covers,
+        &a.surface.contacts,
+        &a.surface.stations,
+        &a.surface.request,
+        pose,
+        &a.request,
+        &a.surface.no_contact,
+    )?;
+    let volume = volume::assess(
+        &a.candidate.mesh,
+        pose,
+        &queried.sweeps,
+        &queried.regions,
+        a.request.empty,
+    )?;
+    a.candidate.pose = pose;
+    a.regions = queried.regions;
+    a.volume = volume;
+    Ok(())
+}
+pub(super) fn report(a: &Assessment) -> Result<report::Report, Error> {
     report::build(
         &a.covers,
         &a.surface.contacts,

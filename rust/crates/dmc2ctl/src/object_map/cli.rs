@@ -68,6 +68,9 @@ pub fn run(args: &[OsString], default_store: &Path) -> Result<String, Error> {
     use Operation::*;
     match spec.operation {
         List => store.list(),
+        ContinueAdaptive => positional::stock::adaptive::continuation::run(&store,&id(0)?,&id(1)?,&id(2)?,&id(3)?,&id(4)?),
+        PrepareAdaptive => positional::stock::adaptive::prepare(&store,&id(0)?,&id(1)?,&id(2)?,&id(3)?),
+        AdaptiveCycle => positional::stock::adaptive::run(&store,&id(0)?,&id(1)?,&id(2)?,path(3)),
         Show => store.show(&id(0)?),
         Create => {
             let object = id(0)?;
@@ -146,6 +149,8 @@ pub fn run(args: &[OsString], default_store: &Path) -> Result<String, Error> {
             positional::stock::volume::prepare(&store, &id(0)?, &id(1)?, &id(2)?, &id(3)?)
         }
         FitVolume => positional::stock::volume::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3)),
+        PreparePartial => positional::stock::partial::prepare(&store, &id(0)?, &id(1)?, &id(2)?),
+        FitPartial => positional::stock::partial::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3)),
         ExportStockScene => {
             positional::stock::scene::export(&store, &id(0)?, &id(1)?, &id(2)?, &id(3)?, path(4))
         }

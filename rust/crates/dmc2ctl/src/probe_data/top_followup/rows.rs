@@ -5,6 +5,7 @@ use std::collections::BTreeSet;
 
 const COLUMNS: &str = "x_work_mm,y_work_mm";
 const REPEATS: &str = "proposal,capture,sequence,phase,edge,approach_x_work_mm,approach_y_work_mm,target_x_work_mm,target_y_work_mm,target_z_work_mm";
+const DIRECTED: &str = "phase,edge,approach_x_work_mm,approach_y_work_mm,target_x_work_mm,target_y_work_mm,target_z_work_mm";
 
 pub struct Repeat {
     pub proposal: usize,
@@ -15,6 +16,7 @@ pub struct Repeat {
 pub enum Rows {
     Columns(Vec<[f64; 2]>),
     Repeats(Vec<Repeat>),
+    Directed(Vec<Request>),
 }
 pub(super) fn identifier(name: &str, value: &str) -> Result<(), String> {
     if value.is_empty()
@@ -31,16 +33,31 @@ impl Rows {
         match self {
             Self::Columns(rows) => rows.len(),
             Self::Repeats(rows) => rows.len(),
+            Self::Directed(rows) => rows.len(),
         }
     }
     pub fn repeated(&self) -> bool {
         matches!(self, Self::Repeats(_))
+    }
+    pub fn directed(&self) -> bool {
+        matches!(self, Self::Directed(_))
     }
     pub(super) fn requests(&self, s: &Settings) -> Result<Vec<Request>, String> {
         if self.len() == 0 {
             return Err("The follow-up plan contains no selected top columns. Select an analysis with eligible observations; no empty program was supplied.".into());
         }
         match self {
+            Self::Directed(rows) => rows.iter().map(|q| {
+                let side=q.phase==Phase::Rim;
+                let changed=(0..2).filter(|&i| !super::super::mapper_settings::close(q.approach[i],q.target[i])).count();
+                if (side && (changed!=1 || !(0..=3).contains(&q.edge)))
+                    || (!side && (q.phase!=Phase::Grid || changed!=0 || q.edge!=-1 || q.target[2]>=s.origin[2])) {
+                    return Err("An adaptive observation must be a downward column or one horizontal side approach. Inspect its explicit start, target and direction; no replacement move was supplied.".into());
+                }
+                for p in [s.origin,[q.approach[0],q.approach[1],s.origin[2]],
+                    [q.approach[0],q.approach[1],if side {q.target[2]} else {s.origin[2]}],q.target] {s.bounds(p)?;}
+                Ok(*q)
+            }).collect(),
             Self::Columns(rows) => rows
                 .iter()
                 .map(|&xy| TopColumn::new(s, xy).map(|p| p.request))
@@ -60,6 +77,22 @@ impl Rows {
     }
     pub(super) fn encode(&self) -> String {
         match self {
+            Self::Directed(rows) => {
+                let mut out = format!("{DIRECTED}\n");
+                for q in rows {
+                    out.push_str(&format!(
+                        "{},{},{},{},{},{},{}\n",
+                        q.phase as u8,
+                        q.edge,
+                        q.approach[0],
+                        q.approach[1],
+                        q.target[0],
+                        q.target[1],
+                        q.target[2]
+                    ));
+                }
+                out
+            }
             Self::Columns(rows) => {
                 let mut out = format!("{COLUMNS}\n");
                 for xy in rows {
@@ -136,5 +169,35 @@ impl Rows {
                 Ok([x.parse().map_err(|_| error())?, y.parse().map_err(|_| error())?])
             }).collect::<Result<Vec<_>, String>>().map(Self::Columns)
         }
+    }
+    pub(super) fn read_directed(raw: &str) -> Result<Self, String> {
+        let mut lines = raw.lines();
+        let error = || {
+            "Malformed adaptive observation rows. Preserve the plan and regenerate it from its retained request; Abort then Pendant Mode for an active run.".to_string()
+        };
+        if lines.next() != Some(DIRECTED) {
+            return Err(error());
+        }
+        let rows = lines
+            .map(|line| {
+                let v = line.split(',').collect::<Vec<_>>();
+                if v.len() != 7 {
+                    return Err(error());
+                }
+                let number = |i: usize| {
+                    v[i].parse::<f64>()
+                        .ok()
+                        .filter(|v| v.is_finite())
+                        .ok_or_else(error)
+                };
+                Ok(Request {
+                    phase: Phase::read(number(0)?)?,
+                    edge: v[1].parse().map_err(|_| error())?,
+                    approach: [number(2)?, number(3)?],
+                    target: [number(4)?, number(5)?, number(6)?],
+                })
+            })
+            .collect::<Result<Vec<_>, String>>()?;
+        Ok(Self::Directed(rows))
     }
 }

@@ -37,6 +37,9 @@ impl Plan {
         if self.rows.repeated() && self.role != Some(Role::Check) {
             return Err("Original top repeats must retain contact_role=check. Re-export their observation analysis; original contacts and failed checks cannot be replaced by new fitting rows.".into());
         }
+        if self.rows.directed() && self.role.is_none() {
+            return Err("Adaptive measurements require an explicit fit/check contact role. Regenerate the plan with its intended evidence role.".into());
+        }
         self.rows.requests(&s)?;
         Ok(s)
     }
@@ -75,7 +78,7 @@ impl Plan {
                 requests.get(index as usize)
             } else { None }.ok_or("A follow-up contact has no matching requested row. Preserve the capture; Abort then Pendant Mode before a new Run.")?;
             let stage = number(r, "stage")?;
-            for (key, value) in [
+            let mut expected = vec![
                 ("phase", q.phase as u8 as f64),
                 ("edge", q.edge as f64),
                 ("approach_x", q.approach[0]),
@@ -83,22 +86,29 @@ impl Plan {
                 ("target_x", q.target[0]),
                 ("target_y", q.target[1]),
                 ("target_z", q.target[2]),
-                ("from_x", q.approach[0]),
-                ("from_y", q.approach[1]),
                 (
                     "feed",
                     if stage == 0.0 {
-                        s.downward_feed
+                        s.coarse_feed(q.phase)
                     } else {
                         s.feeds[1]
                     },
                 ),
-            ] {
+            ];
+            if !self.rows.directed() || stage == 0.0 {
+                expected.extend([("from_x", q.approach[0]), ("from_y", q.approach[1])]);
+            }
+            for (key, value) in expected {
                 if !close(number(r, key)?, value) {
                     return Err(format!("Follow-up record {} disagrees with its planned {key}. Preserve the capture and plan; Abort then Pendant Mode. This record cannot supply material evidence.", r["sequence"]));
                 }
             }
-            if stage == 0.0 && !close(number(r, "from_z")?, s.origin[2]) {
+            let from_z = if q.phase == crate::probe_data::mapper_schema::Phase::Rim {
+                q.target[2]
+            } else {
+                s.origin[2]
+            };
+            if stage == 0.0 && !close(number(r, "from_z")?, from_z) {
                 return Err("A follow-up coarse dip did not start at its retained clearance. Preserve the capture and recover through Abort then Pendant Mode.".into());
             }
         }

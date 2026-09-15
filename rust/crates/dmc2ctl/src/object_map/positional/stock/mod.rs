@@ -1,9 +1,11 @@
 //! Acquisition-led stock estimation, reached through the standard offline binary.
 mod candidate;
+pub(in crate::object_map) mod adaptive;
 mod fit;
 pub(in crate::object_map) mod material;
 pub(in crate::object_map) mod observation;
 mod optimize;
+pub(in crate::object_map) mod partial;
 pub(in crate::object_map) mod placement;
 pub(in crate::object_map) mod reconstruction;
 mod report;

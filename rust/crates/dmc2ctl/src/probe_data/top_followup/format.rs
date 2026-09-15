@@ -2,6 +2,7 @@ use super::{data, number, rows::identifier, Plan, Role, Rows, START_FIELDS};
 const MAGIC: &str = "DMC2_TOP_FOLLOWUP_V1";
 const ROLE_MAGIC: &str = "DMC2_TOP_FOLLOWUP_V2";
 const REPEAT_MAGIC: &str = "DMC2_TOP_FOLLOWUP_V3";
+const DIRECTED_MAGIC: &str = "DMC2_MEASUREMENT_FOLLOWUP_V4";
 const START: &str = "DMC2_TOP_FOLLOWUP_START_V1";
 const IDS: [&str; 4] = ["object", "setup", "analysis", "capture"];
 
@@ -10,7 +11,9 @@ impl Plan {
         self.settings()?;
         let mut out = format!(
             "{}\n",
-            if self.rows.repeated() {
+            if self.rows.directed() {
+                DIRECTED_MAGIC
+            } else if self.rows.repeated() {
                 REPEAT_MAGIC
             } else if self.role.is_some() {
                 ROLE_MAGIC
@@ -50,7 +53,7 @@ impl Plan {
         };
         let mut identity = identity.lines();
         let version = identity.next().ok_or_else(error)?;
-        if !matches!(version, MAGIC | ROLE_MAGIC | REPEAT_MAGIC) {
+        if !matches!(version, MAGIC | ROLE_MAGIC | REPEAT_MAGIC | DIRECTED_MAGIC) {
             return Err(error());
         }
         let mut source: [String; 4] = Default::default();
@@ -74,7 +77,11 @@ impl Plan {
         if identity.next().is_some() {
             return Err(error());
         }
-        let rows = Rows::read(rows, version == REPEAT_MAGIC)?;
+        let rows = if version == DIRECTED_MAGIC {
+            Rows::read_directed(rows)?
+        } else {
+            Rows::read(rows, version == REPEAT_MAGIC)?
+        };
         let plan = Self {
             role,
             source,

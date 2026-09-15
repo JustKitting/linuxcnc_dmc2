@@ -86,6 +86,11 @@ pub enum Operation {
     ExportStockScene,
     PrepareVolume,
     FitVolume,
+    PreparePartial,
+    FitPartial,
+    PrepareAdaptive,
+    AdaptiveCycle,
+    ContinueAdaptive,
     Fit,
     ShowFit,
     ExportFit,
@@ -104,6 +109,9 @@ pub struct Spec {
 use Field::*;
 use Operation as Op;
 pub const OPERATIONS: &[Spec] = &[
+    Spec { operation: Op::ContinueAdaptive, name: "continue-adaptive-stock", label: "Update fit from new measurements", description: "Select the previous adaptive cycle and its newly imported complete capture. Preserve the exact contacts and misses, append their declared fit/check roles to a new surface revision, update the model and placement, and generate the next measurement plan.", fields: &[Object, Setup, Analysis, SourceCapture, NewAnalysis] },
+    Spec { operation: Op::PrepareAdaptive, name: "prepare-adaptive-stock", label: "Prepare adaptive mapping", description: "Select the required STL and an acquisition profile. Set the current surface revision, allowed placements, noisy-model parameters and sampling budgets. Subsequent cycles can use newly acquired surface revisions.", fields: &[Object, Setup, Design, SourceCapture] },
+    Spec { operation: Op::AdaptiveCycle, name: "adaptive-stock-cycle", label: "Fit stock and choose measurements", description: "Update a noisy implicit stock model, search rigid placements and choose informative new top/side probes at relevant heights. Retain the proposed probe program for standard File Open/Run and the unchanged positioned model for CAM review. Insufficient material pauses cutting; no program is automatically loaded or run.", fields: &[Object, Setup, NewAnalysis, Request] },
     Spec { operation: Op::List, name: "list", label: "List objects", description: "Read the retained objects. Select Show object to inspect its setups, captures and design revisions.", fields: &[] },
     Spec { operation: Op::Create, name: "create", label: "Create object", description: "Create a new object record. Existing IDs are preserved.", fields: &[NewObject, Label] },
     Spec { operation: Op::Show, name: "show", label: "Show object", description: "Inspect its captures, failures, setup IDs, design revisions and analysis candidates.", fields: &[Object] },
@@ -119,7 +127,7 @@ pub const OPERATIONS: &[Spec] = &[
     Spec { operation: Op::FitSurface, name: "fit-stock-surface", label: "Estimate 3D stock surfaces", description: "Estimate local surfaces and slope from retained 3D contacts without a nominal stock shape. Inspect residuals, unresolved regions and independent checks through Inspect analysis. Local patches leave unmeasured volume unknown.", fields: &[Object, Setup, NewAnalysis, Request] },
     Spec { operation: Op::PrepareFootprint, name: "prepare-footprint", label: "Prepare machining footprint", description: "Select a retained stock-outline analysis and the complete material this operation must preserve. Set allowed placement bounds and clearance in the request; stock need not be rectangular.", fields: &[Object, Setup, Analysis, Design] },
     Spec { operation: Op::FitFootprint, name: "fit-footprint", label: "Place machining footprint", description: "Search translation and yaw for the unchanged machining projection inside the measured outline. Inspect local material deficits and the search bound. Height and 3D material coverage remain separate requirements.", fields: &[Object, Setup, NewAnalysis, Request] },
-    Spec { operation: Op::PrepareMaterial, name: "prepare-material-check", label: "Prepare material check", description: "Select a machining footprint or 3D volume-placement candidate, retained surfaces and the explicit probe/error and required-material boundary models. Set comparison and geometry budgets in the request.", fields: &[Object, Setup, Analysis] },
+    Spec { operation: Op::PrepareMaterial, name: "prepare-material-check", label: "Prepare material check", description: "Select a machining footprint, partial-placement or 3D volume-placement candidate, retained surfaces and the explicit probe/error and required-material boundary models. Set comparison and geometry budgets in the request.", fields: &[Object, Setup, Analysis] },
     Spec { operation: Op::CheckMaterial, name: "check-material", label: "Check candidate material", description: "Compare unchanged required material to supported surface patches and finite retained no-contact sweeps, including clear sweeps wholly inside required material. Pause the cutting pipeline on insufficient material or conflicting evidence, retaining shortage locations and measurement needs. Inspect analysis remains available; a shortage never resizes required geometry or relaxes clearance.", fields: &[Object, Setup, NewAnalysis, Request] },
     Spec {
         operation: Op::PrepareObservations,
@@ -153,6 +161,8 @@ pub const OPERATIONS: &[Spec] = &[
     Spec { operation: Op::ReconstructStockMesh, name: "reconstruct-stock-mesh", label: "Reconstruct stock surface", description: "Create a source-linked surface mesh from supported measured patches. Retain missing regions, open edges and interpolation limits for further acquisition. This does not certify a stock solid or issue machine commands.", fields: &[Object, Setup, NewAnalysis, Request] },
     Spec { operation: Op::PrepareVolume, name: "prepare-volume-placement", label: "Prepare 3D stock placement", description: "Select reconstructed measured stock and full required operation geometry. Fill the explicit occupancy model, allowed XYZ translations/rotations, clearance and computation budgets.", fields: &[Object, Setup, StockMeshAnalysis, Design] },
     Spec { operation: Op::FitVolume, name: "fit-volume-placement", label: "Place geometry in 3D stock", description: "Search allowed rigid placements against an explicitly enclosed measured-stock model. Retain the best position, every local deficit, source geometry and remaining search bound for material checks and CAD export.", fields: &[Object, Setup, NewAnalysis, Request] },
+    Spec { operation: Op::PreparePartial, name: "prepare-partial-placement", label: "Prepare placement refinement", description: "Select a retained V3 material assessment. Inherit its unchanged geometry, clearance and uncertainty settings; enter explicit translation/rotation correction bounds and computation budgets. No closed measured-stock mesh is required.", fields: &[Object, Setup, MaterialAnalysis] },
+    Spec { operation: Op::FitPartial, name: "fit-partial-placement", label: "Refine placement from measurements", description: "Refine the candidate against retained local support and finite clear probe paths. Recheck material at the result. Insufficient material pauses the pipeline; unknown regions stay unresolved. This is an explicit offline request and issues no machine commands.", fields: &[Object, Setup, NewAnalysis, Request] },
     Spec { operation: Op::ExportStockScene, name: "export-stock-scene", label: "Export stock scene for CAD", description: "Combine a material assessment and its measured stock mesh with exact shared source binding. Export separate geometry roles and the candidate frame convention for FreeCAD inspection and CAM preparation.", fields: &[Object, Setup, MaterialAnalysis, StockMeshAnalysis, NewDirectory] },
     Spec { operation: Op::LoadRequest, name: "load-request", label: "Open analysis request", description: "Open a request draft for editing. Save edits to a new file to preserve the original.", fields: &[Request] },
     Spec { operation: Op::SaveRequest, name: "save-request", label: "Save request as", description: "Save the current request editor to a new file. Existing files are never overwritten. CLI input is read from standard input.", fields: &[NewFile] },
@@ -174,6 +184,8 @@ impl Spec {
             | Op::PrepareSpatialObservations
             | Op::PrepareStockMesh
             | Op::PrepareVolume
+            | Op::PreparePartial
+            | Op::PrepareAdaptive
             | Op::LoadRequest => "request",
             _ => "json",
         }

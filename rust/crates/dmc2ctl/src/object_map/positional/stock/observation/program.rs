@@ -65,7 +65,7 @@ pub fn run(
                 let r = &repeats[row];
                 format!(",{},{},{}", r.capture, r.sequence, r.request.phase as u8)
             }
-            Rows::Columns(_) => String::new(),
+            Rows::Columns(_) | Rows::Directed(_) => String::new(),
         };
         rows.push_str(&format!(
             "{row},{cell},{},{},{},{},{},{},{}{role_value}{repeat_value}\n",

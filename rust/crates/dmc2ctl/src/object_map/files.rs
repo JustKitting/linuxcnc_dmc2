@@ -40,6 +40,11 @@ pub fn browse(path: &Path) -> Result<String, Error> {
 }
 fn draft(raw: &[u8]) -> Result<&str, Error> {
     let schemas = [
+        (super::positional::stock::adaptive::request::SCHEMA,super::positional::stock::adaptive::request::KEYS.to_vec()),
+        (
+            super::positional::stock::partial::request::SCHEMA,
+            super::positional::stock::partial::request::KEYS.to_vec(),
+        ),
         (
             super::positional::request::SCHEMA,
             super::positional::request::keys(),

@@ -49,19 +49,9 @@ impl Objective<6> for Enclosed<'_, '_> {
         Ok(lower)
     }
     fn movement(&self, lo: [f64; 6], hi: [f64; 6]) -> ([f64; 6], f64) {
-        let half = std::array::from_fn::<_, 6, _>(|i| (hi[i] - lo[i]) / 2.);
-        let m = std::array::from_fn::<_, 6, _>(|i| {
-            if i < 3 {
-                half[i]
-            } else {
-                2. * self.radius * (half[i].min(std::f64::consts::PI) / 2.).sin()
-            }
-        });
-        // Signed distance is 1-Lipschitz. Telescope Rz Ry Rx: each factor
-        // changes a vector by at most its angle chord. The combined rotation
-        // also cannot move a radius-R vector farther than its diameter.
-        let total = m[0].hypot(m[1]).hypot(m[2]) + (m[3] + m[4] + m[5]).min(2. * self.radius);
-        (m, total)
+        // Signed distance is 1-Lipschitz; the shared Rz Ry Rx chord bound
+        // covers combined translations and rotations without resizing stock.
+        optimize::rigid_movement(self.radius, lo, hi)
     }
 }
 pub fn run(stock: &Solid<'_>, samples: &[Sample], r: &Request) -> Result<Fitted, Error> {

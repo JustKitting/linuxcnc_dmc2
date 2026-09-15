@@ -83,11 +83,37 @@ pub fn run<const N: usize>(
     objective: &impl Objective<N>,
     r: &Domain<N>,
 ) -> Result<Fitted<N>, Error> {
+    run_seeded(objective, r, None)
+}
+pub fn run_seeded<const N: usize>(
+    objective: &impl Objective<N>,
+    r: &Domain<N>,
+    seed: Option<[f64; N]>,
+) -> Result<Fitted<N>, Error> {
     let first = cell(r.lo, r.hi, 0, objective)?;
     let mut best = (first.at, first.value);
-    let mut queue = BinaryHeap::from([first]);
     let mut evaluations = 1usize;
     let mut history = vec![(evaluations, best.0, best.1)];
+    if let Some(at) = seed {
+        if (0..N).any(|i| !at[i].is_finite() || at[i] < r.lo[i] || at[i] > r.hi[i]) {
+            return Err(Error::Input("The retained initial placement lies outside the refinement domain. Include the initial placement in every requested interval.".into()));
+        }
+        if at != first.at {
+            if r.evaluations <= evaluations {
+                return Err(Error::Input("The computation budget cannot evaluate both the retained placement and the domain midpoint. Increase max_evaluations before refining placement.".into()));
+            }
+            let value = objective.value(at)?;
+            if !value.is_finite() {
+                return Err(Error::Data("The retained placement's objective is nonfinite. Inspect source geometry and units before refinement.".into()));
+            }
+            evaluations += 1;
+            if value >= best.1 {
+                best = (at, value);
+                history.push((evaluations, at, value));
+            }
+        }
+    }
+    let mut queue = BinaryHeap::from([first]);
     let (stop, upper) = loop {
         let upper = queue.peek().map_or(best.1, |c| c.upper.max(best.1));
         if best.1 >= r.margin {
@@ -132,4 +158,18 @@ pub fn run<const N: usize>(
         stop,
         history,
     })
+}
+
+/// Rigid movement bound for points no farther than radius from the origin.
+pub fn rigid_movement(radius: f64, lo: [f64; 6], hi: [f64; 6]) -> ([f64; 6], f64) {
+    let half = std::array::from_fn::<_, 6, _>(|i| (hi[i] - lo[i]) / 2.);
+    let m = std::array::from_fn::<_, 6, _>(|i| {
+        if i < 3 {
+            half[i]
+        } else {
+            2. * radius * (half[i].min(std::f64::consts::PI) / 2.).sin()
+        }
+    });
+    let total = m[0].hypot(m[1]).hypot(m[2]) + (m[3] + m[4] + m[5]).min(2. * radius);
+    (m, total)
 }
