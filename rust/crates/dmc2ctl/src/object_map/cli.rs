@@ -123,6 +123,13 @@ pub fn run(args: &[OsString], default_store: &Path) -> Result<String, Error> {
         PrepareObservations => {
             positional::stock::observation::prepare(&store, &id(0)?, &id(1)?, &id(2)?)
         }
+        PrepareSpatialObservations => positional::stock::observation::spatial::prepare(
+            &store,
+            &id(0)?,
+            &id(1)?,
+            &id(2)?,
+            &id(3)?,
+        ),
         PlanObservations => {
             positional::stock::observation::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3))
         }

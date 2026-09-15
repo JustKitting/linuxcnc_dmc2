@@ -976,6 +976,84 @@ results establishes physical probing, current clearance or material occupancy.
 The CNC session was not restarted. The running UI's adoption of the new catalog
 entries remains unobserved.
 
+## New spatial top observations — 2026-09-15
+
+**Prepare new top samples** (`prepare-spatial-observations OBJECT SETUP
+MATERIAL_ANALYSIS SOURCE_CAPTURE`) supplies a separate request type to the
+existing **Select follow-up observations** operation. The request editor,
+inspection and export use the normal installed `dmc2ctl` and Object Mapper
+catalog. Historical repeat requests retain their original interpretation.
+
+```text
+DMC2_SPATIAL_OBSERVATION_REQUEST_V1
+material_analysis=REQUIRED
+source_capture=REQUIRED
+sample_spacing_mm=REQUIRED
+max_observations=REQUIRED
+max_grid_cells=REQUIRED
+max_candidate_comparisons=REQUIRED
+
+```
+
+The selected capture must contribute original fine contacts to the reproduced
+material assessment. Its ledger and original acquisition companions, including
+absent companions, must match the retained surface source. Only Surface and
+Automatic top map captures with complete vertical top-search cycles qualify.
+Probe radius must agree with the source surface model. Partial ledgers can
+supply complete cycles; an interrupted cycle or quarantined capture cannot.
+
+Unsupported required-geometry cover regions supply **XY areas to investigate**.
+Their shape, normals and height do not supply a stock model or probing depth.
+For a downward column, the conversion is:
+
+```text
+region_work_xy = candidate_region_machine_xy
+                 - trigger_to_ball_xy
+                 - original_work_to_machine_xy
+```
+
+Downward pretravel has no XY component. Candidate cell centres are aligned to
+the original work-XY origin using the explicit sampling spacing, at least the
+largest retained XY step. Cells intersecting each projected cover disk are
+grouped once, so overlapping mesh triangles do not multiply a cell's selection
+weight. The proposed point can be outside a particular disk by up to half the
+cell diagonal. Candidate centres stay inside the original plate/travel
+intersection. Censored projections and regions with no candidates remain
+explicit in the report.
+
+The shared typed `TopColumn`/`Request` retains original starting clearance,
+descent floor, mounted-reach floor, downward/fine/travel feeds and backoff.
+Sampling spacing does not alter the original fine backoff or descent budget.
+Both original fine and coarse-miss columns are excluded from selection when
+their requested XY matches within the retained endpoint-step comparison.
+Remaining cells are prioritized by smallest XY distance to an original searched
+column, then grid index, without triangle-count weighting. This priority is not
+an execution order. The observation limit selects a subset; all cells and
+region associations remain retained. Insufficient cell/comparison budgets
+produce a readable error before publication instead of a truncated assessment.
+
+`observation-plan.machine-mm.json` uses `dmc2.spatial-observation-plan.v1`.
+It retains source identity, frame operands, actual acquisition-contract fields,
+all unresolved material regions, and null new triggers/execution order. No
+existing contact becomes a new check. New top sampling alone does not resolve
+side/underside support, an unobserved surface normal, a contact/miss conflict or
+closed material volume. Entry and execution still require a reviewed path and
+fresh exact trigger capture/readback. X labels remain physical RIGHT /
+LinuxCNC -X and physical LEFT / LinuxCNC +X.
+
+The installed-binary synthetic file exercise produced ten new candidate cells
+and selected four at 0.5 mm spacing. A request whose cell centres matched old
+columns selected none, retaining fine sources 53/58 and coarse-miss source 61.
+All 1,662 unsupported material regions remained unresolved; 1,632 projected
+regions crossed the original envelope. The 32 material-source files and all
+36 exported files matched their original bytes; the old repeat report and
+editor round trip retained their bytes. Undersized comparison/cell budgets and
+an unrelated source capture published no analysis directory. Readback:
+`/home/kit/cnc-backups/mapper-spatial-r25wc__g/round-trip-readback.json`.
+Seventy-one library numerical checks reported passes. The standard binary is
+built and installed. These are file/numerical results, not physical acquisition
+or machine-recovery evidence; the CNC session was not restarted or moved.
+
 ## Recorded TODOs — 2026-09-14
 
 This is the continuing implementation list for the positional mapper and
@@ -1006,8 +1084,10 @@ machine run.
   The standard command binary is built and installed; source identities and
   historical request replay survive the numerical file workflow. Still
   outstanding: establish the physical error model, distinguish inferred empty
-  regions from unknown volume in the broader stock model, and select additional
-  spatial samples from material requirements. The top acquisition and these
+  regions from unknown volume in the broader stock model, and execute reviewed
+  additional spatial samples from material requirements. New top-column
+  selection is now in the standard Object Mapper path; see the spatial-observation
+  runbook above. The top acquisition and these
   constraints remain parts of the full workflow, not physical acceptance.
 - [ ] **Exponential edge bracketing, then binary refinement.** Source and
   standard capture binary now use versioned policy V4 for new runs: **1 mm,
@@ -1121,15 +1201,22 @@ machine run.
   request/cycle reader and retains source companions exactly. Its normal
   catalog, editor, inspection and export path is built and installed; see the
   follow-up-observation runbook above for file readback and limits. Still
-  required: selecting new spatial samples for unsupported geometry, planning
-  entry/recovery paths, multi-height acquisition, and connecting reviewed
+  required: planning entry/recovery paths, multi-height acquisition, and connecting reviewed
   proposals to the standard script executor with fresh exact capture/readback.
+  New spatial top-column selection now consumes unsupported material regions,
+  uses an explicit source-aligned grid and preserves the original acquisition
+  envelope/settings. The standard binary/catalog/editor/inspection/export path
+  is built and installed. Original hit/miss columns are not selected again;
+  source snapshots and every unresolved region survive. Numerical/file details
+  are recorded in the spatial-observation runbook above. New top proposals do
+  not supply side/base access or measured material coverage.
   Historical Surface/Rim modes retain their cuboid fit for replay. The new
   `FreeSurface` mode provides automatic connected top coverage without that
   completion condition, and the outline path retains its free shape.
   Gauge-block cuboid measurements retain their intended role. New spatial
-  sampling driven by material requirements and reviewed follow-up execution
-  still need to connect those acquisition paths to the estimator.
+  sampling driven by material requirements now has a typed selection path;
+  reviewed follow-up execution and fresh capture still need to connect those
+  proposals back to the estimator.
 - [ ] **Fit measured 3D stock surfaces and retain their support.** The standard
   binary and Object Mapper catalog now provide `prepare-stock-surface` and
   `fit-stock-surface`, with the existing editor/inspection/export path. Focused

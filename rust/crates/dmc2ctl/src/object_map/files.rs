@@ -1,8 +1,8 @@
 //! File-selection and draft exchange for the offline AXIS editor.
 use super::{
+    Error,
     record::{self, quote},
     store::{read, save},
-    Error,
 };
 use std::{fs, path::Path};
 
@@ -69,6 +69,10 @@ fn draft(raw: &[u8]) -> Result<&str, Error> {
         (
             super::positional::stock::observation::request::SCHEMA,
             super::positional::stock::observation::request::KEYS.to_vec(),
+        ),
+        (
+            super::positional::stock::observation::spatial::request::SCHEMA,
+            super::positional::stock::observation::spatial::request::KEYS.to_vec(),
         ),
     ];
     let (schema, keys) = schemas.iter().find(|(schema, _)| raw.starts_with(format!("{schema}\n").as_bytes()))

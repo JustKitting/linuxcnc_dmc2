@@ -3,8 +3,34 @@
 //! is not a transfer path, and a proposal is not an executable continuation.
 use super::super::{
     mapper_schema::Phase,
-    mapper_settings::{Request, Sample, Settings},
+    mapper_settings::{Mode, Request, Sample, Settings},
 };
+
+/// New spatial evidence, distinct from repeating an original fine contact.
+/// Coordinates describe a downward column within retained acquisition bounds;
+/// neither entry clearance nor the presence/height of stock is inferred.
+#[derive(Clone, Copy, Debug)]
+pub struct TopColumn {
+    pub request: Request,
+    pub entry: Entry,
+    pub start: [f64; 3],
+}
+impl TopColumn {
+    pub fn new(s: &Settings, xy: [f64; 2]) -> Result<Self, String> {
+        if !matches!(s.mode, Mode::Surface | Mode::FreeSurface) {
+            return Err("New top columns need a retained Surface or Automatic top map run. Select that capture; a side-trace approach cannot supply a top entry path.".into());
+        }
+        let request = Request::top(s, Phase::Grid, xy);
+        for p in [s.origin, [xy[0], xy[1], s.origin[2]], request.target] {
+            s.bounds(p)?;
+        }
+        Ok(Self {
+            request,
+            entry: Entry::OriginalClearance,
+            start: s.origin,
+        })
+    }
+}
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Entry {

@@ -190,6 +190,16 @@ misses to constrain shared interpolation support, including full-facet gap
 checks and explicit contact/miss conflicts. The original capture cycles,
 companions and an explicit probe/error allowance define that interpretation;
 see [retained no-contact support](positional-mapper.md#retained-no-contact-support).
-No physical allowance or empty-volume certification is inferred. Multi-height
-coverage, additional spatial samples and material-directed follow-up execution
-remain in the continuing TODOs; this top acquisition is one part of that workflow.
+No physical allowance or empty-volume certification is inferred.
+
+After a retained material assessment identifies unsupported geometry, Object
+Mapper's **Prepare new top samples** selects that assessment and a contributing
+top capture. Explicit spacing and budgets produce new source-aligned cell
+centres within the original envelope. Original hit/miss columns are not selected
+again; clearance, depth, feeds and backoff retain their original values. The
+required model supplies XY investigation regions rather than a nominal stock
+shape or contact height. See [new spatial top observations](positional-mapper.md#new-spatial-top-observations--2026-09-15).
+The installed file-analysis path retains proposals and all unresolved regions.
+Reviewed entry/execution, fresh trigger capture, multi-height coverage and
+side/base connections remain in the continuing TODOs; this top acquisition is
+one part of that workflow.

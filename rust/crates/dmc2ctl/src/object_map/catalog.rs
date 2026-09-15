@@ -78,6 +78,7 @@ pub enum Operation {
     PrepareMaterial,
     CheckMaterial,
     PrepareObservations,
+    PrepareSpatialObservations,
     PlanObservations,
     PrepareStockMesh,
     ReconstructStockMesh,
@@ -127,10 +128,17 @@ pub const OPERATIONS: &[Spec] = &[
         fields: &[Object, Setup, MaterialAnalysis],
     },
     Spec {
+        operation: Op::PrepareSpatialObservations,
+        name: "prepare-spatial-observations",
+        label: "Prepare new top samples",
+        description: "Select a material assessment and its retained top capture. Set sampling spacing and computation/observation budgets to investigate unsupported regions within that run's original envelope.",
+        fields: &[Object, Setup, MaterialAnalysis, SourceCapture],
+    },
+    Spec {
         operation: Op::PlanObservations,
         name: "plan-observations",
         label: "Select follow-up observations",
-        description: "Choose original probing requests addressing missing checks, disagreeing checks and local shortages. Inspect bounded proposals, required entry states and unresolved regions. This does not run a script or change old contact roles.",
+        description: "Select original repeats or new top columns according to the request type. Inspect source settings, entry requirements and unresolved regions. No script is run and original contact roles remain retained.",
         fields: &[Object, Setup, NewAnalysis, Request],
     },
     Spec { operation: Op::PrepareStockMesh, name: "prepare-stock-mesh", label: "Prepare stock reconstruction", description: "Select a retained 3D surface analysis. Set explicit calculation bounds, lattice spacing and interpolation support in the request; no nominal stock box is assumed.", fields: &[Object, Setup, Analysis] },
@@ -155,6 +163,7 @@ impl Spec {
             | Op::PrepareFootprint
             | Op::PrepareMaterial
             | Op::PrepareObservations
+            | Op::PrepareSpatialObservations
             | Op::PrepareStockMesh
             | Op::PrepareVolume
             | Op::LoadRequest => "request",
