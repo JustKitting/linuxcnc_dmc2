@@ -2,6 +2,7 @@
 mod candidate;
 mod fit;
 pub(in crate::object_map) mod material;
+pub(in crate::object_map) mod observation;
 mod optimize;
 pub(in crate::object_map) mod placement;
 pub(in crate::object_map) mod reconstruction;

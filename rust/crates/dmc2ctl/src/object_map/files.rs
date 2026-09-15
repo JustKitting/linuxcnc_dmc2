@@ -62,9 +62,13 @@ fn draft(raw: &[u8]) -> Result<&str, Error> {
             super::positional::stock::volume::request::SCHEMA,
             super::positional::stock::volume::request::KEYS.to_vec(),
         ),
+        (
+            super::positional::stock::observation::request::SCHEMA,
+            super::positional::stock::observation::request::KEYS.to_vec(),
+        ),
     ];
     let (schema, keys) = schemas.iter().find(|(schema, _)| raw.starts_with(format!("{schema}\n").as_bytes()))
-        .ok_or_else(|| Error::Input("Unsupported analysis draft. Prepare a registration, stock outline, stock surface, machining footprint, material-check, stock-mesh or volume-placement request through Object Mapper.".into()))?;
+        .ok_or_else(|| Error::Input("Unsupported analysis draft. Prepare a registration, stock outline, stock surface, machining footprint, material-check, stock-mesh, volume-placement or follow-up-observation request through Object Mapper.".into()))?;
     record::decode(raw, schema, keys)?;
     std::str::from_utf8(raw).map_err(|e| Error::Input(format!("Request text is not UTF-8: {e}.")))
 }

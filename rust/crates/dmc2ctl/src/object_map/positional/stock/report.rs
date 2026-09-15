@@ -37,7 +37,7 @@ impl Need {
         format!("{{\"kind\":{},\"message\":{},\"source_contacts\":{},\"machine_action_authorized\":false}}",quote(kind),quote(message),source)
     }
 }
-fn reference(s: &Sample) -> String {
+pub(super) fn reference(s: &Sample) -> String {
     format!(
         "{{\"capture\":{},\"sequence\":{}}}",
         quote(s.capture.as_str()),

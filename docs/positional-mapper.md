@@ -855,6 +855,71 @@ cases. Readbacks: `round-trip-readback.json`, `legacy-readback.json` and
 numerical/file milestones, not evidence of physical motion, material occupancy,
 measurement accuracy, accepted workholding or a usable cutting program.
 
+## Material-directed follow-up observations — 2026-09-15
+
+The standard `dmc2ctl object-map` catalog now includes **Prepare follow-up
+observations** (`prepare-observations`) and **Select follow-up observations**
+(`plan-observations`). They use the existing request editor, inspection and
+export operations. Select a retained material assessment, fill both budgets,
+save a new request and select a new analysis ID:
+
+```text
+DMC2_OBSERVATION_REQUEST_V1
+material_analysis=REQUIRED
+max_observations=REQUIRED
+max_candidate_need_comparisons=REQUIRED
+
+```
+
+The source material assessment is reproduced from its original candidate and
+surface inputs before selection. Original ledgers and acquisition companions
+must match the surface bundle byte for byte; current settings never substitute.
+The analysis preserves all source files under `material-source-` and publishes
+its manifest last.
+
+Selection groups missing independent checks, disagreeing checks and checked
+local shortages by their source surface patches. A greedy choice addresses
+the largest number of still-unplanned patch requirements, with source-order
+ties. Required mesh subdivision density does not increase a patch's weight.
+Identical requests within a capture share a proposal while retaining every
+original contact reference. The observation budget limits the chosen set;
+remaining requirements and unavailable approaches stay in the report. This
+selection is not a global optimum or an execution sequence.
+
+Each candidate uses the shared acquisition `Request` and retained-cycle reader
+through `probe_data/mapper_trace/observation`. A fine trigger and a ready endpoint
+must both exist. The report retains their distinct coordinate frames, the
+original phase, approach, target, rates, bounds and work-to-machine translation.
+Original-clearance entry and a released outline approach are different typed
+prerequisites. No transfer or descent to an outline contact is inferred from
+the required model, measured normal or old endpoint. X labels remain physical
+RIGHT / LinuxCNC -X and physical LEFT / LinuxCNC +X.
+
+The resulting `observation-plan.machine-mm.json` is a **proposal**, with no
+runtime sequence, entry path, execution order or machine authorization. Existing
+contact roles are unchanged. A future repeat can become a new independent check
+only after its own exact trigger capture and readback. All material requirements
+remain unresolved pending that evidence; selected proposals do not clear them.
+Repeating a contact cannot supply missing spatial support, wall slope or closed
+volume coverage. Regions with no supported approach remain regions of interest.
+The pending fine re-touch allowance remains a separate, unapplied proposal.
+
+Installed-binary file exercise:
+`/home/kit/cnc-backups/mapper-observations-2ie4uu5i/round-trip-readback.json`.
+The retained synthetic partial-top example supplied 26 fine contacts and 25
+patch requirements. Selection chose the original request for `partial-top:38`,
+which can check the overlapping patches; all 1,528 unresolved material regions
+remained unresolved. All 25 candidate requests matched their original approach,
+target, phase and fine feed. The 32 source files and all 36 exported files
+matched their retained bytes. Replaying the material calculation matched its
+old files except the new analysis ID. The request editor round trip preserved
+its bytes. A changed companion snapshot and an undersized computation budget
+were rejected before publishing an analysis directory. Source numerical checks
+reported 61 passes. The standard binary was built and installed; none of these
+results establishes physical probing, current clearance or material occupancy.
+The CNC session was not restarted. The running UI's adoption of the new catalog
+entries remains unobserved.
+
 ## Recorded TODOs — 2026-09-14
 
 This is the continuing implementation list for the positional mapper and
@@ -970,6 +1035,18 @@ machine run.
   source analyses and original triggers survive together. These regions still
   need conversion into bounded, supported acquisition plans; they are not probe
   targets or authorized hardware actions.
+  The material-directed observation selector now maps patch check/shortage
+  requirements to bounded **original** acquisition requests, shares the typed
+  request/cycle reader and retains source companions exactly. Its normal
+  catalog, editor, inspection and export path is built and installed; see the
+  follow-up-observation runbook above for file readback and limits. Still
+  required: selecting new spatial samples for unsupported geometry, planning
+  entry/recovery paths, multi-height acquisition, and connecting reviewed
+  proposals to the standard script executor with fresh exact capture/readback.
+  The existing Surface/Rim `Survey` still ends in a cuboid fit; do not use that
+  completion condition for irregular raw stock. The separate outline path
+  retains its free shape. Gauge-block cuboid measurements retain their intended
+  role.
 - [ ] **Fit measured 3D stock surfaces and retain their support.** The standard
   binary and Object Mapper catalog now provide `prepare-stock-surface` and
   `fit-stock-surface`, with the existing editor/inspection/export path. Focused

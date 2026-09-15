@@ -1,10 +1,10 @@
 //! Candidate-directed local material assessment, outside the control process.
-mod query;
+pub(super) mod query;
 mod report;
 pub(in crate::object_map) mod request;
 #[cfg(test)]
 mod tests;
-use super::super::cover;
+use super::super::{cover, retained::Bundle};
 use super::{candidate::Candidate, surface};
 use crate::object_map::{
     Error,
@@ -13,6 +13,86 @@ use crate::object_map::{
     store::{Store, read, save},
 };
 use std::path::Path;
+
+pub(super) struct Assessment {
+    pub request: request::Request,
+    pub candidate: Candidate,
+    pub surface: surface::Loaded,
+    pub covers: Vec<cover::Sample>,
+    pub regions: Vec<query::Region>,
+}
+fn assess(store: &Store, object: &Id, setup: &Id, raw: &[u8]) -> Result<Assessment, Error> {
+    let request = request::Request::read(raw)?;
+    let candidate = Candidate::load(store, object, setup, &request.candidate)?;
+    let surface = surface::load(store, object, setup, &request.surface)?;
+    candidate.require_frame(&surface.source)?;
+    let covers = cover::build(
+        candidate.mesh.triangles(),
+        request.radius,
+        request.samples,
+        cover::Metric::Spatial,
+    )?;
+    let regions = query::run(
+        &covers,
+        &surface.contacts,
+        &surface.stations,
+        &surface.request,
+        candidate.pose,
+        &request,
+    )?;
+    Ok(Assessment {
+        request,
+        candidate,
+        surface,
+        covers,
+        regions,
+    })
+}
+fn report(a: &Assessment) -> Result<report::Report, Error> {
+    report::build(
+        &a.covers,
+        &a.surface.contacts,
+        &a.regions,
+        a.candidate.mesh.triangles(),
+        a.candidate.pose,
+        &a.request,
+    )
+}
+fn manifest(object: &Id, setup: &Id, id: &Id, a: &Assessment, json: &str) -> String {
+    format!(
+        "{{\"schema\":\"dmc2.material-check-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"candidate_analysis\":{},\"surface_analysis\":{},\"result\":{},\"cam_ready\":false}}\n",
+        record::quote(object.as_str()),
+        record::quote(setup.as_str()),
+        record::quote(id.as_str()),
+        record::quote(a.request.candidate.as_str()),
+        record::quote(a.request.surface.as_str()),
+        json
+    )
+}
+pub(super) fn load(
+    store: &Store,
+    object: &Id,
+    setup: &Id,
+    id: &Id,
+) -> Result<(Bundle, Assessment), Error> {
+    let source = Bundle::read(&super::super::folder(store, object, setup, id)?)?;
+    let a = assess(store, object, setup, source.get("request.txt")?)?;
+    source.require_source(&a.candidate.bundle, "candidate-source-")?;
+    source.require_source(&a.surface.source, "surface-source-")?;
+    let r = report(&a)?;
+    for (name, text) in [
+        ("residuals.csv", &r.csv),
+        ("measurement-needs.json", &r.needs),
+        ("material-check.machine-mm.json", &r.json),
+    ] {
+        source.require_equal(name, text.as_bytes())?;
+    }
+    source.require_equal(
+        "manifest.json",
+        manifest(object, setup, id, &a, &r.json).as_bytes(),
+    )?;
+    Ok((source, a))
+}
 
 pub fn prepare(store: &Store, object: &Id, setup: &Id, candidate: &Id) -> Result<String, Error> {
     Candidate::load(store, object, setup, candidate)?;
@@ -38,28 +118,12 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
         return Err(Error::Storage("This material analysis ID already exists. Select a new ID to preserve the prior result.".into()));
     }
     let raw = read(input)?;
-    let r = request::Request::read(&raw)?;
-    let candidate = Candidate::load(store, object, setup, &r.candidate)?;
-    let pose = candidate.pose;
-    let mesh = &candidate.mesh;
-    let loaded = surface::load(store, object, setup, &r.surface)?;
-    let source = &loaded.source;
-    let sr = &loaded.request;
-    let contacts = &loaded.contacts;
-    let stations = &loaded.stations;
-    candidate.require_frame(source)?;
-    let samples = cover::build(
-        mesh.triangles(),
-        r.radius,
-        r.samples,
-        cover::Metric::Spatial,
-    )?;
-    let result = query::run(&samples, contacts, stations, sr, pose, &r)?;
-    let report = report::build(&samples, contacts, &result, mesh.triangles(), pose, &r)?;
+    let a = assess(store, object, setup, &raw)?;
+    let report = report(&a)?;
     // Original candidate, source analysis and exact triggers survive together.
     save(&output.join("request.txt"), &raw)?;
-    candidate.bundle.copy_to(&output, "candidate-source-")?;
-    source.copy_to(&output, "surface-source-")?;
+    a.candidate.bundle.copy_to(&output, "candidate-source-")?;
+    a.surface.source.copy_to(&output, "surface-source-")?;
     save(&output.join("residuals.csv"), report.csv.as_bytes())?;
     save(
         &output.join("measurement-needs.json"),
@@ -69,15 +133,7 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
         &output.join("material-check.machine-mm.json"),
         report.json.as_bytes(),
     )?;
-    let manifest = format!(
-        "{{\"schema\":\"dmc2.material-check-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"candidate_analysis\":{},\"surface_analysis\":{},\"result\":{},\"cam_ready\":false}}\n",
-        record::quote(object.as_str()),
-        record::quote(setup.as_str()),
-        record::quote(id.as_str()),
-        record::quote(r.candidate.as_str()),
-        record::quote(r.surface.as_str()),
-        report.json
-    );
+    let manifest = manifest(object, setup, id, &a, &report.json);
     save(&output.join("manifest.json"), manifest.as_bytes())?;
     Ok(format!(
         "{{\"analysis_directory\":{},\"state\":\"material-coverage-unresolved\",\"message\":\"Local material comparisons and candidate-directed measurement regions are retained. Inspect each shortage, missing support and independent check. Closed volume and cutting remain unresolved.\",\"cam_ready\":false}}",

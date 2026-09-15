@@ -120,6 +120,12 @@ pub fn run(args: &[OsString], default_store: &Path) -> Result<String, Error> {
         CheckMaterial => {
             positional::stock::material::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3))
         }
+        PrepareObservations => {
+            positional::stock::observation::prepare(&store, &id(0)?, &id(1)?, &id(2)?)
+        }
+        PlanObservations => {
+            positional::stock::observation::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3))
+        }
         PrepareStockMesh => {
             positional::stock::reconstruction::prepare(&store, &id(0)?, &id(1)?, &id(2)?)
         }

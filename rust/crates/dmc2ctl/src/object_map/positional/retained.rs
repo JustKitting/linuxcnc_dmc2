@@ -61,6 +61,17 @@ impl Bundle {
         }
         Ok(())
     }
+    pub fn check_context(&self, capture: &CaptureSnapshot) -> Result<(), Error> {
+        for (kind, bytes) in capture.context.snapshots() {
+            let name = format!("capture-{}.{kind}.txt", capture.id.as_str());
+            if self.files.get(&name).map(Vec::as_slice) != bytes {
+                return Err(Error::Data(format!(
+                    "The retained {name} snapshot differs from this setup's capture context. Select matching original revisions or recalculate the source analysis; current acquisition settings cannot substitute."
+                )));
+            }
+        }
+        Ok(())
+    }
     pub fn copy_to(&self, output: &Path, prefix: &str) -> Result<(), Error> {
         for (name, bytes) in &self.files {
             save(&output.join(format!("{prefix}{name}")), bytes)?;

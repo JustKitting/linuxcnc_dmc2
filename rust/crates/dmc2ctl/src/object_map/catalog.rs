@@ -77,6 +77,8 @@ pub enum Operation {
     FitFootprint,
     PrepareMaterial,
     CheckMaterial,
+    PrepareObservations,
+    PlanObservations,
     PrepareStockMesh,
     ReconstructStockMesh,
     ExportStockScene,
@@ -117,6 +119,20 @@ pub const OPERATIONS: &[Spec] = &[
     Spec { operation: Op::FitFootprint, name: "fit-footprint", label: "Place machining footprint", description: "Search translation and yaw for the unchanged machining projection inside the measured outline. Inspect local material deficits and the search bound. Height and 3D material coverage remain separate requirements.", fields: &[Object, Setup, NewAnalysis, Request] },
     Spec { operation: Op::PrepareMaterial, name: "prepare-material-check", label: "Prepare material check", description: "Select a machining footprint or 3D volume-placement candidate, then choose retained surfaces and explicit local comparison bounds in the request.", fields: &[Object, Setup, Analysis] },
     Spec { operation: Op::CheckMaterial, name: "check-material", label: "Check candidate material", description: "Compare the unchanged required geometry to supported measured surface patches. Retain local shortages, unknown regions and candidate-directed measurement needs. This does not certify a stock volume or issue probing commands.", fields: &[Object, Setup, NewAnalysis, Request] },
+    Spec {
+        operation: Op::PrepareObservations,
+        name: "prepare-observations",
+        label: "Prepare follow-up observations",
+        description: "Select a retained material assessment and set the observation/computation budgets. Original acquisition settings supply repeat approaches; unknown regions do not become probe endpoints.",
+        fields: &[Object, Setup, MaterialAnalysis],
+    },
+    Spec {
+        operation: Op::PlanObservations,
+        name: "plan-observations",
+        label: "Select follow-up observations",
+        description: "Choose original probing requests addressing missing checks, disagreeing checks and local shortages. Inspect bounded proposals, required entry states and unresolved regions. This does not run a script or change old contact roles.",
+        fields: &[Object, Setup, NewAnalysis, Request],
+    },
     Spec { operation: Op::PrepareStockMesh, name: "prepare-stock-mesh", label: "Prepare stock reconstruction", description: "Select a retained 3D surface analysis. Set explicit calculation bounds, lattice spacing and interpolation support in the request; no nominal stock box is assumed.", fields: &[Object, Setup, Analysis] },
     Spec { operation: Op::ReconstructStockMesh, name: "reconstruct-stock-mesh", label: "Reconstruct stock surface", description: "Create a source-linked surface mesh from supported measured patches. Retain missing regions, open edges and interpolation limits for further acquisition. This does not certify a stock solid or issue machine commands.", fields: &[Object, Setup, NewAnalysis, Request] },
     Spec { operation: Op::PrepareVolume, name: "prepare-volume-placement", label: "Prepare 3D stock placement", description: "Select reconstructed measured stock and full required operation geometry. Fill the explicit occupancy model, allowed XYZ translations/rotations, clearance and computation budgets.", fields: &[Object, Setup, StockMeshAnalysis, Design] },
@@ -138,6 +154,7 @@ impl Spec {
             | Op::PrepareSurface
             | Op::PrepareFootprint
             | Op::PrepareMaterial
+            | Op::PrepareObservations
             | Op::PrepareStockMesh
             | Op::PrepareVolume
             | Op::LoadRequest => "request",

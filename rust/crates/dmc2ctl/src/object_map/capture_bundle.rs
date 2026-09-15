@@ -45,6 +45,13 @@ pub struct Context {
     parts: [Option<Vec<u8>>; 3],
 }
 impl Context {
+    /// Original bytes, including explicit absence, for dependent planning.
+    pub fn snapshots(&self) -> impl Iterator<Item = (&'static str, Option<&[u8]>)> {
+        Kind::ALL
+            .into_iter()
+            .zip(&self.parts)
+            .map(|(kind, bytes)| (kind.name(), bytes.as_deref()))
+    }
     pub fn source(path: &Path, workflow: Workflow) -> Result<Self, Error> {
         let mut result = Self::default();
         if workflow == Workflow::Mapper {

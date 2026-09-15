@@ -1,5 +1,6 @@
 //! Shared retained-data planning and selection; no NML/HAL or execution path.
 mod adaptive;
+pub mod observation;
 pub mod outline;
 pub mod state;
 mod withdrawal;
