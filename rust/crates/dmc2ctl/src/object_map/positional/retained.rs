@@ -62,8 +62,17 @@ impl Bundle {
         Ok(())
     }
     pub fn check_context(&self, capture: &CaptureSnapshot) -> Result<(), Error> {
+        self.check_context_at(capture, &format!("capture-{}", capture.id.as_str()))
+    }
+    pub fn check_capture(&self, capture: &CaptureSnapshot, prefix: &str) -> Result<(), Error> {
+        let stem = format!("{prefix}capture-{}", capture.id.as_str());
+        self.require_equal(&format!("{stem}.txt"), &capture.raw)?;
+        self.check_context_at(capture, &stem)?;
+        self.require_equal(&format!("{stem}.context.json"), capture.context.json(&capture.capture).as_bytes())
+    }
+    fn check_context_at(&self, capture: &CaptureSnapshot, stem: &str) -> Result<(), Error> {
         for (kind, bytes) in capture.context.snapshots() {
-            let name = format!("capture-{}.{kind}.txt", capture.id.as_str());
+            let name = format!("{stem}.{kind}.txt");
             if self.files.get(&name).map(Vec::as_slice) != bytes {
                 return Err(Error::Data(format!(
                     "The retained {name} snapshot differs from this setup's capture context. Select matching original revisions or recalculate the source analysis; current acquisition settings cannot substitute."

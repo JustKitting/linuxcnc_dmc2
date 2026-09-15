@@ -984,6 +984,9 @@ existing **Select follow-up observations** operation. The request editor,
 inspection and export use the normal installed `dmc2ctl` and Object Mapper
 catalog. Historical repeat requests retain their original interpretation.
 
+The original single-capture request below remains replayable. New preparation
+uses V2 with [explicit acquisition history](#explicit-acquisition-history).
+
 ```text
 DMC2_SPATIAL_OBSERVATION_REQUEST_V1
 material_analysis=REQUIRED
@@ -997,8 +1000,8 @@ max_candidate_comparisons=REQUIRED
 
 The selected capture must contribute original fine contacts to the reproduced
 material assessment. Its ledger and original acquisition companions, including
-absent companions, must match the retained surface source. Only Surface and
-Automatic top map captures with complete vertical top-search cycles qualify.
+absent companions, must match the retained surface source. Surface, Automatic
+top map and Top follow-up captures with complete vertical top-search cycles qualify.
 Probe radius must agree with the source surface model. Partial ledgers can
 supply complete cycles; an interrupted cycle or quarantined capture cannot.
 
@@ -1032,7 +1035,8 @@ an execution order. The observation limit selects a subset; all cells and
 region associations remain retained. Insufficient cell/comparison budgets
 produce a readable error before publication instead of a truncated assessment.
 
-`observation-plan.machine-mm.json` uses `dmc2.spatial-observation-plan.v1`.
+For V1 requests, `observation-plan.machine-mm.json` uses
+`dmc2.spatial-observation-plan.v1`; V2 reports add capture-qualified history.
 It retains source identity, frame operands, actual acquisition-contract fields,
 all unresolved material regions, and null new triggers/execution order. No
 existing contact becomes a new check. New top sampling alone does not resolve
@@ -1122,6 +1126,58 @@ These are file and numerical results, not physical acquisition or recovery
 proof. The session was not restarted or moved. Read-only UI inspection reported
 both recovery buttons `normal` and no modal grab.
 
+## Explicit acquisition history
+
+**Prepare new top samples** now emits `DMC2_SPATIAL_OBSERVATION_REQUEST_V2`.
+The numerical header fields above are unchanged. Its payload is a tab-separated
+table with columns `capture`, `use`, `reason`. Preparation lists every capture
+in the selected setup. Complete compatible top cycles receive `include`;
+incompatible or quarantined captures receive `exclude` and their actual
+diagnosis. Review this list in the normal request editor and retain it with the
+sampling settings before **Select follow-up observations**.
+
+The selected primary capture must be included and must still contribute fine
+contacts to the material assessment. Additional history can contain only
+coarse misses: it need not contribute a surface-fit row. Included captures must
+have complete top cycles, numerically matching original start fields except
+mapper mode, and byte-identical original plate/feed snapshots. The existing
+decimal-serialization comparison is used; no new physical tolerance exists.
+An original top run and its explicit follow-up can differ in mode and retain
+different outline/follow-up companions. Every companion is still preserved.
+Different starting positions, work offsets, floors or feed references are
+excluded. Matching recorded values do not establish unchanged physical setup;
+the request's reason text is retained as an annotation, not a physical fact.
+
+An `include` edit cannot bypass compatibility checks. Duplicate IDs, a missing
+primary inclusion and incompatible included captures produce readable errors
+before publication. To change the source frame, prepare a new request from the
+intended capture. V1 requests continue to use only their original selected
+capture and retain their report/export bytes.
+
+Selection compares candidate columns with the pooled original hit and miss
+requests. V2 `already_searched_records` contains each capture ID, original record
+sequence, contact/miss kind, request XY and original trigger (null for a miss).
+The comparison budget includes the pooled sample count. Each included ledger,
+its context JSON and present companions are retained as `history-capture-ID.*`
+before the analysis manifest is published. Export checks these exact bytes,
+including absent companions, before reproducing the selection. Captures imported
+later cannot silently join an existing analysis; prepare a new request to use
+them. No old contact is promoted to an independent check.
+
+The standard command binary is built and installed. In the numerical file
+exercise, a recent-capture-only request selected four old columns; its pooled
+counterpart selected none and retained the earlier three fine contacts and
+coarse miss. A separate miss-only complete cycle suppressed its column without
+assigning a trigger or resolving material coverage. All 40 legacy export files
+matched the preceding implementation; all 54 saved pooled export files remained
+identical after further capture imports. Changed-start inclusion, duplicate IDs
+and primary exclusion created no analysis; a changed retained feed snapshot
+created no program export. Original history ledgers and companions matched
+their source bytes. Readback:
+`/home/kit/cnc-backups/mapper-history-2gpasvhb/round-trip-readback.json`.
+These are numerical/file outcomes, not physical acquisition or recovery proof.
+Read-only UI inspection found both recovery controls enabled and no modal grab.
+
 ## Recorded TODOs — 2026-09-14
 
 This is the continuing implementation list for the positional mapper and
@@ -1136,8 +1192,12 @@ machine run.
   above. Physical entry, acquisition and recovery observation remain open.
   Repeat/side plans still need explicit entry/recovery geometry and execution;
   no unsupported requests are silently narrowed to top points. Further spatial
-  selection must pool compatible acquisition histories so choosing a recent
-  capture does not reselect columns recorded in an earlier capture. Independent
+  selection now pools explicit compatible acquisition histories, including
+  miss-only complete cycles, with immutable source retention and legacy replay;
+  see the history runbook above. Still needed: carry independently selected
+  miss-only evidence into surface-support analysis (history exclusion alone
+  does not resolve material coverage), and handle separately registered frames
+  without assuming that matching numerical settings establish physical identity. Independent
   follow-up check acquisition, multiheight sides and unseen volume remain parts
   of the whole stock-to-CAM workflow.
 - [ ] **Acquire automatic top coverage for irregular stock.** The production

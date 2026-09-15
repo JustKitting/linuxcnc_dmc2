@@ -1,75 +1,17 @@
 //! New material-directed top columns through the normal Object Mapper path.
-mod grid;
 pub(in crate::object_map) mod export;
+mod grid;
 mod report;
 pub(in crate::object_map) mod request;
 mod select;
 #[cfg(test)]
 mod tests;
 use super::material;
-use crate::{
-    object_map::{
-        Error,
-        model::{CaptureState, Id},
-        record,
-        store::{CaptureSnapshot, Store},
-    },
-    probe_data::{
-        mapper_settings::{Phase, Sample, Settings, close},
-        mapper_trace::{observation::TopColumn, state},
-        schema::Workflow,
-    },
-};
+use crate::object_map::{Error, model::Id, record, store::Store};
+use source::Source;
 use std::path::Path;
+mod source;
 
-struct Source {
-    settings: Settings,
-    samples: Vec<Sample>,
-}
-fn source(
-    a: &material::Assessment,
-    captures: &[CaptureSnapshot],
-    id: &Id,
-) -> Result<Source, Error> {
-    if !a.surface.contacts.iter().any(|s| s.capture == *id) {
-        return Err(Error::Input("The selected top capture contributes no retained fine contacts to this material assessment. Select a contributing capture or calculate a new source surface/material analysis.".into()));
-    }
-    let c = captures.iter().find(|c| c.id == *id).ok_or_else(|| Error::Data("The selected original top capture is absent from this setup. Import the intact capture and its original companions before preparing new samples.".into()))?;
-    a.surface
-        .source
-        .require_equal(&format!("capture-{}.txt", id.as_str()), &c.raw)?;
-    a.surface.source.check_context(c)?;
-    if c.capture.state == CaptureState::Quarantined || c.capture.workflow != Workflow::Mapper {
-        return Err(Error::Data("The selected capture is not an eligible mapper run. Retain its diagnosis and select a non-quarantined top capture with complete original cycles.".into()));
-    }
-    let settings = c.context.settings(&c.capture).map_err(Error::Data)?;
-    TopColumn::new(&settings, [settings.origin[0], settings.origin[1]]).map_err(Error::Data)?;
-    if !close(settings.radius, a.surface.request.probe.radius) {
-        return Err(Error::Data("The retained acquisition ball radius disagrees with the surface analysis probe model. Resolve those original references before planning; no radius or travel envelope was substituted.".into()));
-    }
-    let samples = state::samples(&c.capture.records, &settings, false).map_err(|e| Error::Data(format!("Cannot use capture {} for new top samples: {e} Preserve its diagnosis and select an intact capture with complete cycles.",id.as_str())))?;
-    if samples.is_empty() {
-        return Err(Error::Data("The selected capture contains no complete top-search cycles. Preserve its original ledger and select a capture with retained cycles before planning.".into()));
-    }
-    for sample in &samples {
-        let q = sample.request;
-        if !matches!(
-            q.phase,
-            Phase::Reference | Phase::Boundary | Phase::Grid | Phase::Verify
-        ) || q.edge != -1
-            || !close(q.target[0], q.approach[0])
-            || !close(q.target[1], q.approach[1])
-            || !close(q.target[2], settings.floor)
-        {
-            return Err(Error::Data(format!(
-                "Capture {} record {} is not a retained vertical top-search column. Select a top capture whose original requests agree with its mode and descent floor; no side approach was reused.",
-                id.as_str(),
-                sample.sequence
-            )));
-        }
-    }
-    Ok(Source { settings, samples })
-}
 pub fn prepare(
     store: &Store,
     object: &Id,
@@ -78,7 +20,7 @@ pub fn prepare(
     capture: &Id,
 ) -> Result<String, Error> {
     let (_, a) = material::load(store, object, setup, material)?;
-    source(&a, &store.captures(object, setup)?, capture)?;
+    let history = source::prepare(&a, &store.captures(object, setup)?, capture)?;
     let fields = request::KEYS
         .iter()
         .map(|k| {
@@ -92,8 +34,12 @@ pub fn prepare(
             )
         })
         .collect::<Vec<_>>();
-    String::from_utf8(record::encode(request::SCHEMA, &fields, &[])?)
-        .map_err(|e| Error::Data(e.to_string()))
+    String::from_utf8(record::encode(
+        request::HISTORY_SCHEMA,
+        &fields,
+        request::history_text(&history).as_bytes(),
+    )?)
+    .map_err(|e| Error::Data(e.to_string()))
 }
 pub(super) fn run(
     store: &Store,
@@ -105,10 +51,14 @@ pub(super) fn run(
 ) -> Result<String, Error> {
     let r = request::Request::read(raw)?;
     let (bundle, a) = material::load(store, object, setup, &r.material)?;
-    let source = source(&a, &store.captures(object, setup)?, &r.capture)?;
+    let captures = store.captures(object, setup)?;
+    let source = source::load(&a, &captures, &r)?;
     let selection = select::run(&a, &source, &r)?;
     let report = report::build(&a, &source, &selection, &r)?;
     let manifest = manifest(object, setup, id, &r, &report.json);
+    if matches!(&r.history, request::History::Explicit(_)) {
+        source.retain(output)?;
+    }
     super::retain(output, raw, &bundle, &report, &manifest)?;
     Ok(format!(
         "{{\"analysis_directory\":{},\"state\":\"unreviewed-spatial-observation-proposals\",\"spatial_cells\":{},\"selected_observations\":{},\"unsupported_material_regions\":{},\"message\":\"New top-column proposals and all unresolved material regions are retained. Inspect original settings and entry requirements; fresh capture and a reviewed execution path are still required.\",\"cam_ready\":false,\"machine_action_authorized\":false}}",

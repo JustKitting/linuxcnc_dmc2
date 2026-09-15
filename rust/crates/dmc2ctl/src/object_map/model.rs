@@ -68,7 +68,7 @@ impl CaptureIssueKind {
             Self::FollowupContext(_) => "followup-context-invalid",
         }
     }
-    fn message(&self) -> &str {
+    pub fn message(&self) -> &str {
         match self {
             Self::Probe(failure) => failure.message(),
             Self::GaugeBlockSideMiss => "An expected gauge-block side contact was not captured.",

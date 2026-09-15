@@ -39,7 +39,7 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
         return Err(Error::Storage("This observation analysis already exists. Select a new ID to preserve its proposals and original sources.".into()));
     }
     let raw = read(input)?;
-    if raw.starts_with(format!("{}\n", spatial::request::SCHEMA).as_bytes()) {
+    if spatial::request::recognizes(&raw) {
         return spatial::run(store, object, setup, id, &output, &raw);
     }
     let r = request::Request::read(&raw)?;

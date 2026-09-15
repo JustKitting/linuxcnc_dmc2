@@ -74,6 +74,10 @@ fn draft(raw: &[u8]) -> Result<&str, Error> {
             super::positional::stock::observation::spatial::request::SCHEMA,
             super::positional::stock::observation::spatial::request::KEYS.to_vec(),
         ),
+        (
+            super::positional::stock::observation::spatial::request::HISTORY_SCHEMA,
+            super::positional::stock::observation::spatial::request::KEYS.to_vec(),
+        ),
     ];
     let (schema, keys) = schemas.iter().find(|(schema, _)| raw.starts_with(format!("{schema}\n").as_bytes()))
         .ok_or_else(|| Error::Input("Unsupported analysis draft. Prepare a registration, stock outline, stock surface, machining footprint, material-check, stock-mesh, volume-placement or follow-up-observation request through Object Mapper.".into()))?;

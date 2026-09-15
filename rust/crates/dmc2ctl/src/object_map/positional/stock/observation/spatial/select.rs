@@ -3,6 +3,7 @@ use super::{
     Source,
     grid::{Budget, Grid, Key},
     request::Request,
+    source::Recorded,
 };
 use crate::{
     object_map::{Error, positional::geometry::finite},
@@ -14,7 +15,7 @@ pub struct Cell {
     pub key: Key,
     pub column: TopColumn,
     pub regions: BTreeSet<usize>,
-    pub original_sequences: Vec<usize>,
+    pub originals: Vec<Recorded>,
     pub nearest_request_mm: f64,
 }
 pub struct Projection {
@@ -91,17 +92,17 @@ pub fn run(a: &material::Assessment, source: &Source, r: &Request) -> Result<Sel
     for (key, regions) in grouped {
         let xy = grid.xy(key)?;
         let column = TopColumn::new(s, xy).map_err(Error::Data)?;
-        let mut original_sequences = Vec::new();
+        let mut originals = Vec::new();
         let mut nearest_request_mm = f64::INFINITY;
         for sample in &source.samples {
-            let old = sample.request.approach;
+            let old = sample.sample.request.approach;
             let distance = (xy[0] - old[0]).hypot(xy[1] - old[1]);
             if !distance.is_finite() {
                 return Err(Error::Data("Spatial novelty distance overflowed. Inspect the retained coordinate scale and sampling spacing before retrying.".into()));
             }
             nearest_request_mm = nearest_request_mm.min(distance);
             if s.endpoint_matches([xy[0], xy[1], s.floor], [old[0], old[1], s.floor]) {
-                original_sequences.push(sample.sequence);
+                originals.push(sample.clone());
             }
         }
         let id = cells.len();
@@ -113,14 +114,14 @@ pub fn run(a: &material::Assessment, source: &Source, r: &Request) -> Result<Sel
             key,
             column,
             regions,
-            original_sequences,
+            originals,
             nearest_request_mm,
         });
     }
     let mut chosen = cells
         .iter()
         .enumerate()
-        .filter_map(|(i, c)| c.original_sequences.is_empty().then_some(i))
+        .filter_map(|(i, c)| c.originals.is_empty().then_some(i))
         .collect::<Vec<_>>();
     // Prefer filling near previously searched columns, independently of how
     // many STL triangles project onto a cell. This is priority, not travel order.
