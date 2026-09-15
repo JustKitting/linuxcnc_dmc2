@@ -1501,398 +1501,45 @@ that workflow, not its completion.
 
 ## Recorded TODOs — 2026-09-14
 
-This is the continuing implementation list for the positional mapper and
-manufacturing-continuation work. An item stays open until its stated outcome is
-supported. Source implementation, installation, numerical results and physical
-acceptance are separate milestones. Recording a task does not authorize a
-machine run.
-
-- [ ] **Run material-directed follow-ups through the normal UI.** The top
-  program export, shared executor, fresh-plan capture binding, import and
-  surface/material continuation are implemented and installed; see the runbook
-  above. Physical entry, acquisition and recovery observation remain open.
-  Original top repeats now share that export/capture path; see
-  [Repeating original top observations](#repeating-original-top-observations).
-  Side plans still need explicit entry/recovery geometry and execution;
-  no unsupported requests are silently narrowed to top points. Further spatial
-  selection now pools explicit compatible acquisition histories, including
-  miss-only complete cycles, with immutable source retention and legacy replay;
-  see the history runbook above. Independently selected miss-only evidence now
-  feeds surface support, material assessment and reconstruction, with exact
-  source retention and historical replay; see the V3 surface runbook above.
-  Still needed: handle separately registered frames without assuming that
-  matching numerical settings establish physical identity. Fresh follow-up check
-  selection, exported role retention and automatic withheld-row preparation are
-  implemented and installed; see [Fresh withheld checks](#fresh-withheld-checks).
-  Physical top/check/repeat acquisition, mixed-setting entry plans, multiheight
-  sides and unseen volume remain parts of the whole stock-to-CAM workflow.
-- [ ] **Acquire automatic top coverage for irregular stock.** The production
-  Rust planner and Scripts catalog now provide Automatic top map, sharing the
-  existing mapper executor, original trigger capture, feeds and recovery. It
-  grows cardinal searches from the entered grid spacing, refines measured
-  contact/miss brackets, discovers the connected top grid and acquires fresh
-  cell-centre checks. No rectangle fit is required. Plate-boundary contacts and
-  out-of-envelope grid neighbours remain censored. Fine centre contacts become
-  withheld `check` rows in normal 3D stock-surface preparation. Both standard
-  binaries are built and installed. Twelve mapper and 61 library numerical
-  checks reported passes. The installed file workflow retained 13 synthetic
-  fine contacts (nine fit, four check), original triggers and source snapshots
-  through fitting and both exports. An interrupted capture retained its
-  diagnosis with no inferred coverage. Readbacks:
-  `/home/kit/cnc-backups/mapper-autotop-f_vl8pdz/round-trip-readback.json` and
-  `interrupted-readback.json`. See [the acquisition runbook](automatic-stock-mapping.md#automatic-top-map).
-  UI activation and physical observation remain open; no restart or motion was
-  issued. V2 surface requests now consume the retained coarse misses through
-  [shared no-contact support](#retained-no-contact-support), excluding detected
-  gaps from material checks and reconstruction without inventing surface hits.
-  The standard command binary is built and installed; source identities and
-  historical request replay survive the numerical file workflow. Still
-  outstanding: establish the physical error model, distinguish inferred empty
-  regions from unknown volume in the broader stock model, and execute reviewed
-  additional spatial samples from material requirements. New top-column
-  selection is now in the standard Object Mapper path; see the spatial-observation
-  runbook above. The top acquisition and these
-  constraints remain parts of the full workflow, not physical acceptance.
-- [ ] **Use no-contact evidence in whole-stock material decisions.** Required
-  surface fragments now compare directly against retained finite sweeps through
-  the standard material operation, with explicit overlap/boundary/conflict
-  states and source retention through follow-up planning and the FreeCAD scene;
-  see [Required geometry against no-contact sweeps](#required-geometry-against-no-contact-sweeps).
-  V3 now distinguishes a sweep wholly inside declared required material from
-  one outside it, retaining separate bodies, cavities and source conflicts;
-  see [Required material volume and retained imperfect placements](#required-material-volume-and-retained-imperfect-placements).
-  Still needed: a supported occupied-volume model joining top, side and base
-  evidence, including creases and inaccessible regions; use these constraints
-  in placement search without deforming the required machining geometry.
-  Absence of a surface intersection must not be used as material acceptance.
-  Physical probe/error-model and setup-registration acceptance remain open.
-- [ ] **Exponential edge bracketing, then binary refinement.** Source and
-  standard capture binary now use versioned policy V4 for new runs: **1 mm,
-  2 mm, 4 mm, …** offsets from the initial top sample, in physical RIGHT /
-  LinuxCNC -X, bounded by the retained plate/travel intersection. The last
-  contact and first miss define the bracket; binary refinement stays inside
-  it until the existing handoff distance is met. A plate-boundary contact
-  remains an error with no inferred outside point. Old policy snapshots retain
-  their original plate-first path. Numerical checks reported no failures for
-  refinement, plate termination and historical replay. Physical behavior under
-  this new policy has not been observed; that acceptance milestone remains open.
-- [ ] **Growing local edge search with internal refinement.** V4 source and
-  installed standard binaries now share replay in `probe_data/mapper_trace`.
-  Coarse local radii double; half-radius contacts measure chord disagreement.
-  Failed intervals halve using the already measured midpoint. Refinement
-  retraces retained clear segments, preserves full backoff and original fine
-  triggers, and exports selected contour order separately from all trial data.
-  Initial / minimum trace interval is the sampling floor; Outline resolution
-  is the midpoint error criterion. Reaching the floor retains an unresolved
-  decision rather than claiming tolerance. Existing speed/depth policy and
-  plate bounds remain in force. X labels remain physical RIGHT / LinuxCNC -X
-  and physical LEFT / LinuxCNC +X. Seven mapper numerical checks reported passes.
-  A synthetic concave-ledger round trip through installed export/import/
-  prepare-stock retained all 67 fine contacts: 41 fit, one seam check and 25
-  observations, with 42 selected records in contour order and 45 refinement
-  decisions. FreeCAD exchange retained the source ledger and companions byte
-  for byte. Readback: `/home/kit/cnc-backups/mapper-adaptive-v9ynzhbh/round-trip-readback.json`.
-  These are numerical/file results. Physical tracing, reconstruction quality
-  and the running UI's new label remain unobserved; this item stays open.
-- [ ] **Reserve a bounded fine re-touch allowance.** The run ending at
-  16:56:48 EDT stopped at sample 77 with no fine trigger. Its original target
-  allowed only 0.009887915 mm beyond the coarse trigger, while an earlier paired
-  contact in the same run needed 0.020173821 mm. The full 2 mm backoff was
-  recorded. `mapper-run.ngc` currently reuses the coarse target for the fine
-  approach, so a coarse hit near that target can leave insufficient reach for
-  observed coarse/fine variation. Specify the fine endpoint allowance and its
-  bounds explicitly; retain the exact fine-capture requirement. Do not accept
-  the missed endpoint or coarse trigger as a fine measurement. Source ledger:
-  `tmp/output/mapper/mapper-1789419086126841028-1241227.txt`, records 405–409;
-  paired comparison: records 359 and 363. A maximum 0.1 mm past the coarse
-  contact has been proposed to the operator, using the existing outline
-  resolution and recorded variation as context. The answer remains pending;
-  no new allowance or retry behavior has been applied.
-- [ ] **Represent failed capture cycles explicitly.** A fine search reaching
-  its endpoint without contact is currently recorded as `travel` with fine
-  stage, followed by an interpreter abort. Shared Rust failure types now classify
-  missing coarse/fine triggers, unexpected transfer contacts and contact recovery.
-  Object-map import retains the issue's record, reason and recovery instructions
-  and quarantines the capture; acquisition replay uses the same classification.
-  Both standard binaries have been rebuilt and installed. File replay of the
-  retained failed run reports `fine-trigger-not-retained` at record 409, preserves
-  the original ledger byte for byte and exports labelled diagnostic contacts with
-  no ASC cloud. The readback is retained locally at
-  `/home/kit/cnc-backups/mapper-finish-pt50q0l_/capture-diagnosis/readback.json`.
-  This file result does not establish physical recovery or a corrected fine
-  approach. Those outcomes remain open with the fine-allowance work above. Source:
-  `object_map/capture.rs`, `probe_data/mapper_trace/state.rs`, and
-  `live/nc_files/mapper-move.ngc`.
-- [ ] **Reconstruct oversized, irregular measured stock.** The owner clarified
-  that the wood will exceed the required cutting geometry and has no guaranteed
-  exact shape. Minimize residuals to retained rim/top/side measurements while
-  allowing dimensions, edge directions and surface shape to vary. Do not require
-  a quadrilateral, parallel/perpendicular sides or corresponding nominal CAD
-  planes. Local plane or rectangle summaries must retain the actual outline,
-  coherent deviations, concavities and original contact references. The current
-  named-face calculation assumes model-axis-parallel planes and does not provide
-  this reconstruction. The standard `prepare-stock` / `fit-stock` path now
-  estimates an unrestricted ordered XY contour with iterative Huber regression,
-  explicit probe correction, original-contact references and withheld checks.
-  Its source is in `object_map/positional/stock`; the shared probe correction is
-  in `object_map/positional/probe.rs`. Twenty-two object-map numerical tests
-  report passes, including curved/indented contours, oblique approaches,
-  unsupported intervals and withheld contacts. These are computational results,
-  not physical stock evidence. Represent observed, supported-empty and unknown regions;
-  retain explicit uncertainty/modeling assumptions instead of filling unobserved
-  volume by implication. Keep predicted operation stock separate from measured
-  stock. This takes priority over matched-plane initial alignment for the raw
-  wood workflow; see the owner clarification in
-  [the research and implementation note](probe-based-continuation.md#owner-clarification-oversized-wood-without-an-exact-stock-model).
-- [ ] **Close the acquisition/estimation loop.** Stock-outline analysis now
-  emits source-referenced requirements for gaps, unresolved local shape,
-  independent-check disagreement, mixed heights and unmeasured wall slope.
-  Consume those requirements through the typed acquisition planner with retained
-  bounds, exact trigger capture and operator recovery. Additional observation
-  selection and tracing must serve stock reconstruction and containment; they
-  are not separate end goals. No analysis requirement currently issues a probe
-  command. Keep the pending fine endpoint allowance separate from this work.
-  Capture import now retains the original acquisition companions and exports
-  them with the ledger, so later planning can use that run's bounds and policy.
-  The common settings parser is used by both standard binaries. A file-only
-  import/export of the failed run remained readable after its copied source
-  directory was moved; all exported original files matched byte for byte.
-  The standard acquisition reader replayed that export and retained the original
-  missing-fine-trigger diagnosis at record 409. Old V1 snapshots reported missing
-  context instead of consulting live configuration. Readback artifacts are in
-  `/home/kit/cnc-backups/mapper-context-gbmdc3ng`. Both binaries are built and
-  installed. Twenty-four object-map and seven mapper numerical checks reported
-  passes; these do not establish machine behavior. V4 now refines the local
-  next-contact interval from measured midpoint disagreement and carries those
-  decisions through the shared capture context into stock/FreeCAD data. Broader
-  stock-analysis-driven observation selection, multi-height acquisition and
-  material containment remain outstanding. `check-material` now consumes a
-  machining-footprint candidate and retained 3D surfaces to produce source-
-  triangle-specific regions needing measurements. Full 3D covers distinguish
-  local shortages, missing spatial support and independent-check issues; the
-  source analyses and original triggers survive together. These regions still
-  need conversion into bounded, supported acquisition plans; they are not probe
-  targets or authorized hardware actions.
-  The material-directed observation selector now maps patch check/shortage
-  requirements to bounded **original** acquisition requests, shares the typed
-  request/cycle reader and retains source companions exactly. Its normal
-  catalog, editor, inspection and export path is built and installed; see the
-  follow-up-observation runbook above for file readback and limits. Still
-  required: planning entry/recovery paths, multi-height acquisition, and connecting reviewed
-  proposals to the standard script executor with fresh exact capture/readback.
-  New spatial top-column selection now consumes unsupported material regions,
-  uses an explicit source-aligned grid and preserves the original acquisition
-  envelope/settings. The standard binary/catalog/editor/inspection/export path
-  is built and installed. Original hit/miss columns are not selected again;
-  source snapshots and every unresolved region survive. Numerical/file details
-  are recorded in the spatial-observation runbook above. New top proposals do
-  not supply side/base access or measured material coverage.
-  Historical Surface/Rim modes retain their cuboid fit for replay. The new
-  `FreeSurface` mode provides automatic connected top coverage without that
-  completion condition, and the outline path retains its free shape.
-  Gauge-block cuboid measurements retain their intended role. New spatial
-  sampling driven by material requirements now has a typed selection path.
-  Top follow-up export, shared execution, fresh-plan capture binding and
-  fit/check role preparation connect those proposals back to surface/material
-  analysis in the installed file workflow. Physical execution and the remaining
-  repeat, side and multiheight paths are still outstanding.
-- [ ] **Fit measured 3D stock surfaces and retain their support.** The standard
-  binary and Object Mapper catalog now provide `prepare-stock-surface` and
-  `fit-stock-surface`, with the existing editor/inspection/export path. Focused
-  Rust modules estimate local Huber planes from retained 3D fine contacts,
-  orient normals from approaches and apply shared calibration plus normal-based
-  ball-radius correction. All original rows, ambiguous geometry and independent
-  checks remain retained. Local check support is explicitly a planar
-  interpolation assumption, not closed stock volume. Twenty-nine object-map
-  numerical checks report passes. The installed-binary file exercise retained
-  all 26 fine triggers and source bytes, produced 25 local patches and reported
-  the withheld 2 mm disagreement without fitting that check. The request output
-  newline defect exposed by this workflow was corrected at the standard entry
-  point. Readback: `/home/kit/cnc-backups/mapper-surfaces-amm3v64y/round-trip-readback.json`.
-  These are source, build and file milestones. Physical surface observations,
-  volume coverage, uncertainty and containment remain open. The existing CNC
-  session was not restarted.
-- [ ] **Build the measured surface mesh and resolve stock volume.** The
-  standard `prepare-stock-mesh` / `reconstruct-stock-mesh` operations now extract
-  a source-linked mesh from the retained 3D patches, sharing local support and
-  check interpretation with material comparison. Explicit lattice bounds,
-  spacing and budgets produce indexed triangles, unresolved cells, unsupported
-  facet records and measurement-region needs. Original trigger sources remain
-  together through normal inspection/export. The installed-binary synthetic
-  file exercise retained the expected 16 mm² top, 128 facets and open perimeter;
-  source/export bytes matched and material replay remained unchanged. Forty-nine
-  object-map numerical checks reported passes. See the reconstruction runbook
-  and `/home/kit/cnc-backups/mapper-stockmesh-uery5t54/round-trip-readback.json`.
-  Still required: top/side/base connections and crease handling, distinction of
-  supported empty space from unknown volume,
-  multi-height acquisition and the physical material interpretation. The new
-  volume-placement path checks closed-shell geometry including vertex links and
-  triangle intersections; that model does not establish physical occupancy. Open edges
-  must not be silently capped, and edge incidence alone must not accept stock
-  containment. Connect the measurement regions to acquisition and the resulting
-  material model to placement/CAM; mesh export is a milestone within that flow.
-- [ ] **Optimize machining placement inside measured stock.** Fit the unchanged
-  required geometry into the stock estimate using the allowed translations and
-  rotations. Account for material shortage and unknown coverage separately;
-  expected oversize must not pull stock surfaces onto finished-part surfaces.
-  Report local deficits even if an aggregate penalty is small. Select any
-  clearance/allowance objectives from actual setup context. For dice OP1, preserve
-  `stage1_after`, including backing and envelopes; checking only finished blanks
-  would omit required intermediate material. The Huber STL registration
-  objective remains separate. `prepare-footprint` / `fit-footprint` now connect
-  a retained outline to an unchanged required-operation STL, search allowed XY
-  translations and yaw, and retain worst local clearance/deficit bounds across
-  complete projected triangles. Original captures, source analysis, STL and
-  triangle identities are preserved through inspection/export; named locations
-  can use the unreviewed horizontal candidate. The standard binary is built and
-  installed. A synthetic file run improved its conservative horizontal clearance
-  from -2.199750 mm to +0.597026 mm and retained every source file. Thirty-five
-  object-map numerical checks report passes. Full 3D containment, integration
-  with supported volume, actual setup constraints and physical acceptance remain
-  open; neither the horizontal result nor these checks establishes them. See
-  the footprint runbook and the retained file readback above. Every new
-  footprint outcome now retains its best unreviewed pose, including unresolved
-  clearance, so further material assessment can inspect it. The standard
-  `prepare-volume-placement` / `fit-volume-placement` path now adds bounded XYZ
-  translation/rotation search against a reproduced, explicitly enclosed stock
-  model, without resizing required geometry. It shares search mechanics and the
-  candidate reader with footprint/material/scene operations. The numerical
-  ellipsoid file exercise retained full source bytes and local deficits through
-  CAD export. See the 3D placement runbook above. Partial-boundary interpretation,
-  crease/base connections, setup constraints and physical acceptance remain open.
-- [ ] **Use 3D material comparisons to drive placement and observation.**
-  `prepare-material-check` / `check-material` are in the standard catalog and
-  installed binary. They connect unchanged operation geometry to local measured
-  surfaces, preserve every eligible local comparison and produce measurement
-  regions tied to original triangles. The synthetic normal-CLI exercise retained
-  1,920 full 3D regions, 26 original fine contacts and all source bundle bytes;
-  534 regions showed local clearance shortages and 928 lacked support. Forty-one
-  object-map numerical checks reported passes. See the material-check runbook
-  and `/home/kit/cnc-backups/mapper-material-prtkle5x/round-trip-readback.json`.
-  These are source/build/file milestones. The shared candidate path now accepts
-  3D volume-placement results and exports their exact stock revision with the
-  material scene. Closed reconstructed boundaries can drive the bounded 3D
-  optimizer under an explicit enclosed-material assumption. Partial observations
-  still need supported-empty/unknown-volume interpretation and conversion of
-  measurement regions to acquisition plans. Physical observation and acceptance
-  remain outstanding. Local inwardness is not containment.
-- [ ] **Validate placement and compare setups.** Retain named calibration
-  evidence and reference-frame relationships, calculate independent feature
-  prediction errors, and provide a reviewed placement state with an explicit
-  feature tolerance. Add repeatability and uncertainty analysis grounded in
-  repeated observations. Current local fit convergence alone does not accept a
-  placement or establish uncertainty. Relocation must create a new setup and
-  transform the same design-space feature coordinates through its new pose.
-- [ ] **Improve registration and mesh handling where required.** Add usable
-  initial alignment from genuinely corresponding measured or machined features,
-  expose competing symmetric placements, and handle surface/mesh defects
-  explicitly. Matched-plane alignment is optional; it must not become a
-  prerequisite for unknown-shaped raw stock or replace its reconstruction and
-  containment objective. Nearest-triangle
-  lookup now uses an immutable, balanced bounding-box hierarchy in Rust,
-  retaining original triangle IDs and the lowest original ID for equal-distance
-  matches. Coordinate-gap bounds prune distant branches without a dimensional
-  search tolerance. The hierarchy is built once per loaded mesh; the retained
-  triangle vector cannot be mutated independently of it. Background on this
-  class of point/primitive queries: [CGAL AABB tree manual](https://doc.cgal.org/latest/AABB_tree/index.html).
-  The direct component normalization also avoids a reciprocal-overflow defect
-  exposed by a subnormal-distance query in the previous implementation.
-  Sixteen object-map numerical tests report passes. A separate comparison with
-  the saved previous source used 2,361 numerical queries derived from the
-  supplied CAD planes across five delivered meshes. It reported identical
-  nearest points, triangle IDs and signed distances; normal components differed
-  by at most 1.1102230246251565e-16 after the normalization correction. Combined
-  target query times were 0.849/0.810 seconds before and 0.040/0.042 seconds with
-  the index, excluding mesh loading. These are computational observations from
-  that comparison, not physical accuracy or universal performance claims.
-  The matched standard Rust binary is installed; the offline example returned
-  an unreviewed proposal and exported its files. Comparison inputs, outputs and
-  the previous binary are retained at
-  `/home/kit/cnc-backups/mapper-spatial-arbj4k3j`. Initial alignment, symmetry
-  handling remain outstanding. The volume-placement stock path now adds
-  adaptive-predicate triangle intersection checks and vertex/shell topology
-  checks; other registration paths retain their stated mesh-validation limits.
-  Edge closure alone does not establish absence of self-intersections.
-- [ ] **Connect mapper results to the operator workflow.** Provide normal UI
-  access to object/setup selection, retained captures, model revisions, analysis
-  parameters, residual inspection and named-location export. Analysis must run
-  outside machine control and remain cancellable without gating Clear Fault or
-  Pendant Mode. The AXIS pane, catalog-driven forms, nonmodal file chooser,
-  retained request editor, analysis readback and cancellation path are now in
-  source, with the matched Rust command binary installed. The offline example,
-  conflicting-save check and disposable widget checks reported no remaining
-  failures. Activation in the running CNC session and operator observation
-  remain outstanding; no CNC restart or machine operation was issued.
-- [ ] **Implement the FreeCAD setup adapter.** Create a new manufacturing
-  revision using the chosen model placement, measured/predicted stock and
-  retained fixture geometry; regenerate the selected operations and export the
-  result for review. Avoid applying a transform both to the model and through a
-  work offset. Target the actual FreeCAD release and document structure. Current
-  native part inputs now include the delivered `THREE_AXIS_GLUE_A` FCStd, STEP
-  and STL files, plus a hash-bound descriptor of frames, body roles and native
-  planar references. The CAD peer reports FreeCAD 1.1.1 with the LinuxCNC post;
-  its required `ocl`/`opencamlib` dependency for 3D Surface is missing. The peer
-  owns geometry and workstation CAM preparation. A native CAM Job document,
-  actual tooling/stock/fixture inputs and accepted physical setup placement
-  remain outstanding. `export-stock-scene` now supplies a combined retained
-  material/stock scene with exact common-source binding, separate geometry
-  roles and an explicit identity import convention for already transformed
-  machine-mm meshes. The installed command's synthetic export retained all 50
-  source files unchanged and rejected an altered source before publication;
-  readback is in `/home/kit/cnc-backups/mapper-scene-58tfebd7`.
-  This scene and the STL/ASC exchange are available; native Job updates and CAD
-  workstation readback are not implemented/observed. OP1 must preserve
-  `stage1_after`, including its
-  envelopes and backing; `stage1_targets` is finished-blank reference geometry.
-  The descriptor's OP1-to-OP2 flip is already applied to stage2 geometry and
-  must not be applied again during import.
-- [ ] **Generate and check continuation/location programs.** Use the retained
-  setup, current stock, desired geometry and tool/holder/fixture data to prepare
-  the next operation, with an explicit collision/clearance model and the normal
-  typed script-loading/recovery contract. Named coordinate CSV currently contains
-  no toolpath, tool selection, feed, offset command or operation history. Those
-  facts must come from the actual job before a cutting program is issued.
-- [ ] **Implement the additive continuation adapter.** Combine measured
-  geometry with the original slicer project/G-code and retained printer process
-  state. Distinguish a planar layer restart from nonplanar repair and incomplete
-  layers. Current inputs missing: printer/controller details and the original
-  job. No printer continuation program has been generated or executed.
-- [ ] **Run the practical acceptance sequence.** Obtain a matching real model
-  and units, establish the probe/reference convention, predict withheld features,
-  retain their actual contact errors, repeat after relocation, then evaluate a
-  reviewed subsequent operation. Exact machine sequences and fixtures must be
-  known before execution. Numerical examples and builds do not satisfy this
-  physical milestone. Keep failed or unmeasured stages explicitly open.
-- [ ] **Receive and prepare the dice wood-cutting job.** Preserve the CAD-side
-  `THREE_AXIS_GLUE_A` bundle with file hashes, units, original targets, OP1/OP2
-  geometry, intermediate stock, carrier assembly, transforms and stable feature
-  IDs. The durable handoff directory is
-  `/home/kit/cnc-jobs/cnc-polyhedral-dice`; revision folders belong under
-  `incoming`, and directional message folders under `coordination`. Establish
-  actual stock/material, tool and holder geometry, workholding and the
-  CAD-to-machine relationship before producing a setup-specific machining
-  proposal. The supplied dimensions, bond layer and reference cutter are CAD
-  data, not measurements of the current setup. The correspondence authorizes
-  file collaboration only, with no motion, probing, homing, energization,
-  restart or machine-control changes.
-  All 71 delivered source sizes and hashes match the CNC-side readback. Message
-  003's descriptor hash also matches and binds 41 bodies and 158 planar
-  references. These are model-only features with unestablished probe access.
-  The standard Rust object mapper now retains 15 native/STEP/STL snapshots for
-  the raw stock, preserved OP1 material, finished references and OP2 input.
-  Their payloads match the delivered source bytes. Object ID
-  `cnc-polyhedral-dice` has planned `op1` and `op2` records; each remains
-  unregistered, without captures or placement candidates. The append-only
-  workflow reply and import receipt are in the job's
-  `coordination/cnc-to-cad/003-cnc-import-workflow.md` and
-  `003-cnc-object-import-receipt.json`. Supplement 004 supplied both combined
-  finished-blank STLs and 79 native planes per connected-stock body, including
-  five backing datum planes per setup. Exact triangle ranges match all original
-  source payloads. The combined meshes are imported under distinct OP1/OP2
-  revisions; the native plane metadata remains CAD reference data, not captured
-  contacts. `004-cnc-supplement-readback.json` retains the supplement hashes,
-  triangle-range comparison, Rust STL inspection and object-store readback;
-  `004-cnc-handoff-reply.md` acknowledges the transfer and accepted workflow.
-  Incoming source snapshots and local job records are kept outside code
-  publication; these file readbacks do not establish a physical setup or a
-  machining result.
+- [ ] Resolve the rim trace's missing fine contact: establish the permitted
+  endpoint allowance, implement its bounds, and observe full withdrawal and
+  recovery. Use the original failure at record 409 of
+  `tmp/output/mapper/mapper-1789419086126841028-1241227.txt`.
+- [ ] Activate and observe the mapper pane, revised rim trace, automatic top map
+  and top follow-ups through the normal UI, including contact capture,
+  bracketing/refinement, missed contacts, cancellation, Clear Fault and Pendant Mode.
+- [ ] Add entry, transfer and recovery plans for side, multiheight and
+  mixed-setting follow-up measurements, with exact trigger capture/readback.
+- [ ] Make reconstruction and material deficits drive further probing, then
+  feed those observations back into the stock estimate. Cover gaps, conflicting
+  checks, wall slope and unresolved shape; adapt edge/ridge detection to this loop.
+- [ ] Connect measured top, side and base surfaces across creases and access
+  gaps. Represent supported material, measured empty space and unknown volume
+  separately, with uncertainty; do not fill missing coverage or impose a cuboid.
+- [ ] Use partial surface support and no-contact constraints directly in
+  placement optimization. Preserve required machining geometry; account for
+  local shortages, unknown coverage and actual setup clearances separately.
+- [ ] Establish probe calibration and physical frame relationships between
+  captures. Set evidence-based tolerances and quantify independent prediction
+  errors, repeatability and uncertainty before accepting a placement.
+- [ ] Add initial alignment from corresponding measured features and expose
+  ambiguous symmetric placements. Resolve unsupported mesh geometry explicitly.
+- [ ] Implement relocation and flip registration using new setup records and
+  the same design features; retain the measured relationship between setups.
+- [ ] Create and update native FreeCAD CAM Jobs from the chosen placement,
+  measured/predicted stock and fixtures. Resolve the workstation's Surface CAM
+  dependency, exchange the current mapper contract with the CAD peer, and obtain
+  native Job readback. Apply each placement/flip transform only once.
+- [ ] Establish actual dice stock, tools/holders, workholding, bond thickness and
+  CAD-to-machine frames. Preserve OP1 `stage1_after` backing/envelopes; use the
+  supplied OP2 frame without applying its flip again.
+- [ ] Generate cutting and continuation/location programs from those setups,
+  with actual tool, feed, offset and operation-history data; check stock,
+  holder/fixture collisions and clearances through the standard loading path.
+- [ ] Demonstrate the entire UI workflow on real material: map, estimate stock,
+  place the required geometry, generate CAM, review the program, cut, relocate
+  and continue. Retain independent measurements and operator recovery evidence
+  for each authorized physical stage.
+- [ ] Implement additive continuation using measured geometry, the original
+  slicer job/G-code and printer process state once those inputs are supplied.
+  Handle planar restarts, incomplete layers and nonplanar repair explicitly.
