@@ -73,7 +73,7 @@ fn main() {
         let message = if args
             .first()
             .and_then(|s| integer(s).ok())
-            .is_some_and(|action| matches!(action, 6 | 11))
+            .is_some_and(|action| matches!(action, 6 | 11 | 12))
         {
             format!("Probe planning stopped: {error} Captures are retained. Use Abort, then Pendant Mode; correct the reported condition before a new Run.")
         } else {
@@ -100,7 +100,7 @@ fn main() {
 fn run() -> Result<(), String> {
     let args: Vec<_> = env::args().skip(1).collect();
     if args == ["--help"] {
-        println!("dmc2-probe-capture is the synchronous M190 capture gate. Circle: P0 Q0 begins, P1 Q<sequence> saves. Surface: P2 Q0 begins, P3 Q<sequence> saves. Block: P4 Q0 begins, P5 Q<sequence> saves, P6 Q<sequence> publishes the next retained-data plan. Tool setter: P7 Q0 snapshots calibration and begins; P8 Q<sequence> saves and exports the fine contact's plate-referenced Z tool offset. Automatic mapper: P9 Q0 begins with plate/feed snapshots; P10 saves; P11 publishes the next plan. --export-mapper exports retained partial data offline. Records are durably saved and read back. --export-surface <ledger>, --export-block <ledger>, and --export-tool-offset <ledger> [<INI> [<historical-reference.json>]] export retained data without a machine connection. No machine commands are issued.");
+        println!("dmc2-probe-capture is the synchronous M190 capture gate. Circle: P0 Q0 begins, P1 Q<sequence> saves. Surface: P2 Q0 begins, P3 Q<sequence> saves. Block: P4 Q0 begins, P5 Q<sequence> saves, P6 Q<sequence> publishes the next retained-data plan. Tool setter: P7 Q0 snapshots calibration and begins; P8 Q<sequence> saves and exports the fine contact's plate-referenced Z tool offset. Automatic mapper: P9 Q0 begins with plate/feed snapshots; P10 saves; P11 publishes the next plan; P12 Q0 begins explicit top follow-up from the actual loaded program. --export-mapper exports retained partial data offline. Records are durably saved and read back. --export-surface <ledger>, --export-block <ledger>, and --export-tool-offset <ledger> [<INI> [<historical-reference.json>]] export retained data without a machine connection. No machine commands are issued.");
         return Ok(());
     }
     if args.len() != 2 {
@@ -143,6 +143,7 @@ fn run() -> Result<(), String> {
         9 if sequence == 0 => mapper::begin(root, &output),
         10 => storage::commit(&output, Workflow::Mapper, sequence, trigger_position),
         11 => mapper::publish_next(&output, sequence),
+        12 if sequence == 0 => mapper::followup::begin(&output),
         _ => Err("unknown capture action; reopen the selected probing script".to_owned()),
     }
 }

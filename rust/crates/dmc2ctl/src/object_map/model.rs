@@ -54,22 +54,25 @@ impl CaptureState {
     }
 }
 
-#[derive(Debug, Clone, Copy)]
+#[derive(Debug, Clone)]
 pub enum CaptureIssueKind {
     Probe(crate::probe_data::mapper_schema::CaptureFailure),
     GaugeBlockSideMiss,
+    FollowupContext(String),
 }
 impl CaptureIssueKind {
-    fn name(self) -> &'static str {
+    fn name(&self) -> &'static str {
         match self {
             Self::Probe(failure) => failure.name(),
             Self::GaugeBlockSideMiss => "gauge-block-side-miss",
+            Self::FollowupContext(_) => "followup-context-invalid",
         }
     }
-    fn message(self) -> &'static str {
+    fn message(&self) -> &str {
         match self {
             Self::Probe(failure) => failure.message(),
             Self::GaugeBlockSideMiss => "An expected gauge-block side contact was not captured.",
+            Self::FollowupContext(detail) => detail,
         }
     }
 }

@@ -3,11 +3,13 @@ use super::ledger::{number, Fields};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
+#[repr(u8)]
 pub enum Mode {
     Surface,
     Rim,
     Outline,
     FreeSurface,
+    TopFollowup,
 }
 impl Mode {
     pub fn read(value: f64) -> Result<Self, String> {
@@ -16,6 +18,7 @@ impl Mode {
             1.0 => Ok(Self::Rim),
             2.0 => Ok(Self::Outline),
             3.0 => Ok(Self::FreeSurface),
+            4.0 => Ok(Self::TopFollowup),
             _ => Err("The retained mapper mode is unsupported. Preserve the capture and select a supported script before a new Run; Abort and Pendant Mode remain available.".into()),
         }
     }

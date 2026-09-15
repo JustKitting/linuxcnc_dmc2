@@ -246,10 +246,11 @@ impl Store {
             .map(|id| {
                 let bytes = read(&path.join(format!("{}.dmc2", id.as_str())))?;
                 let retained = capture_bundle::decode(&bytes, &id)?;
-                let capture =
+                let mut capture =
                     Capture::read(std::str::from_utf8(&retained.raw).map_err(|e| {
                         Error::Data(format!("Retained capture is not UTF-8: {e}."))
                     })?)?;
+                retained.context.annotate_followup(&mut capture);
                 Ok(CaptureSnapshot {
                     id,
                     source_path: retained.source,

@@ -1,5 +1,6 @@
 //! New material-directed top columns through the normal Object Mapper path.
 mod grid;
+pub(in crate::object_map) mod export;
 mod report;
 pub(in crate::object_map) mod request;
 mod select;
@@ -107,15 +108,7 @@ pub(super) fn run(
     let source = source(&a, &store.captures(object, setup)?, &r.capture)?;
     let selection = select::run(&a, &source, &r)?;
     let report = report::build(&a, &source, &selection, &r)?;
-    let manifest = format!(
-        "{{\"schema\":\"dmc2.spatial-observation-plan-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"material_analysis\":{},\"source_capture\":{},\"result\":{},\"cam_ready\":false,\"machine_action_authorized\":false}}\n",
-        record::quote(object.as_str()),
-        record::quote(setup.as_str()),
-        record::quote(id.as_str()),
-        record::quote(r.material.as_str()),
-        record::quote(r.capture.as_str()),
-        report.json
-    );
+    let manifest = manifest(object, setup, id, &r, &report.json);
     super::retain(output, raw, &bundle, &report, &manifest)?;
     Ok(format!(
         "{{\"analysis_directory\":{},\"state\":\"unreviewed-spatial-observation-proposals\",\"spatial_cells\":{},\"selected_observations\":{},\"unsupported_material_regions\":{},\"message\":\"New top-column proposals and all unresolved material regions are retained. Inspect original settings and entry requirements; fresh capture and a reviewed execution path are still required.\",\"cam_ready\":false,\"machine_action_authorized\":false}}",
@@ -124,4 +117,16 @@ pub(super) fn run(
         selection.chosen.len(),
         selection.projections.len()
     ))
+}
+
+fn manifest(object: &Id, setup: &Id, id: &Id, r: &request::Request, json: &str) -> String {
+    format!(
+        "{{\"schema\":\"dmc2.spatial-observation-plan-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"material_analysis\":{},\"source_capture\":{},\"result\":{},\"cam_ready\":false,\"machine_action_authorized\":false}}\n",
+        record::quote(object.as_str()),
+        record::quote(setup.as_str()),
+        record::quote(id.as_str()),
+        record::quote(r.material.as_str()),
+        record::quote(r.capture.as_str()),
+        json
+    )
 }

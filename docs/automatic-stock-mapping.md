@@ -203,3 +203,22 @@ The installed file-analysis path retains proposals and all unresolved regions.
 Reviewed entry/execution, fresh trigger capture, multi-height coverage and
 side/base connections remain in the continuing TODOs; this top acquisition is
 one part of that workflow.
+
+
+## Run selected top observations
+
+After **Select follow-up observations** produces a new-top-sample analysis,
+choose **Export top follow-up program** in Object Mapper. **Reload operations**
+refreshes an already-open window's catalog. The new output directory contains
+the ordered work-coordinate rows, original source analysis, entry instructions
+and a typed program using the shared executor. Review the original starting
+frame and clearance transfers before using standard File Open/Run; export alone
+issues no machine command.
+
+Fresh records retain their exact trigger coordinates and original plan beside
+the ledger. Import that ledger with its companions, prepare a new stock surface,
+then calculate a new material assessment. Invalid plan/cycle captures stay
+quarantined and inspectable without blocking valid captures. See
+[the follow-up runbook](positional-mapper.md#executable-top-follow-ups--2026-09-15)
+for the original-setting checks, file formats, evidence and remaining work.
+This top-column path does not yet execute side or repeat-observation plans.

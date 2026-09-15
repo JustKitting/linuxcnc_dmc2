@@ -2,6 +2,7 @@
 mod dimensions;
 mod free_report;
 mod free_surface;
+pub(super) mod followup;
 #[cfg(test)]
 mod free_tests;
 use dmc2ctl::probe_data::mapper_settings as model;
@@ -86,7 +87,11 @@ pub(super) fn publish_next(output: &Path, sequence: u64) -> Result<(), String> {
             return Err("The mapper sequence is stale or the run has already ended. Start a new Run after recovery.".into());
         }
         let samples = state::samples(&records, &settings, false)?;
-        let progress = if settings.mode == Mode::Outline {
+        let progress = if settings.mode == Mode::TopFollowup {
+            followup::next(&path, &records).map_err(search::Progress::Invalid).and_then(|next| {
+                next.map_or(Ok(()), |q| Err(search::Progress::Need(q)))
+            })
+        } else if settings.mode == Mode::Outline {
             outline::run(&settings, &samples).result
         } else if settings.mode == Mode::FreeSurface {
             search::Survey::new(&settings, &samples).free_surface()

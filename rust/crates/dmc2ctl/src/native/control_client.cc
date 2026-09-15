@@ -30,6 +30,31 @@ extern "C" int32_t dmc2_probe_capture_position(
     }
 }
 
+// Status only. Return the exact byte length; no fixed Rust-side path buffer,
+// command client, current-plan registry or machine state mutation is involved.
+extern "C" int32_t dmc2_probe_capture_program(
+    const char *nml_file, char *path, size_t capacity) noexcept {
+    if (nml_file == nullptr) return -1;
+    try {
+        RCS_STAT_CHANNEL channel(emcFormat, "emcStatus", "xemc", nml_file);
+        if (!channel.valid()) return -1;
+        const NMLTYPE type = channel.peek();
+        if (channel.error_type != NML_NO_ERROR ||
+            (type != 0 && type != EMC_STAT_TYPE)) return -1;
+        const auto *status = static_cast<const EMC_STAT *>(channel.get_address());
+        if (status == nullptr) return -1;
+        const auto length = strnlen(status->task.file, sizeof(status->task.file));
+        if (length == 0 || length == sizeof(status->task.file)) return -1;
+        if (path != nullptr) {
+            if (capacity != length) return -1;
+            std::memcpy(path, status->task.file, length);
+        }
+        return static_cast<int32_t>(length);
+    } catch (...) {
+        return -1;
+    }
+}
+
 extern "C" int32_t dmc2_probe_capture_error(
     const char *nml_file, const char *message) noexcept {
     if (nml_file == nullptr || message == nullptr) return -1;

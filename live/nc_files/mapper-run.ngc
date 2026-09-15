@@ -39,7 +39,12 @@ o<mp_selected> endif
 o<mp_initial_contact> if [#<_hal[motion.probe-input]> NE 0]
     (ABORT,Probe is already touching. Use Pendant Mode to position clear above the block before Run.)
 o<mp_initial_contact> endif
-M190 P9 Q0
+(Mode 4 uses the plan bound to this loaded program; other modes retain their normal planner.)
+o<mp_followup_begin> if [#<_mp_mode> EQ 4]
+    M190 P12 Q0
+o<mp_followup_begin> else
+    M190 P9 Q0
+o<mp_followup_begin> endif
 M66 P5 L0
 (LOGOPEN,../tmp/output/mapper-request.txt)
 (LOG,DMC2_MAPPER_RECORD_V1)

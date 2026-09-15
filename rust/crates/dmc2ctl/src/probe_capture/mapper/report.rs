@@ -30,6 +30,9 @@ pub(super) fn quoted(s: &str) -> String {
 
 pub(crate) fn export(path: &Path, require_result: bool) -> Result<(), String> {
     let (records, settings) = read(path)?;
+    if settings.mode == Mode::TopFollowup {
+        return super::followup::export(path, &records, require_result);
+    }
     if settings.mode == Mode::Outline {
         return super::outline_report::export(path, &records, &settings, require_result);
     }

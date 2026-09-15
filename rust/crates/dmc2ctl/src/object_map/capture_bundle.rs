@@ -8,6 +8,16 @@ use crate::probe_data::{
 use std::{fs, path::Path};
 const V1: &str = "DMC2_OBJECT_CAPTURE_V1";
 const V2: &str = "DMC2_OBJECT_CAPTURE_V2";
+const V3: &str = "DMC2_OBJECT_CAPTURE_V3";
+const NEW_KEYS: &[&str] = &[
+    "id",
+    "source_path",
+    "ledger_bytes",
+    "plate_bytes",
+    "feeds_bytes",
+    "outline_bytes",
+    "followup_bytes",
+];
 const OLD_KEYS: &[&str] = &["id", "source_path"];
 const KEYS: &[&str] = &[
     "id",
@@ -22,14 +32,16 @@ enum Kind {
     Plate,
     Feeds,
     Outline,
+    Followup,
 }
 impl Kind {
-    const ALL: [Self; 3] = [Self::Plate, Self::Feeds, Self::Outline];
+    const ALL: [Self; 4] = [Self::Plate, Self::Feeds, Self::Outline, Self::Followup];
     fn name(self) -> &'static str {
         match self {
             Self::Plate => "plate",
             Self::Feeds => "feeds",
             Self::Outline => "outline",
+            Self::Followup => "followup",
         }
     }
     fn key(self) -> &'static str {
@@ -37,12 +49,13 @@ impl Kind {
             Self::Plate => "plate_bytes",
             Self::Feeds => "feeds_bytes",
             Self::Outline => "outline_bytes",
+            Self::Followup => "followup_bytes",
         }
     }
 }
 #[derive(Default)]
 pub struct Context {
-    parts: [Option<Vec<u8>>; 3],
+    parts: [Option<Vec<u8>>; 4],
 }
 impl Context {
     /// Original bytes, including explicit absence, for dependent planning.
@@ -76,10 +89,45 @@ impl Context {
         let bytes=self.parts[kind as usize].as_deref().ok_or_else(||format!("The original {} snapshot was not retained. Import the original ledger with its companion files under a new capture ID; current configuration cannot substitute.",kind.name()))?;
         std::str::from_utf8(bytes).map_err(|e|format!("The retained {} snapshot is not UTF-8: {e}. Preserve the source and import an intact run under a new ID.",kind.name()))
     }
+    pub fn annotate_followup(&self, capture: &mut Capture) {
+        let is_followup = capture.workflow == Workflow::Mapper
+            && (crate::probe_data::ledger::number(&capture.records[0], "mode").ok()
+                == Some(Mode::TopFollowup as u8 as f64)
+                || self.parts[Kind::Followup as usize].is_some());
+        if is_followup {
+            if let Err(detail) = self.validate_followup(capture) {
+                capture.state = super::model::CaptureState::Quarantined;
+                capture.issues.push(super::model::CaptureIssue {
+                    sequence: 0,
+                    kind: super::model::CaptureIssueKind::FollowupContext(detail),
+                });
+            }
+        }
+    }
+    pub fn validate_followup(&self, capture: &Capture) -> Result<(), String> {
+        if capture.workflow != Workflow::Mapper {
+            return Ok(());
+        }
+        let mode = Mode::read(crate::probe_data::ledger::number(
+            &capture.records[0],
+            "mode",
+        )?)?;
+        if mode == Mode::TopFollowup {
+            let plan = crate::probe_data::top_followup::Plan::read(self.text(Kind::Followup)?)?;
+            if plan.plate != self.text(Kind::Plate)? || plan.feeds != self.text(Kind::Feeds)? {
+                return Err("Follow-up acquisition companions differ from its retained plan. Preserve the source and import the intact ledger/companions; no current settings can substitute.".into());
+            }
+            plan.samples(&capture.records, false)?;
+        } else if self.parts[Kind::Followup as usize].is_some() {
+            return Err("A follow-up companion accompanies a different mapper mode. Preserve the sources and select the matching original ledger/companions.".into());
+        }
+        Ok(())
+    }
     pub fn settings(&self, capture: &Capture) -> Result<Settings, String> {
         if capture.workflow != Workflow::Mapper {
             return Err("This capture does not use mapper companion settings.".into());
         }
+        self.validate_followup(capture)?;
         let start = &capture.records[0];
         let plate = data(
             self.text(Kind::Plate)?,
@@ -108,6 +156,7 @@ impl Context {
         let parts = Kind::ALL
             .iter()
             .zip(&self.parts)
+            .filter(|(kind, bytes)| !matches!(kind, Kind::Followup) || bytes.is_some())
             .map(|(kind, bytes)| {
                 format!(
                     "{{\"kind\":{},\"retained\":{},\"bytes\":{}}}",
@@ -147,6 +196,7 @@ impl Context {
                         Mode::Rim => "rim",
                         Mode::Surface => "surface",
                         Mode::FreeSurface => "free-surface",
+                        Mode::TopFollowup => "top-followup",
                     };
                     (format!("{{\"mode\":{},\"frame\":\"retained work coordinates in mm\",\"work_to_machine_translation_mm\":{:?},\"bounded_min_mm\":{:?},\"bounded_max_mm\":{:?},\"local_spacing_mm\":{},\"resolution_mm\":{},\"nominal_ball_radius_mm\":{},\"horizontal_fine_travel_feeds_mm_min\":{:?},\"downward_feed_mm_min\":{}}}",record::quote(mode),s.offset,s.min,s.max,s.grid,s.resolution,s.radius,s.feeds,s.downward_feed),String::from("null"))
                 }
@@ -177,7 +227,12 @@ pub fn encode(id: &Id, source: &str, raw: &[u8], context: &Context) -> Result<Ve
         ("ledger_bytes", raw.len().to_string()),
     ];
     let mut payload = raw.to_vec();
-    for (kind, bytes) in Kind::ALL.iter().zip(&context.parts) {
+    let followup = context.parts[Kind::Followup as usize].is_some();
+    for (kind, bytes) in Kind::ALL
+        .iter()
+        .zip(&context.parts)
+        .filter(|(kind, _)| followup || !matches!(kind, Kind::Followup))
+    {
         fields.push((
             kind.key(),
             bytes
@@ -190,7 +245,7 @@ pub fn encode(id: &Id, source: &str, raw: &[u8], context: &Context) -> Result<Ve
         }
     }
     record::encode(
-        V2,
+        if followup { V3 } else { V2 },
         &fields
             .iter()
             .map(|(k, v)| (*k, v.as_str()))
@@ -205,10 +260,23 @@ pub struct Decoded {
 }
 pub fn decode(bytes: &[u8], id: &Id) -> Result<Decoded, Error> {
     let old = bytes.starts_with(format!("{V1}\n").as_bytes());
+    let followup = bytes.starts_with(format!("{V3}\n").as_bytes());
     let (fields, body) = record::decode(
         bytes,
-        if old { V1 } else { V2 },
-        if old { OLD_KEYS } else { KEYS },
+        if old {
+            V1
+        } else if followup {
+            V3
+        } else {
+            V2
+        },
+        if old {
+            OLD_KEYS
+        } else if followup {
+            NEW_KEYS
+        } else {
+            KEYS
+        },
     )?;
     if fields["id"] != id.as_str() {
         return Err(Error::Data(
@@ -237,6 +305,9 @@ pub fn decode(bytes: &[u8], id: &Id) -> Result<Decoded, Error> {
     let raw = take("ledger_bytes")?;
     let mut context = Context::default();
     for (i, kind) in Kind::ALL.into_iter().enumerate() {
+        if !followup && matches!(kind, Kind::Followup) {
+            continue;
+        }
         if fields[kind.key()] != "absent" {
             context.parts[i] = Some(take(kind.key())?);
         }

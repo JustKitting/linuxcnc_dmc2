@@ -1054,6 +1054,74 @@ Seventy-one library numerical checks reported passes. The standard binary is
 built and installed. These are file/numerical results, not physical acquisition
 or machine-recovery evidence; the CNC session was not restarted or moved.
 
+## Executable top follow-ups — 2026-09-15
+
+Object Mapper's **Export top follow-up program** operation accepts a retained
+new-top-sample analysis:
+
+```text
+export-top-observations OBJECT SETUP ANALYSIS NEW_DIRECTORY
+```
+
+The export reproduces the material assessment and observation selection and
+compares their retained sources, report, residuals and manifest before writing.
+An empty selection or a repeat/side request is a readable error; no points are
+silently omitted. The output includes `execution-order.csv`, the full original
+analysis, entry instructions, an inspectable `.followup.txt` and the typed
+`top-followup.ngc`. The program is published last. Its explicit execution order
+is the selected priority order, with the existing return to original clearance
+between columns. No additional path optimization is applied.
+
+Use **Reload operations** in an already-open Object Mapper to obtain the new
+catalog. Review the source probe/stock reference, required starting coordinates,
+work offset and every transfer at the original clearance plane. Export does not
+load, position or run the machine. After that review, use standard AXIS File
+Open and Run. The generated file declares motion, digital output, coordinate
+state and external-command effects, the existing all-homed prerequisites and
+Abort recovery. X increasing is physical LEFT / LinuxCNC +X; decreasing is
+physical RIGHT / LinuxCNC -X.
+
+The export materializes the shared `mapper-run.ngc` subroutine definition,
+renaming its local subroutine identity and omitting only its standalone file
+terminator. There is one executor implementation. This keeps M190 P12 in the
+exported file: LinuxCNC 2.9.10's `emcTaskUpdate` obtains `task.file` from the
+interpreter's **current** filename, which changes inside external subroutines
+(`emctask.cc`, `rs274ngc_pre.cc::file_name`, `interp_o_word.cc`). The native
+binding reads status only. Program regeneration compares the entire body,
+including its encoded plan bytes and shared template. The normal loader also
+binds the program revision at File Open/Run. No mutable current-plan flag exists.
+
+Mapper mode `TopFollowup` retains the original plate/feed snapshots, start
+fields and explicit work-XY columns. Before a target is published, the fresh
+start fields must match the source using the existing decimal-serialization
+comparison. This is not a mechanical alignment tolerance. The shared original
+floor, feeds, double-touch, capture/readback and withdrawal remain in use.
+Complete fresh cycles must agree with their planned rows, directions and feeds;
+a final result must contain the requested number of cycles. Coarse misses have
+no invented trigger or surface height.
+
+Import the fresh ledger with its `.plate.txt`, `.feeds.txt` and `.followup.txt`
+companions under a new capture ID in the original object/setup. Capture storage
+V3 retains the follow-up bytes; historical V1/V2 encoding and context JSON stay
+unchanged when that companion is absent. Missing plans, mismatched settings,
+wrong rows and unfinished cycles receive `followup-context-invalid` quarantine
+with the actual diagnosis. Their original bytes remain exportable and valid
+captures remain available to normal preparation. Fresh top fine contacts are
+`fit` rows; existing independent check roles remain unchanged. Calculate a new
+stock surface and material assessment before selecting further observations.
+
+Both standard binaries are built and installed. The installed synthetic file
+workflow exported four columns, retained three fine contacts and one coarse
+miss, preserved all 36 analysis source files and the fresh ledger/companions
+through surface and FreeCAD export, and reached a new material assessment and
+next spatial-request template. Missing-plan, changed-start and interrupted
+captures retained separate quarantine diagnoses while preparation still selected
+valid rows. Empty and wrong-request exports created no directory. Readback:
+`/home/kit/cnc-backups/mapper-followup-ync_w2m4/round-trip-readback.json`.
+These are file and numerical results, not physical acquisition or recovery
+proof. The session was not restarted or moved. Read-only UI inspection reported
+both recovery buttons `normal` and no modal grab.
+
 ## Recorded TODOs — 2026-09-14
 
 This is the continuing implementation list for the positional mapper and
@@ -1062,6 +1130,16 @@ supported. Source implementation, installation, numerical results and physical
 acceptance are separate milestones. Recording a task does not authorize a
 machine run.
 
+- [ ] **Run material-directed follow-ups through the normal UI.** The top
+  program export, shared executor, fresh-plan capture binding, import and
+  surface/material continuation are implemented and installed; see the runbook
+  above. Physical entry, acquisition and recovery observation remain open.
+  Repeat/side plans still need explicit entry/recovery geometry and execution;
+  no unsupported requests are silently narrowed to top points. Further spatial
+  selection must pool compatible acquisition histories so choosing a recent
+  capture does not reselect columns recorded in an earlier capture. Independent
+  follow-up check acquisition, multiheight sides and unseen volume remain parts
+  of the whole stock-to-CAM workflow.
 - [ ] **Acquire automatic top coverage for irregular stock.** The production
   Rust planner and Scripts catalog now provide Automatic top map, sharing the
   existing mapper executor, original trigger capture, feeds and recovery. It

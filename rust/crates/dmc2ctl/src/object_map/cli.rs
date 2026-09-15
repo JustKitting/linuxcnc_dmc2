@@ -133,6 +133,9 @@ pub fn run(args: &[OsString], default_store: &Path) -> Result<String, Error> {
         PlanObservations => {
             positional::stock::observation::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3))
         }
+        ExportTopObservations => positional::stock::observation::spatial::export::run(
+            &store, &id(0)?, &id(1)?, &id(2)?, path(3),
+        ),
         PrepareStockMesh => {
             positional::stock::reconstruction::prepare(&store, &id(0)?, &id(1)?, &id(2)?)
         }

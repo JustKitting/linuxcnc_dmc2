@@ -3,7 +3,7 @@ use super::*;
 fn bundle_preserves_absent_empty_and_non_utf8_companions_without_repair() {
     let id = Id::parse("fixture").unwrap();
     let context = Context {
-        parts: [Some(Vec::new()), Some(vec![0, 255, 10]), None],
+        parts: [Some(Vec::new()), Some(vec![0, 255, 10]), None, None],
     };
     let raw = b"original\nledger\n";
     let bytes = encode(&id, "/synthetic/source", raw, &context).unwrap();

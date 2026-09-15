@@ -17,7 +17,7 @@ pub struct TopColumn {
 }
 impl TopColumn {
     pub fn new(s: &Settings, xy: [f64; 2]) -> Result<Self, String> {
-        if !matches!(s.mode, Mode::Surface | Mode::FreeSurface) {
+        if !matches!(s.mode, Mode::Surface | Mode::FreeSurface | Mode::TopFollowup) {
             return Err("New top columns need a retained Surface or Automatic top map run. Select that capture; a side-trace approach cannot supply a top entry path.".into());
         }
         let request = Request::top(s, Phase::Grid, xy);
