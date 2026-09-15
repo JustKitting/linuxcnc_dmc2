@@ -1361,6 +1361,75 @@ multiheight access, unseen volume and physical acceptance remain open. This
 extension connects existing repeat selection to acquisition and retained stock
 analysis; it does not establish CAM readiness or close the whole workflow.
 
+## Required geometry against no-contact sweeps
+
+**Prepare material check** now creates `DMC2_MATERIAL_CHECK_REQUEST_V2`.
+**Check candidate material** compares the unchanged required geometry against
+both supported local surfaces and the finite no-contact sweeps retained by the
+selected surface analysis. A required fragment crossing recorded clear travel
+receives an explicit overlap state even where no local surface patch exists.
+The stock still need not be a rectangle, quadrilateral or an exact CAD shape.
+
+The added `max_no_contact_comparisons` field is a positive computation budget
+for every retained sweep multiplied by every required triangle fragment. Missing
+or insufficient budgets produce a named diagnostic before an analysis directory
+is published. The source surface must declare its no-contact probe/error model;
+no physical allowance is filled from live configuration. Historical V1 requests
+retain their previous calculation and report bytes and remain editable through
+the standard request-loading path.
+
+Each cover now retains its actual triangle vertices. The candidate transform is
+applied to those vertices, and the shared geometry calculation measures the
+distance between that fragment and the finite retained probe-centre segment.
+Signed separation is this distance minus the already eroded ball radius from
+the source surface. Negative separation means an intersection under that
+declared model; zero is the model boundary. A cover ball intersecting a sweep
+does not by itself mark the required triangle as intersecting. No miss endpoint
+is promoted to a trigger, and no segment is extended beyond its reported travel.
+
+The V2 material report retains the transformed fragment, original sweep identity,
+reported/requested endpoints, probe-centre path, eroded radius, separation and
+existing contact/model conflicts. Region states distinguish
+`required-geometry-no-contact-overlap` and
+`required-geometry-no-contact-boundary`. Contact/no-contact conflicts and
+independent-check disagreement retain priority and their source evidence.
+All contributing overlaps remain in the report even when another state takes
+priority. The CSV carries matching miss-source columns, and measurement needs
+retain the source references. Absence of an intersection establishes neither
+material presence nor a filled solid; unseen interior cavities and the rest of
+the stock volume remain unknown. This is a required-surface intersection check,
+not a complete occupied-volume model or a placement acceptance criterion.
+
+The standard Rust command binary is built and installed. In the retained
+numerical examples, the existing gap sweep changed 11 formerly unsupported
+regions to explicit overlap. Adding the separate miss-only capture identified
+25 regions with 29 retained overlap pairs. The conflicted source retained all
+64 earlier conflict regions and added 176 intersecting regions as conflicts,
+with no empty-space acceptance. The independent-check example retained its
+258 disagreement regions. These are file/numerical observations, not physical
+stock measurements or machine-behavior evidence.
+
+Normal repeat and spatial planning reproduced the V2 assessment and preserved
+the overlap regions as unresolved. Those regions were not converted into new
+top-fit or repeat-check proposals. The FreeCAD scene retained its existing
+outer format and copied all 37 material and 23 stock files exactly, including
+the new report and unchanged required geometry. Scene export still declares
+that it binds retained material reports rather than rerunning that calculation;
+the dependent observation operations perform the calculation replay. All 1,600
+files from the copied historical store remained unchanged. Both material
+request versions loaded with exact request bytes, and missing-model/budget
+requests left no analysis directory. Readbacks are in
+`/home/kit/cnc-backups/mapper-empty-material-_2t51kck/`:
+`installation.json`, `material-readback.json`, `geometry-readback.json` and
+`continuation-readback.json`.
+
+The library run reported 74 passes, without establishing physical behavior.
+Read-only UI inspection reported Clear Fault and Pendant Mode as `normal`,
+with no modal grab. The offline mapper still returns before machine-control
+initialization and introduces no gate on either recovery control. No machine
+command or restart was issued. Physical error-model acceptance, occupied-volume
+coverage, placement acceptance and the native CAM Job remain outstanding.
+
 ## Recorded TODOs — 2026-09-14
 
 This is the continuing implementation list for the positional mapper and
@@ -1415,6 +1484,17 @@ machine run.
   selection is now in the standard Object Mapper path; see the spatial-observation
   runbook above. The top acquisition and these
   constraints remain parts of the full workflow, not physical acceptance.
+- [ ] **Use no-contact evidence in whole-stock material decisions.** Required
+  surface fragments now compare directly against retained finite sweeps through
+  the standard material operation, with explicit overlap/boundary/conflict
+  states and source retention through follow-up planning and the FreeCAD scene;
+  see [Required geometry against no-contact sweeps](#required-geometry-against-no-contact-sweeps).
+  Still needed: a supported occupied-volume model joining top, side and base
+  evidence, including creases and inaccessible regions; distinguish a sweep
+  wholly inside required material from one outside it; use these constraints
+  in placement search without deforming the required machining geometry.
+  Absence of a surface intersection must not be used as material acceptance.
+  Physical probe/error-model and setup-registration acceptance remain open.
 - [ ] **Exponential edge bracketing, then binary refinement.** Source and
   standard capture binary now use versioned policy V4 for new runs: **1 mm,
   2 mm, 4 mm, …** offsets from the initial top sample, in physical RIGHT /

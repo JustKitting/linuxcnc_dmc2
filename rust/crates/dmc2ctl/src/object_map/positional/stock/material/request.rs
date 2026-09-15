@@ -1,6 +1,7 @@
 use super::super::super::{request::scalar, Error};
 use crate::object_map::{model::Id, record};
-pub const SCHEMA: &str = "DMC2_MATERIAL_CHECK_REQUEST_V1";
+pub const LEGACY_SCHEMA: &str = "DMC2_MATERIAL_CHECK_REQUEST_V1";
+pub const SCHEMA: &str = "DMC2_MATERIAL_CHECK_REQUEST_V2";
 pub const KEYS: &[&str] = &[
     "candidate_analysis",
     "surface_analysis",
@@ -11,7 +12,27 @@ pub const KEYS: &[&str] = &[
     "max_cover_samples",
     "max_patch_comparisons",
 ];
+pub fn keys() -> Vec<&'static str> {
+    KEYS.iter()
+        .copied()
+        .chain(["max_no_contact_comparisons"])
+        .collect()
+}
+#[derive(Clone, Copy)]
+pub enum EmptySpace {
+    Legacy,
+    RetainedSweeps { comparisons: usize },
+}
+impl EmptySpace {
+    pub fn version(self) -> &'static str {
+        match self {
+            Self::Legacy => "v1",
+            Self::RetainedSweeps { .. } => "v2",
+        }
+    }
+}
 pub struct Request {
+    pub empty: EmptySpace,
     pub candidate: Id,
     pub surface: Id,
     pub clearance: f64,
@@ -23,7 +44,12 @@ pub struct Request {
 }
 impl Request {
     pub fn read(raw: &[u8]) -> Result<Self, Error> {
-        let (f, payload) = record::decode(raw, SCHEMA, KEYS)?;
+        let legacy = raw.starts_with(format!("{LEGACY_SCHEMA}\n").as_bytes());
+        let (f, payload) = if legacy {
+            record::decode(raw, LEGACY_SCHEMA, KEYS)?
+        } else {
+            record::decode(raw, SCHEMA, &keys())?
+        };
         if !payload.is_empty() {
             return Err(Error::Input("Material checks use retained source analyses. Remove the extra payload; edit contact roles in a new source-surface analysis.".into()));
         }
@@ -38,6 +64,9 @@ impl Request {
             Ok(v)
         };
         Ok(Self {
+            empty: if legacy { EmptySpace::Legacy } else { EmptySpace::RetainedSweeps {
+                comparisons: f["max_no_contact_comparisons"].parse::<usize>().ok().filter(|n| *n > 0).ok_or_else(|| Error::Input("max_no_contact_comparisons requires a positive computational budget for every retained sweep and required triangle fragment. Edit this request; no pairs will be omitted.".into()))?,
+            } },
             candidate: Id::parse(&f["candidate_analysis"])?, surface: Id::parse(&f["surface_analysis"])?,
             clearance: value("required_clearance_mm", false)?, allowance: value("surface_allowance_mm", false)?,
             band: value("normal_band_mm", true)?, radius: value("cover_radius_mm", true)?,

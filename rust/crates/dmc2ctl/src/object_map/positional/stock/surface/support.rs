@@ -16,8 +16,8 @@ pub struct Support {
 }
 pub struct Conflict {
     pub contact: usize,
-    miss: usize,
-    surface: V,
+    pub miss: usize,
+    pub surface: V,
 }
 impl Support {
     pub fn new(

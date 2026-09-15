@@ -7,7 +7,7 @@ pub(in crate::object_map) mod request;
 pub(super) mod support;
 #[cfg(test)]
 mod tests;
-use super::super::{Error, geometry, probe::Sample};
+use super::super::{geometry, probe::Sample, Error};
 use super::fit::Stop;
 use geometry::V;
 pub struct Patch {
@@ -75,6 +75,7 @@ pub struct Loaded {
     pub request: request::Request,
     pub contacts: Vec<Sample>,
     pub stations: Vec<Station>,
+    pub no_contact: Vec<no_contact::Sweep>,
 }
 pub fn load(
     store: &crate::object_map::store::Store,
@@ -116,5 +117,6 @@ pub fn load(
         request,
         contacts,
         stations,
+        no_contact: misses,
     })
 }

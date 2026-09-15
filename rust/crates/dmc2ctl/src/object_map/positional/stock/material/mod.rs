@@ -1,4 +1,5 @@
 //! Candidate-directed local material assessment, outside the control process.
+mod empty;
 pub(super) mod query;
 mod report;
 pub(in crate::object_map) mod request;
@@ -7,10 +8,10 @@ mod tests;
 use super::super::{cover, retained::Bundle};
 use super::{candidate::Candidate, surface};
 use crate::object_map::{
-    Error,
     model::Id,
     record,
-    store::{Store, read, save},
+    store::{read, save, Store},
+    Error,
 };
 use std::path::Path;
 
@@ -39,6 +40,7 @@ fn assess(store: &Store, object: &Id, setup: &Id, raw: &[u8]) -> Result<Assessme
         &surface.request,
         candidate.pose,
         &request,
+        &surface.no_contact,
     )?;
     Ok(Assessment {
         request,
@@ -56,11 +58,13 @@ fn report(a: &Assessment) -> Result<report::Report, Error> {
         a.candidate.mesh.triangles(),
         a.candidate.pose,
         &a.request,
+        &a.surface.no_contact,
     )
 }
 fn manifest(object: &Id, setup: &Id, id: &Id, a: &Assessment, json: &str) -> String {
     format!(
-        "{{\"schema\":\"dmc2.material-check-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"candidate_analysis\":{},\"surface_analysis\":{},\"result\":{},\"cam_ready\":false}}\n",
+        "{{\"schema\":\"dmc2.material-check-bundle.{}\",\"object\":{},\"setup\":{},\"analysis\":{},\"candidate_analysis\":{},\"surface_analysis\":{},\"result\":{},\"cam_ready\":false}}\n",
+        a.request.empty.version(),
         record::quote(object.as_str()),
         record::quote(setup.as_str()),
         record::quote(id.as_str()),
@@ -96,7 +100,8 @@ pub(super) fn load(
 
 pub fn prepare(store: &Store, object: &Id, setup: &Id, candidate: &Id) -> Result<String, Error> {
     Candidate::load(store, object, setup, candidate)?;
-    let fields = request::KEYS
+    let keys = request::keys();
+    let fields = keys
         .iter()
         .map(|k| {
             (

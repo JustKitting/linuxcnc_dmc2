@@ -51,6 +51,7 @@ fn contact(sequence: usize, p: V, usage: Use) -> Sample {
 }
 fn settings() -> request::Request {
     request::Request {
+        empty: request::EmptySpace::Legacy,
         candidate: Id::parse("synthetic").unwrap(),
         surface: Id::parse("surface").unwrap(),
         clearance: 0.25,
@@ -64,6 +65,7 @@ fn settings() -> request::Request {
 fn region(p: V) -> cover::Sample {
     cover::Sample {
         triangle: 0,
+        vertices: [p; 3],
         center: p,
         radius: 0.25,
     }
@@ -81,6 +83,7 @@ fn assess(points: &[cover::Sample], check: Option<f64>) -> Vec<query::Region> {
             t: [0.; 3],
         },
         &settings(),
+        &[],
     )
     .unwrap()
 }
@@ -115,6 +118,7 @@ fn local_shortage_and_inwardness_do_not_become_a_solid() {
             t: [0.; 3],
         },
         &settings(),
+        &[],
     )
     .unwrap();
     assert!(report.json.contains("\"solid_stock\":null"));
@@ -171,6 +175,7 @@ fn rigid_frame_change_preserves_local_distances() {
         &sr,
         pose,
         &settings(),
+        &[],
     )
     .unwrap();
     assert_eq!(result[0].state, query::State::LocallyInward);
@@ -209,6 +214,7 @@ fn comparison_budget_cannot_drop_regions() {
             t: [0.; 3],
         },
         &r,
+        &[],
     )
     .err()
     .unwrap();

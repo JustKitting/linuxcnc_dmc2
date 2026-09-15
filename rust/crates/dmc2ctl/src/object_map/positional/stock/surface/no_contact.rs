@@ -9,11 +9,11 @@ use super::{
 };
 use crate::object_map::positional::{mesh::Triangle, probe::Sample};
 use crate::object_map::{
-    Error,
     capture_selection::{Entry, Use},
     model::Id,
     record::quote,
     store::CaptureSnapshot,
+    Error,
 };
 
 pub enum Issue {
@@ -89,6 +89,10 @@ impl Sweep {
             geometry::segment_triangle(self.center_from, self.center_end, triangle),
             self.radius,
         )
+    }
+    pub fn triangle_distance(&self, triangle: Triangle) -> Result<f64, Error> {
+        geometry::segment_triangle(self.center_from, self.center_end, triangle)
+            .ok_or_else(|| Error::Data(format!("No-contact distance for {}:{} cannot be evaluated with finite arithmetic. Inspect the retained geometry and coordinate units before reassessing; no empty region was inferred.",self.capture.as_str(),self.sequence)))
     }
 }
 

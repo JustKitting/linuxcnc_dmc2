@@ -1,5 +1,5 @@
 use super::super::super::{cover, geometry::*, probe::Sample, Error};
-use super::{request::Request, surface};
+use super::{empty, request::Request, surface};
 pub(super) use surface::local::Checks;
 use surface::Station;
 
@@ -9,6 +9,8 @@ pub enum State {
     Unchecked,
     CheckConflict,
     NoContactConflict,
+    EmptyOverlap,
+    EmptyBoundary,
     Shortage,
     BoundaryBand,
     LocallyInward,
@@ -20,6 +22,8 @@ impl State {
             Self::Unchecked => ("independent-support-check-missing", "Retain independent contacts checking these local patches before relying on their material comparison."),
             Self::CheckConflict => ("independent-support-check-disagreement", "Resolve the retained independent check disagreement before using these local material comparisons; no failing contact was removed."),
             Self::NoContactConflict => surface::no_contact::Issue::Conflict.description(),
+            Self::EmptyOverlap => ("required-geometry-no-contact-overlap", "An actual required triangle fragment intersects retained clear travel under the declared eroded-probe model. Review the original miss, setup/probe reference and required geometry before changing placement; nearby top contacts cannot fill this recorded gap."),
+            Self::EmptyBoundary => ("required-geometry-no-contact-boundary", "An actual required triangle fragment touches the boundary of a retained eroded-probe sweep. Resolve this model boundary using the retained uncertainty and geometry; no positive material coverage or penetration was inferred."),
             Self::Shortage => ("local-clearance-shortage", "The required geometry lacks requested clearance under a checked local plane model. Inspect the source contacts and independent remeasurement before changing the candidate placement."),
             Self::BoundaryBand => ("local-clearance-bound-unresolved", "The cover/allowance interval crosses the requested clearance. Refine computational coverage or the measured surface allowance using evidence, then reassess."),
             Self::LocallyInward => ("locally-inward-only", "This region meets local checked-plane clearance. Closed boundary coverage, enclosed material and cavities remain unresolved; do not treat local inwardness as a solid."),
@@ -39,6 +43,7 @@ pub struct Comparison {
 pub struct Region {
     pub state: State,
     pub comparisons: Vec<Comparison>,
+    pub no_contact: Vec<empty::Overlap>,
 }
 pub fn run(
     cover: &[cover::Sample],
@@ -47,6 +52,7 @@ pub fn run(
     sr: &surface::request::Request,
     pose: Pose,
     r: &Request,
+    misses: &[surface::no_contact::Sweep],
 ) -> Result<Vec<Region>, Error> {
     let required = stations
         .len()
@@ -55,8 +61,9 @@ pub fn run(
         return Err(Error::Input("max_patch_comparisons cannot cover every selected patch, check and triangle region. Increase this computational budget or refine the explicitly selected source analyses; no region was dropped.".into()));
     }
     let local = surface::local::build(samples, stations, sr)?;
+    let empty = empty::run(cover, &local, misses, sr, pose, r.empty)?;
     let mut result = Vec::with_capacity(cover.len());
-    for sample in cover {
+    for (sample, no_contact) in cover.iter().zip(empty) {
         let p = pose.point(sample.center);
         if !finite(p) {
             return Err(Error::Data("Candidate coordinates overflowed during material comparison. Inspect units and the retained pose.".into()));
@@ -99,15 +106,20 @@ pub fn run(
             .iter()
             .filter(|c| c.checks == Checks::Within)
             .collect::<Vec<_>>();
-        let state = if comparisons.is_empty() {
-            State::Unsupported
-        } else if comparisons
+        let state = if comparisons
             .iter()
             .any(|c| c.checks == Checks::NoContactConflict)
+            || no_contact.iter().any(|o| !o.source.conflicts.is_empty())
         {
             State::NoContactConflict
         } else if comparisons.iter().any(|c| c.checks == Checks::Disagrees) {
             State::CheckConflict
+        } else if no_contact.iter().any(|o| o.separation < 0.) {
+            State::EmptyOverlap
+        } else if !no_contact.is_empty() {
+            State::EmptyBoundary
+        } else if comparisons.is_empty() {
+            State::Unsupported
         } else if checked.is_empty() {
             State::Unchecked
         } else if checked.iter().any(|c| c.upper < r.clearance) {
@@ -117,7 +129,11 @@ pub fn run(
         } else {
             State::LocallyInward
         };
-        result.push(Region { state, comparisons });
+        result.push(Region {
+            state,
+            comparisons,
+            no_contact,
+        });
     }
     Ok(result)
 }

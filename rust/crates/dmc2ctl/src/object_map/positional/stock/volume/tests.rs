@@ -80,6 +80,7 @@ fn bounds_cover_coupled_translation_and_rotation() {
     let solid = Solid::new(&stock, 288).unwrap();
     let samples = [cover::Sample {
         triangle: 0,
+        vertices: [[1., 2., 3.]; 3],
         center: [1., 2., 3.],
         radius: 0.1,
     }];
@@ -123,11 +124,9 @@ fn failed_clearance_keeps_best_bound_and_does_not_enlarge_domain() {
     assert!(f.clearance < 0.);
     assert!(f.upper >= f.clearance);
     r.winding_terms = 1;
-    assert!(
-        search::run(&solid, &cover, &r)
-            .err()
-            .unwrap()
-            .to_string()
-            .contains("max_winding_terms")
-    );
+    assert!(search::run(&solid, &cover, &r)
+        .err()
+        .unwrap()
+        .to_string()
+        .contains("max_winding_terms"));
 }

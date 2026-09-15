@@ -2,6 +2,7 @@
 use super::{geometry::*, mesh::Triangle, Error};
 pub struct Sample {
     pub triangle: usize,
+    pub vertices: [V; 3],
     pub center: V,
     pub radius: f64,
 }
@@ -47,6 +48,7 @@ pub fn build(
             if extent <= radius {
                 result.push(Sample {
                     triangle,
+                    vertices: v,
                     center,
                     radius: extent,
                 });
