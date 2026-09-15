@@ -10,6 +10,13 @@ impl Plan {
         let encoded = self.encode()?;
         let s = self.settings()?;
         let mut out = String::from("%\n(DMC2 SCRIPT 1)\n(DMC2 EFFECTS axis-motion;digital-output;coordinate-state;external-command)\n(DMC2 REQUIRES running-session;estop-clear;machine-on;interpreter-idle;all-homed)\n(DMC2 RECOVERY abort-task)\n(DMC2 END)\n(Top follow-up: fresh columns in the explicit order below.)\n(Review the same stock, probe and frame, plus every transfer at original clearance.)\n(No positioning move to the start is supplied. Abort then Pendant Mode remains available.)\n(Physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)\n");
+        if let Some(role) = self.role {
+            out.push_str(&format!(
+                "(Fresh fine contact role: {}. {})\n",
+                role.name(),
+                role.description()
+            ));
+        }
         out.push_str(&format!(
             "(Required starting work XYZ mm: {:?}; work-to-machine translation mm: {:?})\n",
             s.origin, s.offset

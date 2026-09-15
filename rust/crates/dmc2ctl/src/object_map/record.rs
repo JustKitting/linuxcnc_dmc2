@@ -69,7 +69,15 @@ pub fn decode<'a>(
         }
     }
     if fields.len() != keys.len() {
-        return Err(Error::Data("Object metadata fields are missing.".into()));
+        let missing = keys
+            .iter()
+            .copied()
+            .filter(|key| !fields.contains_key(*key))
+            .collect::<Vec<_>>()
+            .join(", ");
+        return Err(Error::Data(format!(
+            "{schema} is missing required fields: {missing}. Restore these fields from the original record or fill the prepared request, then retry."
+        )));
     }
     Ok((fields, &bytes[boundary + 2..]))
 }

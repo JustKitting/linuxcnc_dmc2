@@ -63,20 +63,28 @@ pub fn prepare_surface(store: &Store, object: &Id, setup: &Id) -> Result<String,
         if c.capture.state == CaptureState::Quarantined {
             continue;
         }
+        let role = c
+            .context
+            .followup_plan(&c.capture)
+            .map_err(Error::Data)?
+            .and_then(|p| p.role);
         for p in c.capture.contacts.iter().filter(|p| p.stage == Stage::Fine) {
-            let independent = if c.capture.workflow == Workflow::Mapper {
-                let phase = Phase::read(
-                    number(&c.capture.records[p.sequence], "phase").map_err(Error::Data)?,
-                )
-                .map_err(Error::Data)?;
-                phase == Phase::OutlineClose
-                    || (phase == Phase::Verify
-                        && Mode::read(number(&c.capture.records[0], "mode").map_err(Error::Data)?)
+            let independent = role == Some(crate::probe_data::top_followup::Role::Check)
+                || if c.capture.workflow == Workflow::Mapper {
+                    let phase = Phase::read(
+                        number(&c.capture.records[p.sequence], "phase").map_err(Error::Data)?,
+                    )
+                    .map_err(Error::Data)?;
+                    phase == Phase::OutlineClose
+                        || (phase == Phase::Verify
+                            && Mode::read(
+                                number(&c.capture.records[0], "mode").map_err(Error::Data)?,
+                            )
                             .map_err(Error::Data)?
-                            == Mode::FreeSurface)
-            } else {
-                false
-            };
+                                == Mode::FreeSurface)
+                } else {
+                    false
+                };
             rows.push_str(&format!(
                 "{},{},{}\n",
                 c.id.as_str(),
@@ -86,7 +94,9 @@ pub fn prepare_surface(store: &Store, object: &Id, setup: &Id) -> Result<String,
         }
     }
     rows.push('\n');
-    rows.push_str(&crate::object_map::capture_selection::encode(&surface::no_contact::prepare(&captures)));
+    rows.push_str(&crate::object_map::capture_selection::encode(
+        &surface::no_contact::prepare(&captures),
+    ));
     template(Model::Surface, &rows)
 }
 
@@ -169,7 +179,11 @@ pub fn run(
             let samples = req.probe.samples(&captures, &req.selected)?;
             let misses = surface::no_contact::read(&captures, &samples, &req)?;
             let report = surface::build(&samples, &req, &misses)?;
-            (samples, report, misses.into_iter().map(|m| m.capture).collect::<Vec<_>>())
+            (
+                samples,
+                report,
+                misses.into_iter().map(|m| m.capture).collect::<Vec<_>>(),
+            )
         }
     };
     let used = samples

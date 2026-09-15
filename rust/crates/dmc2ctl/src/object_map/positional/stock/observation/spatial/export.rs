@@ -2,11 +2,11 @@
 use super::{material, report, request, select, source};
 use crate::{
     object_map::{
-        Error,
         model::Id,
         positional::retained::Bundle,
         record,
-        store::{Store, save},
+        store::{save, Store},
+        Error,
     },
     probe_data::top_followup::Plan,
 };
@@ -52,6 +52,7 @@ pub fn run(
             .map_err(|e| Error::Data(format!("Original {name} snapshot is not UTF-8: {e}.")))
     };
     let plan = Plan {
+        role: r.role,
         source: [
             object.as_str().into(),
             setup.as_str().into(),
@@ -71,18 +72,28 @@ pub fn run(
     let program = plan.program().map_err(Error::Data)?;
     Plan::from_program(&program).map_err(Error::Data)?;
     let s = plan.settings().map_err(Error::Data)?;
-    let mut rows = String::from(
-        "row,spatial_cell,work_x_mm,work_y_mm,clear_work_z_mm,floor_work_z_mm,downward_feed_mm_min,fine_feed_mm_min,travel_feed_mm_min\n",
-    );
+    let role_header = if plan.role.is_some() {
+        ",contact_role"
+    } else {
+        ""
+    };
+    let role_value = plan
+        .role
+        .map(|r| format!(",{}", r.name()))
+        .unwrap_or_default();
+    let mut rows = format!("row,spatial_cell,work_x_mm,work_y_mm,clear_work_z_mm,floor_work_z_mm,downward_feed_mm_min,fine_feed_mm_min,travel_feed_mm_min{role_header}\n");
     for (row, &cell) in selection.chosen.iter().enumerate() {
         let xy = plan.points[row];
         rows.push_str(&format!(
-            "{row},{cell},{},{},{},{},{},{},{}\n",
+            "{row},{cell},{},{},{},{},{},{},{}{role_value}\n",
             xy[0], xy[1], s.origin[2], s.floor, s.downward_feed, s.feeds[1], s.feeds[2]
         ));
     }
+    let contact_instructions = plan.role.map(|r| r.description()).unwrap_or(
+        "Fresh top contacts supply fit rows; prior withheld check roles remain unchanged.",
+    );
     let instructions = format!(
-        "Top follow-up from object {}, setup {}, analysis {}.\n\nReview the original stock/probe reference and clear transfer plane for this placement. Required starting work XYZ mm: {:?}. Work-to-machine translation mm: {:?}. The program checks retained numerical starting fields before publishing a target; these numbers do not establish physical alignment. No entry-positioning move is supplied. Each selected column transfers at original clearance, dips to the original floor, double-touches on coarse contact, records original fine trigger coordinates and withdraws using mapper-run. A coarse miss has no assigned surface height.\n\nThe explicit execution order is execution-order.csv, matching the analysis priority order. No path optimization or additional points are inserted. X increasing: physical LEFT / LinuxCNC +X; decreasing: physical RIGHT / LinuxCNC -X.\n\nAfter review, use AXIS File Open on top-followup.ngc and the normal Run control. Exporting does not load or run it. The exact plan is embedded in that program and is copied with its plate/feed snapshots beside the fresh tmp/output/mapper ledger. A separate .followup.txt is retained here for inspection; editing it does not change the executable program.\n\nImport the fresh ledger with companions into this object/setup under a new capture ID, then Prepare 3D stock surfaces. Fresh top contacts supply fit rows; prior withheld check roles remain unchanged. Calculate a new surface/material assessment to select further evidence. Side, underside and unmeasured volume remain unresolved.\n\nAbort, Clear Fault and Pendant Mode remain the standard recovery controls. An interrupted cycle or mismatched plan/frame cannot supply follow-up material evidence. Preserve its ledger and diagnosis before another operator-run acquisition.\n",
+        "Top follow-up from object {}, setup {}, analysis {}.\n\nReview the original stock/probe reference and clear transfer plane for this placement. Required starting work XYZ mm: {:?}. Work-to-machine translation mm: {:?}. The program checks retained numerical starting fields before publishing a target; these numbers do not establish physical alignment. No entry-positioning move is supplied. Each selected column transfers at original clearance, dips to the original floor, double-touches on coarse contact, records original fine trigger coordinates and withdraws using mapper-run. A coarse miss has no assigned surface height.\n\nThe explicit execution order is execution-order.csv, matching the analysis priority order. No path optimization or additional points are inserted. X increasing: physical LEFT / LinuxCNC +X; decreasing: physical RIGHT / LinuxCNC -X.\n\nAfter review, use AXIS File Open on top-followup.ngc and the normal Run control. Exporting does not load or run it. The exact plan is embedded in that program and is copied with its plate/feed snapshots beside the fresh tmp/output/mapper ledger. A separate .followup.txt is retained here for inspection; editing it does not change the executable program.\n\nImport the fresh ledger with companions into this object/setup under a new capture ID, then Prepare 3D stock surfaces. {contact_instructions} Calculate a new surface/material assessment to select further evidence. Side, underside and unmeasured volume remain unresolved.\n\nAbort, Clear Fault and Pendant Mode remain the standard recovery controls. An interrupted cycle or mismatched plan/frame cannot supply follow-up material evidence. Preserve its ledger and diagnosis before another operator-run acquisition.\n",
         object.as_str(),
         setup.as_str(),
         id.as_str(),

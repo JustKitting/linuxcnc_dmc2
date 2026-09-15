@@ -28,6 +28,7 @@ fn plan() -> Plan {
         ("max_feed", 1800.0),
     ];
     Plan {
+        role: None,
         source: ["example","setup","analysis","capture"].map(String::from),
         start: fields.into_iter().map(|(k,v)|(k.into(),v.to_string())).collect(),
         plate: "DMC2_PLATE_ENVELOPE_V1\nx_min=23\nx_max=27\ny_min=26\ny_max=30\nball_diameter=2\n".into(),

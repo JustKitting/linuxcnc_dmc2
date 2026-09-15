@@ -132,7 +132,7 @@ pub const OPERATIONS: &[Spec] = &[
         operation: Op::PrepareSpatialObservations,
         name: "prepare-spatial-observations",
         label: "Prepare new top samples",
-        description: "Select a material assessment and its retained top capture. Set sampling spacing and computation/observation budgets to investigate unsupported regions within that run's original envelope.",
+        description: "Select a material assessment and its retained top capture. Choose contact_role=fit for missing coverage or check for regions lacking independent support checks. Set spacing and computation/observation budgets. Fresh check contacts remain withheld in surface preparation; original acquisition bounds and feeds stay retained.",
         fields: &[Object, Setup, MaterialAnalysis, SourceCapture],
     },
     Spec {

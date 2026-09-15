@@ -1,12 +1,12 @@
 use super::super::material::{self, query::State};
 use super::{
-    Source,
     grid::{Budget, Grid, Key},
-    request::Request,
+    request::{Request, Role},
     source::Recorded,
+    Source,
 };
 use crate::{
-    object_map::{Error, positional::geometry::finite},
+    object_map::{positional::geometry::finite, Error},
     probe_data::mapper_trace::observation::TopColumn,
 };
 use std::collections::{BTreeMap, BTreeSet};
@@ -17,6 +17,33 @@ pub struct Cell {
     pub regions: BTreeSet<usize>,
     pub originals: Vec<Recorded>,
     pub nearest_request_mm: f64,
+    pub checks: Vec<super::check::Prediction>,
+}
+#[derive(Clone, Copy, PartialEq, Eq)]
+pub enum Eligibility {
+    New,
+    Searched,
+    UnsupportedCheck,
+}
+impl Eligibility {
+    pub fn name(self) -> &'static str {
+        match self {
+            Self::New => "new-top-column-proposal",
+            Self::Searched => "existing-column-retained-not-selected",
+            Self::UnsupportedCheck => "no-supported-top-check-intersection",
+        }
+    }
+}
+impl Cell {
+    pub fn eligibility(&self, role: Option<Role>) -> Eligibility {
+        if !self.originals.is_empty() {
+            Eligibility::Searched
+        } else if role == Some(Role::Check) && self.checks.is_empty() {
+            Eligibility::UnsupportedCheck
+        } else {
+            Eligibility::New
+        }
+    }
 }
 pub struct Projection {
     pub center: [f64; 3],
@@ -36,10 +63,29 @@ pub fn run(a: &material::Assessment, source: &Source, r: &Request) -> Result<Sel
     let s = &source.settings;
     let grid = Grid::new(s, r.spacing)?;
     let mut budget = Budget::new(r.comparisons);
+    let locals = if r.role == Some(Role::Check) {
+        budget.take(
+            a.surface
+                .stations
+                .len()
+                .checked_mul(a.surface.contacts.len()),
+        )?;
+        Some(super::super::super::surface::local::build(
+            &a.surface.contacts,
+            &a.surface.stations,
+            &a.surface.request,
+        )?)
+    } else {
+        None
+    };
     let mut grouped: BTreeMap<Key, BTreeSet<usize>> = BTreeMap::new();
     let mut projections = BTreeMap::new();
     for (i, (cover, region)) in a.covers.iter().zip(&a.regions).enumerate() {
-        if region.state != State::Unsupported {
+        let needed = match r.role.unwrap_or(Role::Fit) {
+            Role::Fit => State::Unsupported,
+            Role::Check => State::Unchecked,
+        };
+        if region.state != needed {
             continue;
         }
         let center = a.candidate.pose.point(cover.center);
@@ -106,6 +152,11 @@ pub fn run(a: &material::Assessment, source: &Source, r: &Request) -> Result<Sel
             }
         }
         let id = cells.len();
+        let checks = if let Some(locals) = &locals {
+            super::check::at(a, s, locals, &regions, xy, &mut budget)?
+        } else {
+            Vec::new()
+        };
         for region in &regions {
             let p = projections.get_mut(region).ok_or_else(|| Error::Data("A spatial cell lost its source region during selection. Preserve the material analysis and retry under a new analysis ID; no incomplete plan was published.".into()))?;
             p.cells.push(id);
@@ -116,12 +167,13 @@ pub fn run(a: &material::Assessment, source: &Source, r: &Request) -> Result<Sel
             regions,
             originals,
             nearest_request_mm,
+            checks,
         });
     }
     let mut chosen = cells
         .iter()
         .enumerate()
-        .filter_map(|(i, c)| c.originals.is_empty().then_some(i))
+        .filter_map(|(i, c)| (c.eligibility(r.role) == Eligibility::New).then_some(i))
         .collect::<Vec<_>>();
     // Prefer filling near previously searched columns, independently of how
     // many STL triangles project onto a cell. This is priority, not travel order.

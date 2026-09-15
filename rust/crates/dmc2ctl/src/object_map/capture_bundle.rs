@@ -95,7 +95,7 @@ impl Context {
                 == Some(Mode::TopFollowup as u8 as f64)
                 || self.parts[Kind::Followup as usize].is_some());
         if is_followup {
-            if let Err(detail) = self.validate_followup(capture) {
+            if let Err(detail) = self.followup_plan(capture) {
                 capture.state = super::model::CaptureState::Quarantined;
                 capture.issues.push(super::model::CaptureIssue {
                     sequence: 0,
@@ -104,9 +104,12 @@ impl Context {
             }
         }
     }
-    pub fn validate_followup(&self, capture: &Capture) -> Result<(), String> {
+    pub fn followup_plan(
+        &self,
+        capture: &Capture,
+    ) -> Result<Option<crate::probe_data::top_followup::Plan>, String> {
         if capture.workflow != Workflow::Mapper {
-            return Ok(());
+            return Ok(None);
         }
         let mode = Mode::read(crate::probe_data::ledger::number(
             &capture.records[0],
@@ -118,16 +121,17 @@ impl Context {
                 return Err("Follow-up acquisition companions differ from its retained plan. Preserve the source and import the intact ledger/companions; no current settings can substitute.".into());
             }
             plan.samples(&capture.records, false)?;
+            return Ok(Some(plan));
         } else if self.parts[Kind::Followup as usize].is_some() {
             return Err("A follow-up companion accompanies a different mapper mode. Preserve the sources and select the matching original ledger/companions.".into());
         }
-        Ok(())
+        Ok(None)
     }
     pub fn settings(&self, capture: &Capture) -> Result<Settings, String> {
         if capture.workflow != Workflow::Mapper {
             return Err("This capture does not use mapper companion settings.".into());
         }
-        self.validate_followup(capture)?;
+        self.followup_plan(capture)?;
         let start = &capture.records[0];
         let plate = data(
             self.text(Kind::Plate)?,

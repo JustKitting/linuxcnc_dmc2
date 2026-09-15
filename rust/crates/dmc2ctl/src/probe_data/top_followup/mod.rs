@@ -2,6 +2,8 @@
 //! Data only: the shared LinuxCNC executor owns all movement and withdrawal.
 mod format;
 mod program;
+mod role;
+pub use role::Role;
 #[cfg(test)]
 mod tests;
 use super::{
@@ -19,6 +21,8 @@ pub struct Plan {
     pub feeds: String,
     /// Explicit execution order; each leg returns to original clearance.
     pub points: Vec<[f64; 2]>,
+    /// None retains the historical V1 plan bytes and implicit fitting role.
+    pub role: Option<Role>,
 }
 impl Plan {
     pub fn settings(&self) -> Result<Settings, String> {

@@ -1,4 +1,5 @@
 //! New material-directed top columns through the normal Object Mapper path.
+mod check;
 pub(in crate::object_map) mod export;
 mod grid;
 mod report;
@@ -7,7 +8,7 @@ mod select;
 #[cfg(test)]
 mod tests;
 use super::material;
-use crate::object_map::{Error, model::Id, record, store::Store};
+use crate::object_map::{model::Id, record, store::Store, Error};
 use source::Source;
 use std::path::Path;
 mod source;
@@ -21,7 +22,8 @@ pub fn prepare(
 ) -> Result<String, Error> {
     let (_, a) = material::load(store, object, setup, material)?;
     let history = source::prepare(&a, &store.captures(object, setup)?, capture)?;
-    let fields = request::KEYS
+    let keys = request::role_keys();
+    let fields = keys
         .iter()
         .map(|k| {
             (
@@ -35,7 +37,7 @@ pub fn prepare(
         })
         .collect::<Vec<_>>();
     String::from_utf8(record::encode(
-        request::HISTORY_SCHEMA,
+        request::ROLE_SCHEMA,
         &fields,
         request::history_text(&history).as_bytes(),
     )?)
@@ -60,8 +62,13 @@ pub(super) fn run(
         source.retain(output)?;
     }
     super::retain(output, raw, &bundle, &report, &manifest)?;
+    let count_key = if r.role.is_some() {
+        "targeted_material_regions"
+    } else {
+        "unsupported_material_regions"
+    };
     Ok(format!(
-        "{{\"analysis_directory\":{},\"state\":\"unreviewed-spatial-observation-proposals\",\"spatial_cells\":{},\"selected_observations\":{},\"unsupported_material_regions\":{},\"message\":\"New top-column proposals and all unresolved material regions are retained. Inspect original settings and entry requirements; fresh capture and a reviewed execution path are still required.\",\"cam_ready\":false,\"machine_action_authorized\":false}}",
+        "{{\"analysis_directory\":{},\"state\":\"unreviewed-spatial-observation-proposals\",\"spatial_cells\":{},\"selected_observations\":{},\"{count_key}\":{},\"message\":\"Top-column proposals and all unresolved material regions are retained. Inspect original settings and entry requirements; fresh capture and a reviewed execution path are still required.\",\"cam_ready\":false,\"machine_action_authorized\":false}}",
         record::quote(&output.display().to_string()),
         selection.cells.len(),
         selection.chosen.len(),

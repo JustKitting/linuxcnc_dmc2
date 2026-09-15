@@ -1,12 +1,20 @@
-use super::{data, number, Plan, START_FIELDS};
+use super::{data, number, Plan, Role, START_FIELDS};
 const MAGIC: &str = "DMC2_TOP_FOLLOWUP_V1";
+const ROLE_MAGIC: &str = "DMC2_TOP_FOLLOWUP_V2";
 const START: &str = "DMC2_TOP_FOLLOWUP_START_V1";
 const IDS: [&str; 4] = ["object", "setup", "analysis", "capture"];
 
 impl Plan {
     pub fn encode(&self) -> Result<String, String> {
         self.settings()?;
-        let mut out = format!("{MAGIC}\n");
+        let mut out = format!(
+            "{}\n",
+            if self.role.is_some() {
+                ROLE_MAGIC
+            } else {
+                MAGIC
+            }
+        );
         for (name, value) in IDS.into_iter().zip(&self.source) {
             if value.is_empty()
                 || !value
@@ -16,6 +24,9 @@ impl Plan {
                 return Err(format!("Follow-up {name} is not a retained ID. Export the program from its original Object Mapper analysis."));
             }
             out.push_str(&format!("{name}={value}\n"));
+        }
+        if let Some(role) = self.role {
+            out.push_str(&format!("contact_role={}\n", role.name()));
         }
         out.push_str(&format!("\n{START}\n"));
         for &key in START_FIELDS {
@@ -43,7 +54,8 @@ impl Plan {
             return Err(error());
         };
         let mut identity = identity.lines();
-        if identity.next() != Some(MAGIC) {
+        let version = identity.next().ok_or_else(error)?;
+        if !matches!(version, MAGIC | ROLE_MAGIC) {
             return Err(error());
         }
         let mut source: [String; 4] = Default::default();
@@ -54,6 +66,16 @@ impl Plan {
                 .ok_or_else(error)?
                 .into();
         }
+        let role = if version == ROLE_MAGIC {
+            Some(Role::read(
+                identity
+                    .next()
+                    .and_then(|s| s.strip_prefix("contact_role="))
+                    .ok_or_else(|| "The retained top follow-up plan has no contact_role field. Preserve it and re-export from the original observation analysis; Abort then Pendant Mode for an active run.".to_string())?,
+            )?)
+        } else {
+            None
+        };
         if identity.next().is_some() {
             return Err(error());
         }
@@ -70,6 +92,7 @@ impl Plan {
             ]);
         }
         let plan = Self {
+            role,
             source,
             start: data(start, START, START_FIELDS)?,
             plate: format!("{plate}\n"),

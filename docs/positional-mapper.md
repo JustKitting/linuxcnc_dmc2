@@ -988,7 +988,8 @@ inspection and export use the normal installed `dmc2ctl` and Object Mapper
 catalog. Historical repeat requests retain their original interpretation.
 
 The original single-capture request below remains replayable. New preparation
-uses V2 with [explicit acquisition history](#explicit-acquisition-history).
+uses V3 with [explicit acquisition history](#explicit-acquisition-history) and
+a declared [fresh-contact role](#fresh-withheld-checks).
 
 ```text
 DMC2_SPATIAL_OBSERVATION_REQUEST_V1
@@ -1131,8 +1132,9 @@ both recovery buttons `normal` and no modal grab.
 
 ## Explicit acquisition history
 
-**Prepare new top samples** now emits `DMC2_SPATIAL_OBSERVATION_REQUEST_V2`.
-The numerical header fields above are unchanged. Its payload is a tab-separated
+`DMC2_SPATIAL_OBSERVATION_REQUEST_V2` introduced explicit acquisition history;
+current preparation emits V3 with the contact role described below.
+The numerical header fields above are unchanged. The payload is a tab-separated
 table with columns `capture`, `use`, `reason`. Preparation lists every capture
 in the selected setup. Complete compatible top cycles receive `include`;
 incompatible or quarantined captures receive `exclude` and their actual
@@ -1235,6 +1237,75 @@ Readback:
 Read-only UI inspection reported Clear Fault and Pendant Mode `normal`, with
 no modal grab. No machine action or restart was issued.
 
+## Fresh withheld checks
+
+**Prepare new top samples** now emits `DMC2_SPATIAL_OBSERVATION_REQUEST_V3`.
+Its existing settings and explicit history table gain the required field
+`contact_role=fit|check`, edited through the normal request editor. `fit` selects
+new columns for `unobserved-local-coverage` regions. `check` selects new columns
+for `independent-support-check-missing` regions. Both preserve old fine contacts,
+misses and explicit inclusion decisions. Disagreeing checks and original repeats
+remain separate observation requirements; this new role does not discard or
+automatically replace them.
+
+A check candidate must intersect a relevant unchecked, upward-facing local
+ball-centre plane inside its existing hull/gap/no-contact support and the
+original descent range. The selection report retains the patch source identity,
+predicted machine-frame ball centre and predicted work-frame trigger. The
+downward inverse correction is `trigger_work_z = predicted_center_machine_z -
+mount_z - pretravel - original_offset_z`, using the retained operands. This
+prediction supplies a possible check association, not a contact or descent
+endpoint. Candidates without supported intersections remain unselected and
+reported. Required machining geometry supplies investigation regions; it does
+not become the stock shape or an assumed contact height.
+
+The role is retained in the exported `DMC2_TOP_FOLLOWUP_V2` plan, its embedded
+program bytes, execution-order CSV and fresh acquisition companion. Motion
+continues through the existing top executor using the original start clearance,
+floor, feeds and order. Top withdrawal returns to the original start clearance;
+the retained backoff setting is not a partial top-withdrawal endpoint. Predicted
+check heights do not alter this sequence. Native file reports use
+`dmc2.top-followup-capture.v2` and name the declared role alongside original
+machine-coordinate triggers.
+
+After import, **Prepare 3D stock surfaces** reads the original plan and assigns
+fresh fine contacts from a check plan to `check` rows. These remain withheld from
+the fit; their actual residuals determine support agreement. The surface request
+retains the explicit row roles used in each analysis. Every original ledger,
+companion and context survives surface, material, reconstruction and scene
+exports. Existing plans and analyses do not absorb later imports silently.
+Historical implicit-fit plans and spatial V1/V2 reports retain their bytes.
+
+**Historical frame-label correction:** spatial V2
+`already_searched_records.original_trigger_work_mm` contains the retained
+**machine-mm** trigger despite its old field name. The native ledger source is
+`machine_*_exact`. Spatial V3 uses `original_trigger_machine_mm`. Historical
+report bytes are preserved for replay; read the old value as machine-mm or use
+the original ledger. Do not apply a second work-to-machine translation to it.
+Original requested XY and the newly predicted work trigger remain work-frame
+values with their original offset retained separately.
+
+Both standard binaries are built and installed. The labelled numerical exercise
+selected four fresh check columns, imported four check rows per capture, and
+retained all nine fitted patches unchanged for both agreement and disagreement.
+Agreement changed 258 missing-check regions into local clearance classifications;
+the other 1,662 unsupported regions stayed unsupported. A simulated 0.2 mm
+residual produced 258 check-disagreement regions instead. The respective mesh
+results retained 108 supported facets and no supported facets, with disagreement
+and no-contact reasons preserved. Neither result establishes a closed stock
+solid or physical material coverage.
+
+All 40 historical V1 and 58 historical V2 export files reproduced byte for byte.
+All 57 saved fresh-program export files remained identical after the additional
+imports. Original check ledgers and their companions survived the complete scene
+export exactly. The next check request retained the new search history, selected
+no further missing-check columns and retained other unresolved requirements.
+The fit role continued selecting unsupported regions. Readback:
+`/home/kit/cnc-backups/mapper-check-role-tkkurwf5/round-trip-readback.json`.
+These are numerical/file outcomes. Physical entry, acquisition and recovery
+observation remain outstanding. Read-only UI inspection reported both recovery
+controls `normal` and no modal grab. No machine action or restart was issued.
+
 ## Recorded TODOs — 2026-09-14
 
 This is the continuing implementation list for the positional mapper and
@@ -1255,9 +1326,11 @@ machine run.
   feeds surface support, material assessment and reconstruction, with exact
   source retention and historical replay; see the V3 surface runbook above.
   Still needed: handle separately registered frames without assuming that
-  matching numerical settings establish physical identity. Independent follow-up
-  check acquisition, multiheight sides and unseen volume remain parts of the
-  whole stock-to-CAM workflow.
+  matching numerical settings establish physical identity. Fresh follow-up check
+  selection, exported role retention and automatic withheld-row preparation are
+  implemented and installed; see [Fresh withheld checks](#fresh-withheld-checks).
+  Their physical acquisition, disagreement/repeat execution, multiheight sides
+  and unseen volume remain parts of the whole stock-to-CAM workflow.
 - [ ] **Acquire automatic top coverage for irregular stock.** The production
   Rust planner and Scripts catalog now provide Automatic top map, sharing the
   existing mapper executor, original trigger capture, feeds and recovery. It
@@ -1410,9 +1483,11 @@ machine run.
   `FreeSurface` mode provides automatic connected top coverage without that
   completion condition, and the outline path retains its free shape.
   Gauge-block cuboid measurements retain their intended role. New spatial
-  sampling driven by material requirements now has a typed selection path;
-  reviewed follow-up execution and fresh capture still need to connect those
-  proposals back to the estimator.
+  sampling driven by material requirements now has a typed selection path.
+  Top follow-up export, shared execution, fresh-plan capture binding and
+  fit/check role preparation connect those proposals back to surface/material
+  analysis in the installed file workflow. Physical execution and the remaining
+  repeat, side and multiheight paths are still outstanding.
 - [ ] **Fit measured 3D stock surfaces and retain their support.** The standard
   binary and Object Mapper catalog now provide `prepare-stock-surface` and
   `fit-stock-surface`, with the existing editor/inspection/export path. Focused
