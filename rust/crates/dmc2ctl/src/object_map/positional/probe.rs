@@ -11,6 +11,20 @@ use super::{
 };
 use std::collections::BTreeMap;
 
+pub fn keys(extra: &[&'static str]) -> Vec<&'static str> {
+    [
+        "calibration_state",
+        "calibration_reference",
+        "frame_reference",
+        "ball_radius_mm",
+        "trigger_to_ball_mm",
+        "pretravel_mm",
+    ]
+    .into_iter()
+    .chain(extra.iter().copied())
+    .collect()
+}
+
 #[derive(Clone, Copy)]
 pub enum Calibration {
     Nominal,

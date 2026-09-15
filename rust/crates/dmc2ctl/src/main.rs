@@ -25,7 +25,14 @@ fn main() {
         // Offline object data commands never open NML or publish machine faults.
         match dmc2ctl::object_map::cli::run(&args[1..], &dmc2ctl::object_map::cli::default_store())
         {
-            Ok(output) => println!("{output}"),
+            Ok(output) => {
+                // Requests already include their terminating newline. Adding
+                // another creates an empty selection row in the normal editor.
+                print!("{output}");
+                if !output.ends_with('\n') {
+                    println!();
+                }
+            }
             Err(error) => {
                 eprintln!("dmc2ctl object-map: {error}");
                 std::process::exit(1);

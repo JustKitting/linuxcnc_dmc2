@@ -103,6 +103,15 @@ fine contact as an observation. Policy snapshots and refinement decisions follow
 the capture into stock analysis and FreeCAD exchange; neither consumer substitutes
 current configuration for missing historical context.
 
+The same retained captures can be selected through Object Mapper's **Prepare 3D
+stock surfaces** operation alongside top or multi-height side observations in
+the same declared setup reference. The Rust estimator retains local normals,
+ball-radius-corrected positions, all residuals and independent checks. A single
+line of rim contacts leaves wall slope unresolved. Local interpolation support
+and missing volume coverage feed the continuing reconstruction work; no stock
+surface analysis launches another probing operation. See
+[the surface runbook](positional-mapper.md#estimate-local-3d-stock-surfaces).
+
 V4 uses the existing plan fields and executor and requires no new HAL pins. The
 installed capture binary reads the policy when a new run begins. The running UI
 may retain its earlier description until reopened. Numerical rotated/concave

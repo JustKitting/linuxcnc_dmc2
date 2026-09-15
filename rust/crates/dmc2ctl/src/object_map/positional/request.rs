@@ -6,26 +6,22 @@ use super::{
 };
 use std::collections::BTreeSet;
 pub const SCHEMA: &str = "DMC2_POSITIONAL_REQUEST_V1";
-pub const KEYS: &[&str] = &[
-    "design",
-    "model_role",
-    "stl_mm_per_unit",
-    "calibration_state",
-    "calibration_reference",
-    "frame_reference",
-    "ball_radius_mm",
-    "trigger_to_ball_mm",
-    "pretravel_mm",
-    "initial_translation_mm",
-    "initial_rotation_xyz_deg",
-    "solve",
-    "max_iterations",
-    "convergence_mm",
-    "huber_mm",
-    "correspondence_limit_mm",
-    "max_translation_correction_mm",
-    "max_rotation_correction_deg",
-];
+pub fn keys() -> Vec<&'static str> {
+    super::probe::keys(&[
+        "design",
+        "model_role",
+        "stl_mm_per_unit",
+        "initial_translation_mm",
+        "initial_rotation_xyz_deg",
+        "solve",
+        "max_iterations",
+        "convergence_mm",
+        "huber_mm",
+        "correspondence_limit_mm",
+        "max_translation_correction_mm",
+        "max_rotation_correction_deg",
+    ])
+}
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Use {
     Fit,
@@ -108,7 +104,7 @@ pub fn vector(s: &str, label: &str) -> Result<V, Error> {
 }
 impl Request {
     pub fn read(raw: &[u8]) -> Result<Self, Error> {
-        let (f, body) = record::decode(raw, SCHEMA, KEYS)?;
+        let (f, body) = record::decode(raw, SCHEMA, &keys())?;
         let positive = |key: &str| -> Result<f64, Error> {
             let v = scalar(&f[key], key)?;
             if v > 0. {

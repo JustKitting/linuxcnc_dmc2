@@ -42,15 +42,13 @@ fn draft(raw: &[u8]) -> Result<&str, Error> {
     let schemas = [
         (
             super::positional::request::SCHEMA,
-            super::positional::request::KEYS,
+            super::positional::request::keys(),
         ),
-        (
-            super::positional::stock::SCHEMA,
-            super::positional::stock::KEYS,
-        ),
+        super::positional::stock::Model::Outline.request_schema(),
+        super::positional::stock::Model::Surface.request_schema(),
     ];
     let (schema, keys) = schemas.iter().find(|(schema, _)| raw.starts_with(format!("{schema}\n").as_bytes()))
-        .ok_or_else(|| Error::Input("Unsupported analysis draft. Prepare a placement or stock-outline request through Object Mapper.".into()))?;
+        .ok_or_else(|| Error::Input("Unsupported analysis draft. Prepare a placement, stock-outline or stock-surface request through Object Mapper.".into()))?;
     record::decode(raw, schema, keys)?;
     std::str::from_utf8(raw).map_err(|e| Error::Input(format!("Request text is not UTF-8: {e}.")))
 }

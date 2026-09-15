@@ -2,6 +2,7 @@
 mod fit;
 mod report;
 mod request;
+mod surface;
 #[cfg(test)]
 mod tests;
 use super::{
@@ -20,8 +21,56 @@ use crate::probe_data::{
     mapper_trace::{outline, state, Progress},
     schema::Workflow,
 };
-pub(in crate::object_map) use request::{KEYS, SCHEMA};
 use std::{collections::BTreeSet, path::Path};
+
+#[derive(Clone, Copy)]
+pub enum Model {
+    Outline,
+    Surface,
+}
+impl Model {
+    fn name(self) -> &'static str {
+        match self {
+            Self::Outline => "stock-outline",
+            Self::Surface => "stock-surface",
+        }
+    }
+    pub fn request_schema(self) -> (&'static str, Vec<&'static str>) {
+        match self {
+            Self::Outline => (request::SCHEMA, request::keys()),
+            Self::Surface => (surface::request::SCHEMA, surface::request::keys()),
+        }
+    }
+}
+fn template(model: Model, rows: &str) -> Result<String, Error> {
+    let (schema, keys) = model.request_schema();
+    let fields = keys.iter().map(|k| (*k, "REQUIRED")).collect::<Vec<_>>();
+    String::from_utf8(record::encode(schema, &fields, rows.as_bytes())?)
+        .map_err(|e| Error::Data(e.to_string()))
+}
+pub fn prepare_surface(store: &Store, object: &Id, setup: &Id) -> Result<String, Error> {
+    let mut rows = String::from("capture,sequence,use\n");
+    for c in store.captures(object, setup)? {
+        if c.capture.state == CaptureState::Quarantined {
+            continue;
+        }
+        for p in c.capture.contacts.iter().filter(|p| p.stage == Stage::Fine) {
+            let seam = c.capture.workflow == Workflow::Mapper
+                && Phase::read(
+                    number(&c.capture.records[p.sequence], "phase").map_err(Error::Data)?,
+                )
+                .map_err(Error::Data)?
+                    == Phase::OutlineClose;
+            rows.push_str(&format!(
+                "{},{},{}\n",
+                c.id.as_str(),
+                p.sequence,
+                if seam { "check" } else { "fit" }
+            ));
+        }
+    }
+    template(Model::Surface, &rows)
+}
 
 pub fn prepare(store: &Store, object: &Id, setup: &Id, capture: &Id) -> Result<String, Error> {
     let captures = store.captures(object, setup)?;
@@ -70,14 +119,16 @@ pub fn prepare(store: &Store, object: &Id, setup: &Id, capture: &Id) -> Result<S
     {
         rows.push_str(&format!("{},{},observe\n", c.id.as_str(), p.sequence));
     }
-    let fields = KEYS
-        .iter()
-        .map(|key| (*key, "REQUIRED"))
-        .collect::<Vec<_>>();
-    String::from_utf8(record::encode(SCHEMA, &fields, rows.as_bytes())?)
-        .map_err(|e| Error::Data(e.to_string()))
+    template(Model::Outline, &rows)
 }
-pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, path: &Path) -> Result<String, Error> {
+pub fn run(
+    store: &Store,
+    object: &Id,
+    setup: &Id,
+    id: &Id,
+    path: &Path,
+    model: Model,
+) -> Result<String, Error> {
     let output = folder(store, object, setup, id)?;
     if output.exists() {
         return Err(Error::Storage(format!(
@@ -86,11 +137,22 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, path: &Path) -> Resu
         )));
     }
     let raw = read(path)?;
-    let req = request::Request::read(&raw)?;
     let captures = store.captures(object, setup)?;
-    let samples = req.probe.samples(&captures, &req.selected)?;
-    let contour = fit::run(&samples, &req)?;
-    let report = report::build(&samples, &contour, &req)?;
+    let (samples, report) = match model {
+        Model::Outline => {
+            let req = request::Request::read(&raw)?;
+            let samples = req.probe.samples(&captures, &req.selected)?;
+            let contour = fit::run(&samples, &req)?;
+            let report = report::build(&samples, &contour, &req)?;
+            (samples, report)
+        }
+        Model::Surface => {
+            let req = surface::request::Request::read(&raw)?;
+            let samples = req.probe.samples(&captures, &req.selected)?;
+            let report = surface::build(&samples, &req)?;
+            (samples, report)
+        }
+    };
     let used = samples
         .iter()
         .map(|s| s.capture.as_str())
@@ -108,7 +170,7 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, path: &Path) -> Resu
         report.centers.as_bytes(),
     )?;
     save(
-        &output.join("stock-outline.machine-mm.json"),
+        &output.join(format!("{}.machine-mm.json", model.name())),
         report.json.as_bytes(),
     )?;
     save(
@@ -120,7 +182,7 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, path: &Path) -> Resu
         .map(|x| record::quote(x))
         .collect::<Vec<_>>()
         .join(",");
-    let manifest=format!("{{\"schema\":\"dmc2.stock-outline-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"captures\":[{}],\"result\":{},\"cam_ready\":false}}\n",record::quote(object.as_str()),record::quote(setup.as_str()),record::quote(id.as_str()),sources,report.json);
+    let manifest=format!("{{\"schema\":\"dmc2.{}-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"captures\":[{}],\"result\":{},\"cam_ready\":false}}\n",model.name(),record::quote(object.as_str()),record::quote(setup.as_str()),record::quote(id.as_str()),sources,report.json);
     save(&output.join("manifest.json"), manifest.as_bytes())?;
-    Ok(format!("{{\"analysis_directory\":{},\"state\":\"unreviewed-stock-outline\",\"message\":\"Stock outline estimate retained with local residuals and measurement requests. Inspect the analysis and independent checks; material coverage and machining placement remain unresolved.\",\"cam_ready\":false}}",record::quote(&output.display().to_string())))
+    Ok(format!("{{\"analysis_directory\":{},\"state\":\"unreviewed-{}\",\"message\":\"Stock estimate retained with local residuals and measurement requests. Inspect the analysis and independent checks; material coverage and machining placement remain unresolved.\",\"cam_ready\":false}}",record::quote(&output.display().to_string()),model.name()))
 }

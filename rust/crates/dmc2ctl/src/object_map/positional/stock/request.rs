@@ -5,23 +5,19 @@ use super::super::{
 };
 use crate::object_map::record;
 pub const SCHEMA: &str = "DMC2_STOCK_OUTLINE_REQUEST_V1";
-pub const KEYS: &[&str] = &[
-    "calibration_state",
-    "calibration_reference",
-    "frame_reference",
-    "ball_radius_mm",
-    "trigger_to_ball_mm",
-    "pretravel_mm",
-    "closure",
-    "surface_model",
-    "neighborhood_span_mm",
-    "huber_mm",
-    "max_iterations",
-    "convergence_mm",
-    "max_gap_mm",
-    "max_z_span_mm",
-    "max_fit_residual_mm",
-];
+pub fn keys() -> Vec<&'static str> {
+    super::super::probe::keys(&[
+        "closure",
+        "surface_model",
+        "neighborhood_span_mm",
+        "huber_mm",
+        "max_iterations",
+        "convergence_mm",
+        "max_gap_mm",
+        "max_z_span_mm",
+        "max_fit_residual_mm",
+    ])
+}
 #[derive(Clone, Copy, PartialEq, Eq)]
 pub enum Closure {
     Open,
@@ -63,7 +59,7 @@ pub struct Request {
 }
 impl Request {
     pub fn read(raw: &[u8]) -> Result<Self, Error> {
-        let (f, body) = record::decode(raw, SCHEMA, KEYS)?;
+        let (f, body) = record::decode(raw, SCHEMA, &keys())?;
         let positive = |key: &str| -> Result<f64, Error> {
             let x = scalar(&f[key], key)?;
             if x <= 0. {

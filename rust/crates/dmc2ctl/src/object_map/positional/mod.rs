@@ -39,7 +39,8 @@ pub fn prepare(store: &Store, object: &Id, setup: &Id, design: &Id) -> Result<St
         ));
     }
     let captures = store.captures(object, setup)?;
-    let fields = request::KEYS
+    let keys = request::keys();
+    let fields = keys
         .iter()
         .map(|k| {
             (

@@ -1,9 +1,12 @@
 # Positional mapper commands and practice runbook
 
-The standard `native/bin/dmc2ctl object-map` command now reads STL geometry and
-fits retained probe contacts to it. It also measures explicitly assigned stock
-faces and transforms named design points using a candidate placement. All these
-commands operate on files before opening any machine connection.
+The standard `native/bin/dmc2ctl object-map` command estimates irregular stock
+outlines and local 3D surfaces from retained probe contacts. This raw-stock path
+does not require the wood to match an STL or rectangle. A separate registration
+path fits genuinely corresponding model features and transforms named design
+points using a candidate placement. All these commands operate on files before
+opening any machine connection. Stock-volume reconstruction and placement of
+unchanged machining geometry inside that volume remain on the TODO list below.
 
 The research, physical requirements and continuation design are in
 [Probe-based positioning and manufacturing continuation](probe-based-continuation.md).
@@ -207,9 +210,93 @@ machine commands. The tracer does not yet consume them automatically.
 
 Interpolated segments remain modeling assumptions. This slice does not establish
 a closed three-dimensional material volume, hidden concavities or wall slope.
-Self-intersection analysis, multi-height/top reconstruction and placement of the
-unchanged machining geometry inside measured material remain implementation
-work. The report retains `solid_stock: null` and `cam_ready: false`.
+Self-intersection analysis, assembly into a supported volume and placement of
+the unchanged machining geometry inside measured material remain implementation
+work. The report retains `solid_stock: null` and `cam_ready: false`. The surface
+operation below fits local geometry from top and multi-height observations.
+
+## Estimate local 3D stock surfaces
+
+The normal Object Mapper catalog exposes **Prepare 3D stock surfaces** and
+**Estimate 3D stock surfaces**, followed by the shared Inspect/Export analysis
+operations. CLI equivalents are:
+
+```sh
+native/bin/dmc2ctl object-map prepare-stock-surface part first > /tmp/surface-request.txt
+native/bin/dmc2ctl object-map fit-stock-surface part first surfaces-a /tmp/surface-request.txt
+native/bin/dmc2ctl object-map show-fit part first surfaces-a
+native/bin/dmc2ctl object-map export-fit part first surfaces-a /tmp/surfaces-a
+```
+
+Preparation includes original fine contacts across the selected setup's
+nonquarantined captures. Retained mapper seam contacts become `check`; the other
+fine contacts initially become `fit`. Edit those assignments and remove any
+unrelated captures from the request. The shared frame and probe calibration
+must apply to every selected row. Withhold independent contacts as `check`;
+`observe` reports residuals without changing the fitted surface. All selected
+original rows and source ledgers remain retained.
+
+The `DMC2_STOCK_SURFACE_REQUEST_V1` uses the same calibration fields and
+trigger-to-ball correction as the other analyses. Additional required settings:
+
+| Field | Meaning |
+|---|---|
+| `neighborhood_mm` | Maximum 3D ball-centre distance from each fitting station for local surface estimation |
+| `max_approach_angle_deg` | Largest difference between recorded approach directions admitted to one neighborhood |
+| `huber_mm` | Perpendicular residual at which local robust weights decrease |
+| `max_iterations` | Computational budget for iterative fitting and each covariance solve |
+| `convergence_mm` | Maximum change in projected neighborhood points for numerical convergence |
+| `max_support_gap_mm` | Largest projected distance to a neighbor admitted to local check associations |
+| `max_fit_residual_mm` | Maximum local residual for check eligibility; excess remains a recorded measurement requirement |
+
+The local least-squares plane uses covariance eigenvectors. The need to choose
+neighborhood scale and resolve normal orientation is described in the
+[PCL normal-estimation tutorial](https://pointclouds.org/documentation/tutorials/normal_estimation.html).
+DMC2's Rust implementation iterates Huber weights, retains all residuals, and
+uses each recorded probe approach to orient the normal. Collinear or ambiguous
+neighborhoods remain unresolved; a rim line does not acquire an assumed wall
+slope. A neighborhood whose approaches conflict with its fitted normal remains
+unresolved rather than supplying an arbitrary sign.
+
+The retained calculation is:
+
+```text
+ball centre = original trigger + trigger_to_ball - pretravel * recorded unit approach
+surface estimate = fitted ball centre - ball_radius * fitted outward normal
+```
+
+The local fit estimates the probe-centre offset surface. Ball correction follows
+that estimated normal. It does not reconstruct concavities inaccessible to the
+ball, prove a plane between observations, or establish unseen interior material.
+Large neighborhoods can blend adjacent surfaces; coherent residuals and the
+original observations remain available for refinement.
+
+`stock-surface.machine-mm.json` retains a patch per fitting station, its source
+neighbors, fitted centre, normal, corrected surface position, covariance
+eigenvalues, weights and stopping reason. Independent checks do not affect the
+fit. A check can associate only with a converged patch meeting the requested
+local residual, inside its projected neighbor hull and within the requested
+distance of a neighbor. These bounds describe **local planar interpolation**;
+they are not measured material coverage. Unsupported or disagreeing checks
+produce explicit requirements in `refinement-requests.json`.
+
+The shared bundle also contains every selected trigger/centre/approach/feed in
+`residuals.csv`, a ball-centre ASC cloud, the exact request and the original
+capture/companion files. Inspect and Export analysis use that same bundle. The
+report remains `unreviewed-stock-surface`, with `solid_stock: null`, unknown
+unmeasured volume and `cam_ready: false`.
+
+The installed command binary's file exercise retained 26 synthetic fine records:
+25 fit rows and one withheld check displaced by 2 mm normal to an analytical
+tilted plane. All trigger values and source bytes survived import/fit/export.
+The check reported 2 mm disagreement; the maximum normal-vector discrepancy
+was approximately 2e-15, a floating-point result, not physical accuracy. Readback
+is in `/home/kit/cnc-backups/mapper-surfaces-amm3v64y/round-trip-readback.json`.
+The command entry point also now preserves an existing terminating newline:
+previously it added an empty selection row to prepared/reopened request text.
+The corrected surface request, existing outline draft and positional request
+all reopened byte for byte. Numerical checks reported 29 object-map passes;
+none of these results establishes physical stock, control recovery or machining.
 
 ## Fit, inspect and repeat without editing control code
 
@@ -285,11 +372,12 @@ through the Points workbench. They are already in a common machine frame; do
 not apply the candidate matrix a second time. Open the native design separately
 when checking its feature history and CAM setup.
 
-The next physical stage is a placement-prediction experiment using a matching
-real model, reference contacts and independent check locations. Its movement
-sequence will be prepared separately after the actual part and geometry are
-known. The research document lists the inputs needed before generating later
-cutting operations or a printer-specific continuation.
+For the owner's oversized wood workflow, the next physical observations concern
+the actual stock and independent checks. A matching raw-stock CAD model is not
+a prerequisite. Nominal required machining geometry remains separate; dice OP1
+must retain `stage1_after`, including backing and envelopes. Any movement
+sequence requires its exact separate authorization. The research document lists
+the inputs needed for later cutting operations or printer-specific continuation.
 
 The AXIS startup integration now registers an **Object Mapper** tab beside
 Pendant and Custom Scripts. **Open object mapper** opens a nonmodal window;
@@ -438,6 +526,22 @@ machine run.
   decisions through the shared capture context into stock/FreeCAD data. Broader
   stock-analysis-driven observation selection, multi-height acquisition and
   material containment remain outstanding.
+- [ ] **Fit measured 3D stock surfaces and retain their support.** The standard
+  binary and Object Mapper catalog now provide `prepare-stock-surface` and
+  `fit-stock-surface`, with the existing editor/inspection/export path. Focused
+  Rust modules estimate local Huber planes from retained 3D fine contacts,
+  orient normals from approaches and apply shared calibration plus normal-based
+  ball-radius correction. All original rows, ambiguous geometry and independent
+  checks remain retained. Local check support is explicitly a planar
+  interpolation assumption, not closed stock volume. Twenty-nine object-map
+  numerical checks report passes. The installed-binary file exercise retained
+  all 26 fine triggers and source bytes, produced 25 local patches and reported
+  the withheld 2 mm disagreement without fitting that check. The request output
+  newline defect exposed by this workflow was corrected at the standard entry
+  point. Readback: `/home/kit/cnc-backups/mapper-surfaces-amm3v64y/round-trip-readback.json`.
+  These are source, build and file milestones. Physical surface observations,
+  volume coverage, uncertainty and containment remain open. The existing CNC
+  session was not restarted.
 - [ ] **Optimize machining placement inside measured stock.** Fit the unchanged
   required geometry into the stock estimate using the allowed translations and
   rotations. Account for material shortage and unknown coverage separately;
