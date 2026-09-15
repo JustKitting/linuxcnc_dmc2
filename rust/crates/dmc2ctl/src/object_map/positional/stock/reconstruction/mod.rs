@@ -9,10 +9,10 @@ mod tests;
 use super::super::{folder, retained::Bundle};
 use super::surface;
 use crate::object_map::{
+    Error,
     model::Id,
     record,
-    store::{read, save, Store},
-    Error,
+    store::{Store, read, save},
 };
 use std::path::Path;
 pub fn prepare(store: &Store, object: &Id, setup: &Id, surface: &Id) -> Result<String, Error> {
@@ -67,6 +67,24 @@ pub(super) struct Estimated {
     pub source: surface::Loaded,
     pub report: report::Report,
 }
+pub(super) struct Loaded {
+    pub bundle: Bundle,
+    pub estimated: Estimated,
+}
+/// Reproduce the reconstruction and bind every retained original source byte.
+pub(super) fn load(store: &Store, object: &Id, setup: &Id, id: &Id) -> Result<Loaded, Error> {
+    let bundle = Bundle::read(&folder(store, object, setup, id)?)?;
+    let estimated = estimate(store, object, setup, bundle.get("request.txt")?)?;
+    bundle.require_source(&estimated.source.source, "surface-source-")?;
+    for (name, bytes) in &estimated.report.files {
+        bundle.require_equal(name, bytes.as_bytes())?;
+    }
+    bundle.require_equal(
+        "manifest.json",
+        manifest(object, setup, id, &estimated.request, &estimated.report).as_bytes(),
+    )?;
+    Ok(Loaded { bundle, estimated })
+}
 pub(super) fn estimate(
     store: &Store,
     object: &Id,
@@ -100,5 +118,12 @@ pub(super) fn manifest(
     r: &request::Request,
     report: &report::Report,
 ) -> String {
-    format!("{{\"schema\":\"dmc2.stock-mesh-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"surface_analysis\":{},\"result\":{},\"cam_ready\":false}}\n",record::quote(object.as_str()),record::quote(setup.as_str()),record::quote(id.as_str()),record::quote(r.surface.as_str()),report.json)
+    format!(
+        "{{\"schema\":\"dmc2.stock-mesh-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"surface_analysis\":{},\"result\":{},\"cam_ready\":false}}\n",
+        record::quote(object.as_str()),
+        record::quote(setup.as_str()),
+        record::quote(id.as_str()),
+        record::quote(r.surface.as_str()),
+        report.json
+    )
 }

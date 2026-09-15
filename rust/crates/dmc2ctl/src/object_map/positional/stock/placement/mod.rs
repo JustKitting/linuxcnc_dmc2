@@ -12,10 +12,10 @@ use super::{
     request::{Closure, Surface},
 };
 use crate::object_map::{
+    Error,
     model::{DesignFormat, Id},
     record,
-    store::{read, save, Store},
-    Error,
+    store::{Store, read, save},
 };
 use std::path::Path;
 struct Source {
@@ -43,7 +43,9 @@ fn source(store: &Store, object: &Id, setup: &Id, id: &Id) -> Result<Source, Err
             || a.residuals.iter().any(|x| x.abs() > req.max_residual)
             || fit::distance(samples[a.sample].center, samples[b.sample].center) > req.max_gap
         {
-            return Err(Error::Data(format!("Outline station/interval {i} has unresolved fit or sampling support. Resolve the source analysis's measurement requirements before fitting a footprint.")));
+            return Err(Error::Data(format!(
+                "Outline station/interval {i} has unresolved fit or sampling support. Resolve the source analysis's measurement requirements before fitting a footprint."
+            )));
         }
     }
     let (min, max) = stations
@@ -75,7 +77,11 @@ fn source(store: &Store, object: &Id, setup: &Id, id: &Id) -> Result<Source, Err
             })
             .fold(f64::INFINITY, f64::min);
         if residual > req.max_residual {
-            return Err(Error::Data(format!("Independent outline check {}:{} disagrees by {residual} mm. Resolve the source estimate; the check will not become fitting data.",check.capture.as_str(),check.sequence)));
+            return Err(Error::Data(format!(
+                "Independent outline check {}:{} disagrees by {residual} mm. Resolve the source estimate; the check will not become fitting data.",
+                check.capture.as_str(),
+                check.sequence
+            )));
         }
     }
     let polygon = polygon::Polygon::new(stations.iter().map(|p| p.surface.unwrap()).collect())?;
@@ -162,8 +168,17 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
             &super::super::pose_record(pose)?,
         )?;
     }
-    let (state, message) = fitted.stop.description();
-    let manifest=format!("{{\"schema\":\"dmc2.footprint-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"design\":{},\"outline_analysis\":{},\"result\":{},\"source_outline\":{},\"cam_ready\":false}}\n",record::quote(object.as_str()),record::quote(setup.as_str()),record::quote(id.as_str()),record::quote(r.design.as_str()),record::quote(r.outline.as_str()),result.json,source.report);
+    let (state, message) = search::description(fitted.stop);
+    let manifest = format!(
+        "{{\"schema\":\"dmc2.footprint-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"design\":{},\"outline_analysis\":{},\"result\":{},\"source_outline\":{},\"cam_ready\":false}}\n",
+        record::quote(object.as_str()),
+        record::quote(setup.as_str()),
+        record::quote(id.as_str()),
+        record::quote(r.design.as_str()),
+        record::quote(r.outline.as_str()),
+        result.json,
+        source.report
+    );
     save(&output.join("manifest.json"), manifest.as_bytes())?;
     Ok(format!(
         "{{\"analysis_directory\":{},\"state\":{},\"message\":{},\"cam_ready\":false}}",

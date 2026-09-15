@@ -80,6 +80,8 @@ pub enum Operation {
     PrepareStockMesh,
     ReconstructStockMesh,
     ExportStockScene,
+    PrepareVolume,
+    FitVolume,
     Fit,
     ShowFit,
     ExportFit,
@@ -113,10 +115,12 @@ pub const OPERATIONS: &[Spec] = &[
     Spec { operation: Op::FitSurface, name: "fit-stock-surface", label: "Estimate 3D stock surfaces", description: "Estimate local surfaces and slope from retained 3D contacts without a nominal stock shape. Inspect residuals, unresolved regions and independent checks through Inspect analysis. Local patches leave unmeasured volume unknown.", fields: &[Object, Setup, NewAnalysis, Request] },
     Spec { operation: Op::PrepareFootprint, name: "prepare-footprint", label: "Prepare machining footprint", description: "Select a retained stock-outline analysis and the complete material this operation must preserve. Set allowed placement bounds and clearance in the request; stock need not be rectangular.", fields: &[Object, Setup, Analysis, Design] },
     Spec { operation: Op::FitFootprint, name: "fit-footprint", label: "Place machining footprint", description: "Search translation and yaw for the unchanged machining projection inside the measured outline. Inspect local material deficits and the search bound. Height and 3D material coverage remain separate requirements.", fields: &[Object, Setup, NewAnalysis, Request] },
-    Spec { operation: Op::PrepareMaterial, name: "prepare-material-check", label: "Prepare material check", description: "Select a machining-footprint candidate, then choose its retained 3D surface analysis and explicit local comparison bounds in the request.", fields: &[Object, Setup, Analysis] },
+    Spec { operation: Op::PrepareMaterial, name: "prepare-material-check", label: "Prepare material check", description: "Select a machining footprint or 3D volume-placement candidate, then choose retained surfaces and explicit local comparison bounds in the request.", fields: &[Object, Setup, Analysis] },
     Spec { operation: Op::CheckMaterial, name: "check-material", label: "Check candidate material", description: "Compare the unchanged required geometry to supported measured surface patches. Retain local shortages, unknown regions and candidate-directed measurement needs. This does not certify a stock volume or issue probing commands.", fields: &[Object, Setup, NewAnalysis, Request] },
     Spec { operation: Op::PrepareStockMesh, name: "prepare-stock-mesh", label: "Prepare stock reconstruction", description: "Select a retained 3D surface analysis. Set explicit calculation bounds, lattice spacing and interpolation support in the request; no nominal stock box is assumed.", fields: &[Object, Setup, Analysis] },
     Spec { operation: Op::ReconstructStockMesh, name: "reconstruct-stock-mesh", label: "Reconstruct stock surface", description: "Create a source-linked surface mesh from supported measured patches. Retain missing regions, open edges and interpolation limits for further acquisition. This does not certify a stock solid or issue machine commands.", fields: &[Object, Setup, NewAnalysis, Request] },
+    Spec { operation: Op::PrepareVolume, name: "prepare-volume-placement", label: "Prepare 3D stock placement", description: "Select reconstructed measured stock and full required operation geometry. Fill the explicit occupancy model, allowed XYZ translations/rotations, clearance and computation budgets.", fields: &[Object, Setup, StockMeshAnalysis, Design] },
+    Spec { operation: Op::FitVolume, name: "fit-volume-placement", label: "Place geometry in 3D stock", description: "Search allowed rigid placements against an explicitly enclosed measured-stock model. Retain the best position, every local deficit, source geometry and remaining search bound for material checks and CAD export.", fields: &[Object, Setup, NewAnalysis, Request] },
     Spec { operation: Op::ExportStockScene, name: "export-stock-scene", label: "Export stock scene for CAD", description: "Combine a material assessment and its measured stock mesh with exact shared source binding. Export separate geometry roles and the candidate frame convention for FreeCAD inspection and CAM preparation.", fields: &[Object, Setup, MaterialAnalysis, StockMeshAnalysis, NewDirectory] },
     Spec { operation: Op::LoadRequest, name: "load-request", label: "Open analysis request", description: "Open a request draft for editing. Save edits to a new file to preserve the original.", fields: &[Request] },
     Spec { operation: Op::SaveRequest, name: "save-request", label: "Save request as", description: "Save the current request editor to a new file. Existing files are never overwritten. CLI input is read from standard input.", fields: &[NewFile] },
@@ -135,6 +139,7 @@ impl Spec {
             | Op::PrepareFootprint
             | Op::PrepareMaterial
             | Op::PrepareStockMesh
+            | Op::PrepareVolume
             | Op::LoadRequest => "request",
             _ => "json",
         }

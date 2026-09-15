@@ -753,6 +753,108 @@ remaining failures; these do not establish live CNC behavior or physical
 acceptance. The code and file checks are retained in
 `/home/kit/cnc-backups/mapper-ui-e7tu4teh`.
 
+## Bounded 3D placement in reconstructed stock
+
+The standard binary and typed Object Mapper catalog now connect a reconstructed
+measured boundary to full rigid placement of unchanged required operation
+geometry. This is an enclosed **stock model**, not an assertion about physical
+wood. It does not require a rectangle, quadrilateral, convex outline or nominal
+stock dimensions. For dice OP1 the required design remains `stage1_after`, with
+backing and holding envelopes, rather than only the finished blanks.
+
+```text
+prepare-volume-placement OBJECT SETUP STOCK-MESH-ANALYSIS DESIGN
+fit-volume-placement OBJECT SETUP NEW-ANALYSIS REQUEST
+```
+
+Use the existing request editor, Save request as, Inspect analysis and Export
+analysis. The draft fills the selected source IDs; every other value is REQUIRED.
+The source reconstruction is reproduced from its retained surface analysis and
+exact original capture bytes before placement. Any absent mesh stays absent.
+
+The request is `DMC2_VOLUME_PLACEMENT_REQUEST_V1`. Its explicit inputs are:
+
+| Fields | Meaning |
+| --- | --- |
+| `stock_mesh_analysis`, `design` | Retained reconstruction and full required-operation STL revision. |
+| `required_geometry_role` | `operation-retained-material`; required backing and holding features belong in this geometry. |
+| `stock_occupancy_model` | `single-shell-enclosed-solid` explicitly models the inside of one closed boundary as material, without hidden cavities. It is not a measured physical fact. |
+| `stl_mm_per_unit` | Original design unit conversion; reconstructed stock is already machine millimetres. |
+| `model_origin_x_bounds_mm`, `model_origin_y_bounds_mm`, `model_origin_z_bounds_mm` | Allowed lower,upper translations of the unchanged design origin; equal endpoints keep a coordinate fixed. |
+| `roll_bounds_deg`, `pitch_bounds_deg`, `yaw_bounds_deg` | Allowed rotations. The matrix convention is `Rz(yaw) Ry(pitch) Rx(roll)` followed by translation. Each interval is at most one full turn. |
+| `required_clearance_mm`, `surface_allowance_mm` | Nonnegative clearance and an explicitly subtracted allowance. Neither supplies a physical uncertainty estimate. |
+| `cover_radius_mm`, `max_cover_samples` | Full spatial triangle-cover size and computation budget; the source STL and triangle order are preserved. |
+| `placement_resolution_mm`, `max_evaluations` | Stop when requested clearance is found, the remaining objective gap reaches resolution, the evaluation budget ends or a cell cannot be subdivided. |
+| `max_topology_visits`, `max_winding_terms` | Explicit geometry-computation budgets. Winding reserves the requested search and final report across every cover sample and stock triangle; no partial geometry substitutes on exhaustion. |
+
+Before enclosed-stock interpretation, the Rust geometry path checks consistent
+outward closed edges, a connected cycle around every vertex, one connected shell,
+and intersections beyond shared edges/vertices. Open, pinched, disconnected and
+intersecting boundaries return readable source-specific recovery instructions.
+The code does not cap holes, delete triangles or infer nested cavity semantics.
+Adaptive orientation signs use the pinned
+[GeoRust `robust` 1.2.0 predicates](https://docs.rs/robust/1.2.0/robust/).
+
+The inward distance combines the nearest boundary distance with the sum of
+oriented triangle solid angles. For a closed embedded outward boundary, winding
+is one inside and zero outside; half separates these values. This is the
+[closed-boundary winding interpretation described by libigl](https://libigl.github.io/tutorial/#generalized-winding-number),
+not a machining tolerance or a way to fill open surfaces.
+
+For each covered required triangle, the lower clearance is:
+
+```text
+inside_distance(transformed_cover_center) - cover_radius - surface_allowance
+```
+
+The search maximizes the minimum of these values. Translation half-diagonals and
+rotation chords bound how far any covered point can move within each search
+cell. Signed distance is 1-Lipschitz, so that displacement bounds the possible
+objective improvement. These are floating-point calculations for the stated
+geometric model, not a formal arithmetic or physical certificate. Each rotation
+acts around the original model origin; long offsets can therefore make bounds
+conservative. Smaller covers reduce geometric conservatism but increase work.
+The implementation sums all stock-triangle angles per query; budgets and the
+existing UI Cancel remain available for expensive analyses.
+
+Every result retains the unchanged design STL, complete stock/source bundles,
+transformed candidate STL, full residual rows, improving-search history and an
+unreviewed pose record. The best candidate and remaining objective upper bound
+survive budget/resolution termination. A retained pose is not accepted placement.
+`nearest_stock_triangle` indexes the retained stock STL's original triangle order;
+reconstruction facet/source tables remain alongside it. The existing material
+checker and CAD scene exporter use the shared typed candidate reader for both
+footprint and volume candidates. A volume scene must use the same exact stock
+revision as its candidate. Scene meshes are already in machine millimetres and
+import at identity; no additional flip or candidate transform is applied.
+
+The local material report remains a local surface assessment: a deeply interior
+point can lack local patch support even when the explicit enclosed model treats
+it as material. Its measurement regions are not executable probe targets. Stock
+occupancy, fixture/tool clearance and physical registration remain unaccepted.
+
+The installed-binary numerical file exercise is retained at
+`/home/kit/cnc-backups/mapper-volume-1_k2fict`. The synthetic ellipsoid uses
+10/9/8 mm semiaxes and explicitly labelled synthetic calibration. Earlier sparse
+analyses remain open. A denser set of 800 fitting and 400 withheld contacts, a
+2.5 mm neighborhood and a 0.5 mm grid produced 35,356 supported facets with closed
+edge incidence; the placement path then checked 17,680 vertex links and 262,348
+intersecting-AABB triangle pairs. It moved the unresized 12-triangle required
+geometry from a lower clearance of -2.1275388512570115 mm to
++1.8029034233368737 mm, using 512 covers and three objective evaluations. These
+numbers describe this calculation only; none is a production default.
+
+The 25-file placement export and 60-file CAD scene retained every source file
+byte for byte. A deliberately budget-limited request retained its best pose;
+an open reconstruction was rejected before publishing a placement directory.
+The original footprint replay matched all 17 files except the new analysis ID,
+and the older material/scene outputs matched their retained bytes. Source tests
+reported 58 passes, including concavity, pitch search and mesh-intersection
+cases. Readbacks: `round-trip-readback.json`, `legacy-readback.json` and
+`legacy-final-readback.json` in that backup directory. These are source/build/
+numerical/file milestones, not evidence of physical motion, material occupancy,
+measurement accuracy, accepted workholding or a usable cutting program.
+
 ## Recorded TODOs — 2026-09-14
 
 This is the continuing implementation list for the positional mapper and
@@ -896,8 +998,10 @@ machine run.
   object-map numerical checks reported passes. See the reconstruction runbook
   and `/home/kit/cnc-backups/mapper-stockmesh-uery5t54/round-trip-readback.json`.
   Still required: top/side/base connections and crease handling, distinction of
-  supported empty space from unknown volume, geometric solid validation,
-  multi-height acquisition and the physical material interpretation. Open edges
+  supported empty space from unknown volume,
+  multi-height acquisition and the physical material interpretation. The new
+  volume-placement path checks closed-shell geometry including vertex links and
+  triangle intersections; that model does not establish physical occupancy. Open edges
   must not be silently capped, and edge incidence alone must not accept stock
   containment. Connect the measurement regions to acquisition and the resulting
   material model to placement/CAM; mesh export is a milestone within that flow.
@@ -920,7 +1024,14 @@ machine run.
   object-map numerical checks report passes. Full 3D containment, integration
   with supported volume, actual setup constraints and physical acceptance remain
   open; neither the horizontal result nor these checks establishes them. See
-  the footprint runbook and the retained file readback above.
+  the footprint runbook and the retained file readback above. The standard
+  `prepare-volume-placement` / `fit-volume-placement` path now adds bounded XYZ
+  translation/rotation search against a reproduced, explicitly enclosed stock
+  model, without resizing required geometry. It shares search mechanics and the
+  candidate reader with footprint/material/scene operations. The numerical
+  ellipsoid file exercise retained full source bytes and local deficits through
+  CAD export. See the 3D placement runbook above. Partial-boundary interpretation,
+  crease/base connections, setup constraints and physical acceptance remain open.
 - [ ] **Use 3D material comparisons to drive placement and observation.**
   `prepare-material-check` / `check-material` are in the standard catalog and
   installed binary. They connect unchanged operation geometry to local measured
@@ -930,9 +1041,13 @@ machine run.
   534 regions showed local clearance shortages and 928 lacked support. Forty-one
   object-map numerical checks reported passes. See the material-check runbook
   and `/home/kit/cnc-backups/mapper-material-prtkle5x/round-trip-readback.json`.
-  These are source/build/file milestones. Feeding those constraints into the
-  placement optimizer, supported-volume construction, acquisition planning and
-  physical observation remain outstanding. Local inwardness is not containment.
+  These are source/build/file milestones. The shared candidate path now accepts
+  3D volume-placement results and exports their exact stock revision with the
+  material scene. Closed reconstructed boundaries can drive the bounded 3D
+  optimizer under an explicit enclosed-material assumption. Partial observations
+  still need supported-empty/unknown-volume interpretation and conversion of
+  measurement regions to acquisition plans. Physical observation and acceptance
+  remain outstanding. Local inwardness is not containment.
 - [ ] **Validate placement and compare setups.** Retain named calibration
   evidence and reference-frame relationships, calculate independent feature
   prediction errors, and provide a reviewed placement state with an explicit
@@ -966,8 +1081,10 @@ machine run.
   an unreviewed proposal and exported its files. Comparison inputs, outputs and
   the previous binary are retained at
   `/home/kit/cnc-backups/mapper-spatial-arbj4k3j`. Initial alignment, symmetry
-  handling and self-intersection analysis remain outstanding. Mesh closure
-  checks alone do not establish absence of self-intersections.
+  handling remain outstanding. The volume-placement stock path now adds
+  adaptive-predicate triangle intersection checks and vertex/shell topology
+  checks; other registration paths retain their stated mesh-validation limits.
+  Edge closure alone does not establish absence of self-intersections.
 - [ ] **Connect mapper results to the operator workflow.** Provide normal UI
   access to object/setup selection, retained captures, model revisions, analysis
   parameters, residual inspection and named-location export. Analysis must run

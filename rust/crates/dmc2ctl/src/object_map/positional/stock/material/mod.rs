@@ -4,21 +4,18 @@ mod report;
 pub(in crate::object_map) mod request;
 #[cfg(test)]
 mod tests;
-use super::super::{cover, mesh::Mesh, read_pose, retained::Bundle};
-use super::{placement, surface};
+use super::super::cover;
+use super::{candidate::Candidate, surface};
 use crate::object_map::{
+    Error,
     model::Id,
     record,
-    store::{read, save, Store},
-    Error,
+    store::{Store, read, save},
 };
 use std::path::Path;
 
 pub fn prepare(store: &Store, object: &Id, setup: &Id, candidate: &Id) -> Result<String, Error> {
-    let dir = super::super::folder(store, object, setup, candidate)?;
-    let source = Bundle::read(&dir)?;
-    placement::request::Request::read(source.get("request.txt")?)?;
-    read_pose(&dir.join("pose-candidate.txt"))?;
+    Candidate::load(store, object, setup, candidate)?;
     let fields = request::KEYS
         .iter()
         .map(|k| {
@@ -42,32 +39,15 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
     }
     let raw = read(input)?;
     let r = request::Request::read(&raw)?;
-    let dir = super::super::folder(store, object, setup, &r.candidate)?;
-    let candidate = Bundle::read(&dir)?;
-    let placement = placement::request::Request::read(candidate.get("request.txt")?)?;
-    let pose = read_pose(&dir.join("pose-candidate.txt"))?;
-    let mesh = Mesh::read(candidate.get("source.stl")?, placement.units)?;
-    mesh.fitting_geometry()?;
-    let transformed = mesh.transformed_stl(pose)?;
-    candidate.require_equal("model-candidate.machine-mm.stl", transformed.as_bytes())?;
+    let candidate = Candidate::load(store, object, setup, &r.candidate)?;
+    let pose = candidate.pose;
+    let mesh = &candidate.mesh;
     let loaded = surface::load(store, object, setup, &r.surface)?;
     let source = &loaded.source;
     let sr = &loaded.request;
     let contacts = &loaded.contacts;
     let stations = &loaded.stations;
-    let (outline_fields, _) = record::decode(
-        candidate.get("stock-source-request.txt")?,
-        super::request::SCHEMA,
-        &super::request::keys(),
-    )?;
-    let (surface_fields, _) = record::decode(
-        source.get("request.txt")?,
-        surface::request::SCHEMA,
-        &surface::request::keys(),
-    )?;
-    if outline_fields["frame_reference"] != surface_fields["frame_reference"] {
-        return Err(Error::Data("The candidate outline and 3D surfaces declare different frame references. Resolve their actual setup relationship and retain matching source analyses before comparison; no implicit registration was applied.".into()));
-    }
+    candidate.require_frame(source)?;
     let samples = cover::build(
         mesh.triangles(),
         r.radius,
@@ -78,7 +58,7 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
     let report = report::build(&samples, contacts, &result, mesh.triangles(), pose, &r)?;
     // Original candidate, source analysis and exact triggers survive together.
     save(&output.join("request.txt"), &raw)?;
-    candidate.copy_to(&output, "candidate-source-")?;
+    candidate.bundle.copy_to(&output, "candidate-source-")?;
     source.copy_to(&output, "surface-source-")?;
     save(&output.join("residuals.csv"), report.csv.as_bytes())?;
     save(
@@ -89,7 +69,18 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
         &output.join("material-check.machine-mm.json"),
         report.json.as_bytes(),
     )?;
-    let manifest = format!("{{\"schema\":\"dmc2.material-check-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"candidate_analysis\":{},\"surface_analysis\":{},\"result\":{},\"cam_ready\":false}}\n",record::quote(object.as_str()),record::quote(setup.as_str()),record::quote(id.as_str()),record::quote(r.candidate.as_str()),record::quote(r.surface.as_str()),report.json);
+    let manifest = format!(
+        "{{\"schema\":\"dmc2.material-check-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"candidate_analysis\":{},\"surface_analysis\":{},\"result\":{},\"cam_ready\":false}}\n",
+        record::quote(object.as_str()),
+        record::quote(setup.as_str()),
+        record::quote(id.as_str()),
+        record::quote(r.candidate.as_str()),
+        record::quote(r.surface.as_str()),
+        report.json
+    );
     save(&output.join("manifest.json"), manifest.as_bytes())?;
-    Ok(format!("{{\"analysis_directory\":{},\"state\":\"material-coverage-unresolved\",\"message\":\"Local material comparisons and candidate-directed measurement regions are retained. Inspect each shortage, missing support and independent check. Closed volume and cutting remain unresolved.\",\"cam_ready\":false}}",record::quote(&output.display().to_string())))
+    Ok(format!(
+        "{{\"analysis_directory\":{},\"state\":\"material-coverage-unresolved\",\"message\":\"Local material comparisons and candidate-directed measurement regions are retained. Inspect each shortage, missing support and independent check. Closed volume and cutting remain unresolved.\",\"cam_ready\":false}}",
+        record::quote(&output.display().to_string())
+    ))
 }

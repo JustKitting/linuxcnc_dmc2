@@ -1,6 +1,10 @@
 //! ASCII/binary STL triangles. Explicit units; geometric normals from winding.
 use super::{super::Error, geometry::*};
 use std::collections::BTreeMap;
+mod intersection;
+pub mod solid;
+#[cfg(test)]
+pub(super) mod solid_tests;
 mod spatial;
 #[cfg(test)]
 mod tests;
@@ -254,7 +258,10 @@ impl Mesh {
     }
     pub fn fitting_geometry(&self) -> Result<(), Error> {
         if self.boundary_edges != 0 || self.inconsistent_edges != 0 || self.signed_volume <= 0. {
-            return Err(data(format!("STL does not have closed consistent outward winding (boundary edges {}, inconsistent edges {}, signed volume {}). Repair the mesh before sphere-to-surface fitting; inspection results remain available.",self.boundary_edges,self.inconsistent_edges,self.signed_volume)));
+            return Err(data(format!(
+                "STL does not have closed consistent outward winding (boundary edges {}, inconsistent edges {}, signed volume {}). Repair the mesh before sphere-to-surface fitting; inspection results remain available.",
+                self.boundary_edges, self.inconsistent_edges, self.signed_volume
+            )));
         }
         Ok(())
     }
@@ -265,7 +272,16 @@ impl Mesh {
         &self.triangles
     }
     pub fn json(&self) -> String {
-        format!("{{\"triangles\":{},\"min_mm\":{},\"max_mm\":{},\"span_mm\":{},\"boundary_edges\":{},\"inconsistent_edges\":{},\"signed_volume_mm3\":{},\"self_intersections_checked\":false}}",self.triangles.len(),json(self.min),json(self.max),json(sub(self.max,self.min)),self.boundary_edges,self.inconsistent_edges,self.signed_volume)
+        format!(
+            "{{\"triangles\":{},\"min_mm\":{},\"max_mm\":{},\"span_mm\":{},\"boundary_edges\":{},\"inconsistent_edges\":{},\"signed_volume_mm3\":{},\"self_intersections_checked\":false}}",
+            self.triangles.len(),
+            json(self.min),
+            json(self.max),
+            json(sub(self.max, self.min)),
+            self.boundary_edges,
+            self.inconsistent_edges,
+            self.signed_volume
+        )
     }
     pub fn transformed_stl(&self, pose: Pose) -> Result<String, Error> {
         let mut text = String::from("solid dmc2_pose_candidate_mm\n");

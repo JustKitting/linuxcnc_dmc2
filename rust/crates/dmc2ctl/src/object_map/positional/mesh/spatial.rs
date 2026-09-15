@@ -1,5 +1,5 @@
 //! Immutable triangle IDs in a balanced axis-aligned bounding-box hierarchy.
-use super::{data, finite, Error, Nearest, Triangle, V};
+use super::{Error, Nearest, Triangle, V, data, finite};
 
 #[derive(Clone, Copy)]
 struct Bounds {
@@ -8,6 +8,9 @@ struct Bounds {
 }
 
 impl Bounds {
+    fn overlaps(self, other: Self) -> bool {
+        (0..3).all(|i| self.min[i] <= other.max[i] && other.min[i] <= self.max[i])
+    }
     fn triangle(t: &Triangle) -> Self {
         Self {
             min: std::array::from_fn(|i| t.v.iter().map(|p| p[i]).fold(f64::INFINITY, f64::min)),
@@ -61,6 +64,38 @@ pub(super) struct Index {
 }
 
 impl Index {
+    /// Visit every unordered pair of intersecting closed triangle AABBs.
+    /// The explicit budget counts hierarchy visits, including pruned nodes.
+    pub(super) fn overlap_pairs(
+        &self,
+        triangles: &[Triangle],
+        budget: usize,
+        mut pair: impl FnMut(usize, usize) -> Result<(), Error>,
+    ) -> Result<usize, Error> {
+        let mut visits = 0usize;
+        for (i, t) in triangles.iter().enumerate() {
+            let bounds = Bounds::triangle(t);
+            let mut pending = vec![self.root];
+            while let Some(id) = pending.pop() {
+                if visits == budget {
+                    return Err(data(
+                        "The mesh topology search exhausted max_topology_visits. Preserve the source and increase this computational budget in a new request; no closed-solid result was accepted.",
+                    ));
+                }
+                visits += 1;
+                let node = &self.nodes[id];
+                if !bounds.overlaps(node.bounds) {
+                    continue;
+                }
+                match node.contents {
+                    Contents::Triangle(j) if j > i => pair(i, j)?,
+                    Contents::Triangle(_) => (),
+                    Contents::Branch(children) => pending.extend(children),
+                }
+            }
+        }
+        Ok(visits)
+    }
     pub(super) fn new(triangles: &[Triangle]) -> Result<Self, Error> {
         if triangles.is_empty() {
             return Err(data("STL has no searchable geometry."));

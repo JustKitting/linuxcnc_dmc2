@@ -1,8 +1,8 @@
 //! File-selection and draft exchange for the offline AXIS editor.
 use super::{
+    Error,
     record::{self, quote},
     store::{read, save},
-    Error,
 };
 use std::{fs, path::Path};
 
@@ -58,9 +58,13 @@ fn draft(raw: &[u8]) -> Result<&str, Error> {
             super::positional::stock::reconstruction::request::SCHEMA,
             super::positional::stock::reconstruction::request::KEYS.to_vec(),
         ),
+        (
+            super::positional::stock::volume::request::SCHEMA,
+            super::positional::stock::volume::request::KEYS.to_vec(),
+        ),
     ];
     let (schema, keys) = schemas.iter().find(|(schema, _)| raw.starts_with(format!("{schema}\n").as_bytes()))
-        .ok_or_else(|| Error::Input("Unsupported analysis draft. Prepare a registration, stock outline, stock surface, machining footprint, material-check or stock-mesh request through Object Mapper.".into()))?;
+        .ok_or_else(|| Error::Input("Unsupported analysis draft. Prepare a registration, stock outline, stock surface, machining footprint, material-check, stock-mesh or volume-placement request through Object Mapper.".into()))?;
     record::decode(raw, schema, keys)?;
     std::str::from_utf8(raw).map_err(|e| Error::Input(format!("Request text is not UTF-8: {e}.")))
 }
@@ -70,5 +74,8 @@ pub fn load_request(path: &Path) -> Result<String, Error> {
 pub fn save_request(path: &Path, raw: &[u8]) -> Result<String, Error> {
     draft(raw)?;
     save(path, raw)?;
-    Ok(format!("{{\"request_file\":{},\"state\":\"draft-retained\",\"message\":\"Request text retained. The selected analysis operation validates calibration, settings and selected contacts.\"}}",quote(&path.display().to_string())))
+    Ok(format!(
+        "{{\"request_file\":{},\"state\":\"draft-retained\",\"message\":\"Request text retained. The selected analysis operation validates calibration, settings and selected contacts.\"}}",
+        quote(&path.display().to_string())
+    ))
 }

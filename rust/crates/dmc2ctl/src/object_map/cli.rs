@@ -1,10 +1,10 @@
 use super::{
+    Error,
     catalog::{self, Operation},
     exchange, files,
     model::Id,
     positional,
     store::Store,
-    Error,
 };
 use std::{
     ffi::OsString,
@@ -126,6 +126,10 @@ pub fn run(args: &[OsString], default_store: &Path) -> Result<String, Error> {
         ReconstructStockMesh => {
             positional::stock::reconstruction::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3))
         }
+        PrepareVolume => {
+            positional::stock::volume::prepare(&store, &id(0)?, &id(1)?, &id(2)?, &id(3)?)
+        }
+        FitVolume => positional::stock::volume::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3)),
         ExportStockScene => {
             positional::stock::scene::export(&store, &id(0)?, &id(1)?, &id(2)?, &id(3)?, path(4))
         }

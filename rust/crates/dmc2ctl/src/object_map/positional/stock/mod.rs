@@ -1,6 +1,8 @@
 //! Acquisition-led stock estimation, reached through the standard offline binary.
+mod candidate;
 mod fit;
 pub(in crate::object_map) mod material;
+mod optimize;
 pub(in crate::object_map) mod placement;
 pub(in crate::object_map) mod reconstruction;
 mod report;
@@ -9,12 +11,13 @@ pub(in crate::object_map) mod scene;
 mod surface;
 #[cfg(test)]
 mod tests;
+pub(in crate::object_map) mod volume;
 use super::{
     super::{
+        Error,
         model::{CaptureState, Id, Stage},
         record,
-        store::{read, save, Store},
-        Error,
+        store::{Store, read, save},
     },
     folder,
 };
@@ -22,7 +25,7 @@ use crate::probe_data::{
     ledger::number,
     mapper_schema::Phase,
     mapper_settings::Mode,
-    mapper_trace::{outline, state, Progress},
+    mapper_trace::{Progress, outline, state},
     schema::Workflow,
 };
 use std::{collections::BTreeSet, path::Path};
@@ -186,7 +189,19 @@ pub fn run(
         .map(|x| record::quote(x))
         .collect::<Vec<_>>()
         .join(",");
-    let manifest=format!("{{\"schema\":\"dmc2.{}-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"captures\":[{}],\"result\":{},\"cam_ready\":false}}\n",model.name(),record::quote(object.as_str()),record::quote(setup.as_str()),record::quote(id.as_str()),sources,report.json);
+    let manifest = format!(
+        "{{\"schema\":\"dmc2.{}-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"captures\":[{}],\"result\":{},\"cam_ready\":false}}\n",
+        model.name(),
+        record::quote(object.as_str()),
+        record::quote(setup.as_str()),
+        record::quote(id.as_str()),
+        sources,
+        report.json
+    );
     save(&output.join("manifest.json"), manifest.as_bytes())?;
-    Ok(format!("{{\"analysis_directory\":{},\"state\":\"unreviewed-{}\",\"message\":\"Stock estimate retained with local residuals and measurement requests. Inspect the analysis and independent checks; material coverage and machining placement remain unresolved.\",\"cam_ready\":false}}",record::quote(&output.display().to_string()),model.name()))
+    Ok(format!(
+        "{{\"analysis_directory\":{},\"state\":\"unreviewed-{}\",\"message\":\"Stock estimate retained with local residuals and measurement requests. Inspect the analysis and independent checks; material coverage and machining placement remain unresolved.\",\"cam_ready\":false}}",
+        record::quote(&output.display().to_string()),
+        model.name()
+    ))
 }
