@@ -67,4 +67,18 @@ impl Bundle {
         }
         Ok(())
     }
+    pub fn require_source(&self, source: &Self, prefix: &str) -> Result<(), Error> {
+        let names = self
+            .files
+            .keys()
+            .filter_map(|name| name.strip_prefix(prefix))
+            .collect::<Vec<_>>();
+        if names != source.files.keys().map(String::as_str).collect::<Vec<_>>() {
+            return Err(Error::Data(format!("The retained {prefix} file set differs from the selected source analysis. Select matching revisions or recalculate the dependent analysis; no source files were added or discarded.")));
+        }
+        for (name, bytes) in &source.files {
+            self.require_equal(&format!("{prefix}{name}"), bytes)?;
+        }
+        Ok(())
+    }
 }

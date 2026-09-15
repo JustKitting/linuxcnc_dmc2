@@ -40,6 +40,39 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
         return Err(Error::Storage("This stock-mesh analysis ID already exists. Choose a new ID to preserve its prior result.".into()));
     }
     let raw = read(input)?;
+    let Estimated {
+        request: r,
+        source,
+        report,
+    } = estimate(store, object, setup, &raw)?;
+    save(&output.join("request.txt"), &raw)?;
+    source.source.copy_to(&output, "surface-source-")?;
+    for (name, bytes) in &report.files {
+        save(&output.join(name), bytes.as_bytes())?;
+    }
+    save(
+        &output.join("manifest.json"),
+        manifest(object, setup, id, &r, &report).as_bytes(),
+    )?;
+    let (state, message) = report.outcome.description();
+    Ok(format!(
+        "{{\"analysis_directory\":{},\"state\":{},\"message\":{},\"cam_ready\":false}}",
+        record::quote(&output.display().to_string()),
+        record::quote(state),
+        record::quote(message)
+    ))
+}
+pub(super) struct Estimated {
+    pub request: request::Request,
+    pub source: surface::Loaded,
+    pub report: report::Report,
+}
+pub(super) fn estimate(
+    store: &Store,
+    object: &Id,
+    setup: &Id,
+    raw: &[u8],
+) -> Result<Estimated, Error> {
     let r = request::Request::read(&raw)?;
     let grid = grid::Grid::new(&r)?;
     let source = surface::load(store, object, setup, &r.surface)?;
@@ -54,18 +87,18 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
         field.facet_support(v, &source.request, &r)
     })?;
     let report = report::build(&grid, &field.nodes, &mesh, &source.contacts, &r)?;
-    save(&output.join("request.txt"), &raw)?;
-    source.source.copy_to(&output, "surface-source-")?;
-    for (name, bytes) in report.files {
-        save(&output.join(name), bytes.as_bytes())?;
-    }
-    let manifest=format!("{{\"schema\":\"dmc2.stock-mesh-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"surface_analysis\":{},\"result\":{},\"cam_ready\":false}}\n",record::quote(object.as_str()),record::quote(setup.as_str()),record::quote(id.as_str()),record::quote(r.surface.as_str()),report.json);
-    save(&output.join("manifest.json"), manifest.as_bytes())?;
-    let (state, message) = report.outcome.description();
-    Ok(format!(
-        "{{\"analysis_directory\":{},\"state\":{},\"message\":{},\"cam_ready\":false}}",
-        record::quote(&output.display().to_string()),
-        record::quote(state),
-        record::quote(message)
-    ))
+    Ok(Estimated {
+        request: r,
+        source,
+        report,
+    })
+}
+pub(super) fn manifest(
+    object: &Id,
+    setup: &Id,
+    id: &Id,
+    r: &request::Request,
+    report: &report::Report,
+) -> String {
+    format!("{{\"schema\":\"dmc2.stock-mesh-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"surface_analysis\":{},\"result\":{},\"cam_ready\":false}}\n",record::quote(object.as_str()),record::quote(setup.as_str()),record::quote(id.as_str()),record::quote(r.surface.as_str()),report.json)
 }

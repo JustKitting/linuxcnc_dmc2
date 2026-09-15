@@ -5,6 +5,7 @@ pub(in crate::object_map) mod placement;
 pub(in crate::object_map) mod reconstruction;
 mod report;
 mod request;
+pub(in crate::object_map) mod scene;
 mod surface;
 #[cfg(test)]
 mod tests;

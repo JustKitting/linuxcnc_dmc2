@@ -589,6 +589,51 @@ stock evidence. Readback:
 `/home/kit/cnc-backups/mapper-stockmesh-uery5t54/round-trip-readback.json`.
 The standard binary is built and installed; the CNC session was not restarted.
 
+## Export a stock scene for the CAD workflow
+
+**Export stock scene for CAD** combines a retained material assessment with a
+stock reconstruction from the same surface revision:
+
+```sh
+native/bin/dmc2ctl object-map export-stock-scene part first material-a mesh-a /tmp/stock-scene-a
+```
+
+The standard UI supplies separate Material analysis and Stock mesh analysis
+selectors. Export checks exact source file sets and bytes in both dependent
+analyses, reproduces the stock reconstruction and checks its retained results,
+and reproduces the candidate STL from its original geometry, unit conversion
+and rigid transform. The candidate outline and measured surface must declare
+the same reference frame. Differing revisions or bytes produce a named error
+before publication, with instructions to select or calculate matching sources.
+
+The new folder contains complete `material/` and `stock/` analysis bundles,
+`README.txt` and a final `manifest.json` using
+`dmc2.freecad-stock-scene.v1`. Its `geometry` list distinguishes unchanged
+**operation-retained-material** from **estimated-measured-stock-surface**. Both
+listed meshes are in machine millimetres and use identity import placement.
+The required material has already been transformed; applying the candidate
+matrix, a work offset or a setup flip again would duplicate that placement.
+The original design STL, original unit conversion and model-mm-to-machine-mm
+matrix remain separately identified for native CAD integration. An absent
+supported stock mesh remains absent from the geometry list.
+
+The scene retains material/stock reports and measurement needs. Export replays
+the stock reconstruction; it preserves the existing material assessment with
+exact source binding but does not rerun that assessment. This distinction is
+explicit in the manifest. The files supply the common scene for inspection and
+subsequent integration, not an accepted physical placement or native CAM Job.
+Open stock regions, containment, actual tools and fixtures remain unresolved.
+The CAD-side adapter must consume the intended operation geometry and apply the
+accepted frame convention once when those inputs are established.
+
+The installed standard binary exported the retained synthetic dataset with
+both geometry roles. All 32 material-bundle files and 18 stock-bundle files
+matched the originals. A deliberately altered disposable source copy was
+rejected before any export directory was published, identifying the differing
+capture filename. These are file observations; FreeCAD import, native CAM and
+machine behavior were not exercised. Readback:
+`/home/kit/cnc-backups/mapper-scene-58tfebd7/round-trip-readback.json`.
+
 ## Fit, inspect and repeat without editing control code
 
 ```sh
@@ -944,8 +989,15 @@ machine run.
   its required `ocl`/`opencamlib` dependency for 3D Surface is missing. The peer
   owns geometry and workstation CAM preparation. A native CAM Job document,
   actual tooling/stock/fixture inputs and accepted physical setup placement
-  remain outstanding. The present STL/ASC exchange is available; automatic Job
-  updates are not implemented. OP1 must preserve `stage1_after`, including its
+  remain outstanding. `export-stock-scene` now supplies a combined retained
+  material/stock scene with exact common-source binding, separate geometry
+  roles and an explicit identity import convention for already transformed
+  machine-mm meshes. The installed command's synthetic export retained all 50
+  source files unchanged and rejected an altered source before publication;
+  readback is in `/home/kit/cnc-backups/mapper-scene-58tfebd7`.
+  This scene and the STL/ASC exchange are available; native Job updates and CAD
+  workstation readback are not implemented/observed. OP1 must preserve
+  `stage1_after`, including its
   envelopes and backing; `stage1_targets` is finished-blank reference geometry.
   The descriptor's OP1-to-OP2 flip is already applied to stage2 geometry and
   must not be applied again during import.
