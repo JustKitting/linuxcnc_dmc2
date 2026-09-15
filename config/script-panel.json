@@ -57,7 +57,7 @@
       "key": "rim",
       "operation": "program.rim",
       "requires_beginning": true,
-      "description": "Start clear above the block. The first-edge search uses doubling distances from the starting sample, bounded by the plate, then refines the contact/miss bracket. It descends by Trace depth below the last top contact and follows the local outline at fixed Z. Each contact gets a full probe-diameter backoff before the next inward touch. Trace step sets local candidate spacing; Outline resolution sets contour closure tolerance. First search: physical RIGHT / LinuxCNC -X. Local tracing: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
+      "description": "Start clear above the block. The first-edge search doubles its distance from the starting sample, then refines the contact/miss bracket. At Trace depth below the last top contact, local search intervals grow and measured midpoints refine the outline. Initial / minimum trace interval limits how small that search becomes; Outline resolution sets midpoint disagreement and seam tolerance. Intervals that reach minimum spacing remain marked unresolved. Each contact gets a full probe-diameter backoff; refinement retraces retained clear paths. Plate bounds limit every candidate. First search: physical RIGHT / LinuxCNC -X. Local tracing: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
       "parameters": [
         {
           "pin": "rim-drop-mm",
@@ -68,7 +68,7 @@
         },
         {
           "pin": "rim-grid-mm",
-          "label": "Trace step / local search radius",
+          "label": "Initial / minimum trace interval",
           "kind": "positive-mm",
           "default": "1",
           "increment": "1"

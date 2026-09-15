@@ -3,15 +3,7 @@ use super::super::geometry::{Point, Rectangle};
 use super::model::{close, Mode, Phase, Request, Sample, Settings};
 use std::collections::{BTreeMap, BTreeSet};
 
-pub enum Progress {
-    Need(Request),
-    Invalid(String),
-}
-impl From<String> for Progress {
-    fn from(s: String) -> Self {
-        Self::Invalid(s)
-    }
-}
+pub use dmc2ctl::probe_data::mapper_trace::Progress;
 
 pub struct Survey<'a> {
     s: &'a Settings,

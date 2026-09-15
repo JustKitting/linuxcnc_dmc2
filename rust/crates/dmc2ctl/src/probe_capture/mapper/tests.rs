@@ -49,6 +49,7 @@ fn rotated_stock_replay_reaches_face_checks_and_rim_inside_original_envelope() {
                     8.0 + settings.offset[2],
                 ]);
                 samples.push(Sample {
+                    sequence: samples.len(),
                     request,
                     trigger,
                     returned: None,
@@ -80,6 +81,7 @@ fn contact_at_plate_boundary_never_becomes_a_measured_stock_edge() {
             panic!("expected bounded request");
         };
         samples.push(Sample {
+            sequence: samples.len(),
             request,
             trigger: Some([20.0, 30.0, 48.0]),
             returned: None,

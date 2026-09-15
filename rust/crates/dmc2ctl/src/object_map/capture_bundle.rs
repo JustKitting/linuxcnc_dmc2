@@ -2,6 +2,7 @@
 use super::{capture::Capture, model::Id, record, store::save, Error};
 use crate::probe_data::{
     mapper_settings::{data, policy, Mode, OutlinePolicy, Settings, PLATE_FIELDS},
+    mapper_trace::{outline, state, Progress},
     schema::Workflow,
 };
 use std::{fs, path::Path};
@@ -68,7 +69,7 @@ impl Context {
         let bytes=self.parts[kind as usize].as_deref().ok_or_else(||format!("The original {} snapshot was not retained. Import the original ledger with its companion files under a new capture ID; current configuration cannot substitute.",kind.name()))?;
         std::str::from_utf8(bytes).map_err(|e|format!("The retained {} snapshot is not UTF-8: {e}. Preserve the source and import an intact run under a new ID.",kind.name()))
     }
-    fn settings(&self, capture: &Capture) -> Result<Settings, String> {
+    pub fn settings(&self, capture: &Capture) -> Result<Settings, String> {
         if capture.workflow != Workflow::Mapper {
             return Err("This capture does not use mapper companion settings.".into());
         }
@@ -79,11 +80,12 @@ impl Context {
             PLATE_FIELDS,
         )?;
         let feeds = policy(self.text(Kind::Feeds)?)?;
-        let outline = if crate::probe_data::ledger::number(start, "mode")? == 2. {
-            Some(OutlinePolicy::read(self.text(Kind::Outline)?)?)
-        } else {
-            None
-        };
+        let outline =
+            if Mode::read(crate::probe_data::ledger::number(start, "mode")?)? == Mode::Outline {
+                Some(OutlinePolicy::read(self.text(Kind::Outline)?)?)
+            } else {
+                None
+            };
         let settings = Settings::read(start, &plate, &feeds, outline)?;
         if settings
             .min
@@ -112,11 +114,27 @@ impl Context {
             })
             .collect::<Vec<_>>()
             .join(",");
+        let mut selection = String::from("null");
         let (settings, issue) = if capture.workflow != Workflow::Mapper {
             (String::from("null"), String::from("null"))
         } else {
             match self.settings(capture) {
                 Ok(s) => {
+                    if s.mode == Mode::Outline {
+                        selection = match state::samples(&capture.records,&s,false) {
+                            Ok(samples)=>{
+                                let traced=outline::run(&s,&samples);
+                                let issue=match &traced.result {
+                                    Ok(())=>String::from("null"),
+                                    Err(Progress::Need(_))=>record::quote("The outline is partial; only selected retained contacts are ordered. Resume measurement through an operator-approved run."),
+                                    Err(Progress::Invalid(e))=>record::quote(e),
+                                };
+                                let refinements=traced.refinements.iter().map(outline::Refinement::json).collect::<Vec<_>>().join(",");
+                                format!("{{\"selected_original_sequences\":{:?},\"refinements\":[{refinements}],\"issue\":{issue},\"interpretation\":\"Selected contour order from this capture's retained policy; sampling decisions do not establish unsampled material or a solid volume.\"}}",traced.sequences)
+                            }
+                            Err(e)=>format!("{{\"selected_original_sequences\":null,\"refinements\":null,\"issue\":{}}}",record::quote(&e)),
+                        };
+                    }
                     let mode = match s.mode {
                         Mode::Outline => "outline",
                         Mode::Rim => "rim",
@@ -127,7 +145,7 @@ impl Context {
                 Err(e) => (String::from("null"), record::quote(&e)),
             }
         };
-        format!("{{\"schema\":\"dmc2.capture-context.v1\",\"snapshots\":[{parts}],\"settings\":{settings},\"issue\":{issue},\"interpretation\":\"Recorded acquisition settings, not calibration or current machine state. Companion files are retained as found beside the source ledger; legacy records have no inferred companions.\"}}")
+        format!("{{\"schema\":\"dmc2.capture-context.v1\",\"snapshots\":[{parts}],\"settings\":{settings},\"outline_selection\":{selection},\"issue\":{issue},\"interpretation\":\"Recorded acquisition settings, not calibration or current machine state. Companion files are retained as found beside the source ledger; legacy records have no inferred companions.\"}}")
     }
     pub fn export(&self, ledger: &Path, capture: &Capture) -> Result<(), Error> {
         for (kind, bytes) in Kind::ALL.iter().zip(&self.parts) {

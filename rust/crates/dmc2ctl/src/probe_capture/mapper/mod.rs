@@ -1,16 +1,14 @@
 //! Automatic stock geometry. M190 publishes data; LinuxCNC owns motion.
 mod dimensions;
 use dmc2ctl::probe_data::mapper_settings as model;
-mod outline;
+use dmc2ctl::probe_data::mapper_trace::{outline, state};
 mod outline_report;
 #[cfg(test)]
 mod outline_tests;
 mod report;
 mod search;
-mod state;
 #[cfg(test)]
 mod tests;
-mod withdrawal;
 
 use super::{ledger, plan_bank, schema::Workflow, storage};
 use model::{data, policy, Mode, OutlinePolicy, Phase, Request, Settings, PLATE_FIELDS};
@@ -62,7 +60,7 @@ fn read(path: &Path) -> Result<(Vec<ledger::Fields>, Settings), String> {
         &fs::read_to_string(path.with_extension("feeds.txt"))
             .map_err(|e| format!("Reading this run's feed snapshot: {e}"))?,
     )?;
-    let outline = if ledger::number(start, "mode")? == 2.0 {
+    let outline = if Mode::read(ledger::number(start, "mode")?)? == Mode::Outline {
         Some(OutlinePolicy::read(
             &fs::read_to_string(path.with_extension("outline.txt"))
                 .map_err(|e| format!("Reading this run's outline policy snapshot: {e}"))?,
@@ -85,7 +83,7 @@ pub(super) fn publish_next(output: &Path, sequence: u64) -> Result<(), String> {
         }
         let samples = state::samples(&records, &settings, false)?;
         let progress = if settings.mode == Mode::Outline {
-            outline::run(&settings, &samples).map(|_| ())
+            outline::run(&settings, &samples).result
         } else {
             search::Survey::new(&settings, &samples).run().map(|_| ())
         };

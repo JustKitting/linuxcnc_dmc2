@@ -2,7 +2,8 @@
 //! These numerical checks provide no evidence of physical probe behaviour.
 use super::{
     model::{
-        BoundarySearch, Mode, OutlinePolicy, OutlineRevision, Phase, Request, Sample, Settings,
+        BoundarySearch, LocalSearch, Mode, OutlinePolicy, OutlineRevision, Phase, Request, Sample,
+        Settings,
     },
     outline,
     search::Progress,
@@ -54,6 +55,13 @@ const CURRENT_POLICY: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../config/mapper-outline.txt"
 ));
+const GROWING_POLICY: &str = "DMC2_OUTLINE_POLICY_V4\nhandoff_mm=25.4\ninitial_edge_offset_mm=1\n";
+
+// The G-code recorder retains these fields with %.9f before the next plan.
+// Original fine-trigger coordinates are captured separately and stay exact.
+fn recorded_coordinates<const N: usize>(point: [f64; N]) -> [f64; N] {
+    point.map(|value| format!("{value:.9}").parse().unwrap())
+}
 
 fn replay(polygon: &[P], policy: OutlinePolicy) -> outline::Outline {
     let mut s = fixture(Mode::Outline);
@@ -68,8 +76,9 @@ fn replay(polygon: &[P], policy: OutlinePolicy) -> outline::Outline {
     let mut samples = Vec::new();
     let mut tracing = false;
     loop {
-        match outline::run(&s, &samples) {
-            Ok(result) => {
+        let result = outline::run(&s, &samples);
+        match &result.result {
+            Ok(()) => {
                 assert!(tracing);
                 assert!(result.points.len() > polygon.len());
                 let first = result.points[0];
@@ -79,10 +88,50 @@ fn replay(polygon: &[P], policy: OutlinePolicy) -> outline::Outline {
                     .points
                     .iter()
                     .all(|p| (p[2] - s.offset[2] - plane).abs() < 1e-9));
+                for (sequence, point) in result.sequences.iter().zip(&result.points) {
+                    assert_eq!(samples[*sequence].trigger, Some(*point));
+                }
+                if matches!(policy.local_search, LocalSearch::GrowingRefinement) {
+                    assert!(result.refinements.iter().any(|d| d.radius_mm > s.grid));
+                    assert!(result.sequences.windows(2).any(|pair| pair[0] > pair[1]),
+                        "measured midpoints must precede their earlier coarse trial in selected contour order");
+                    assert!(samples
+                        .iter()
+                        .filter(|p| p.request.phase == Phase::OutlineBackoff)
+                        .all(|p| p.trigger.is_none()));
+                    for decision in result.refinements.iter().filter(|d| d.resolved) {
+                        let mid = decision.midpoint_sequence.unwrap();
+                        assert!(mid > decision.coarse_sequence);
+                        assert!(decision.error_mm.unwrap() <= s.resolution);
+                        assert!(result
+                            .sequences
+                            .windows(2)
+                            .any(|pair| pair == [mid, decision.coarse_sequence]));
+                    }
+                    eprintln!("numerical-only outline: {} samples, {} selected contacts, {} midpoint decisions; maximum radius {} mm",samples.len(),result.points.len(),result.refinements.len(),result.refinements.iter().map(|d|d.radius_mm).fold(0.,f64::max));
+                    if let Some(dir) = std::env::var_os("DMC2_NUMERICAL_OUTLINE_DUMP") {
+                        let rows=samples.iter().map(|p|format!("{{\"sample\":{},\"phase\":{},\"approach\":{:?},\"target\":{:?},\"trigger\":{},\"returned\":{:?}}}",p.sequence,p.request.phase as u8,p.request.approach,p.request.target,p.trigger.map(|v|format!("{v:?}")).unwrap_or_else(||"null".into()),p.returned.unwrap())).collect::<Vec<_>>().join(",");
+                        let data=format!("{{\"evidence\":\"synthetic numerical fixture; not machine measurements\",\"polygon\":{polygon:?},\"samples\":[{rows}],\"selected_samples\":{:?}}}\n",result.sequences);
+                        super::ledger::publish(
+                            &std::path::PathBuf::from(dir)
+                                .join(format!("polygon-{}.json", polygon.len())),
+                            data.as_bytes(),
+                        )
+                        .unwrap();
+                    }
+                }
                 return result;
             }
-            Err(Progress::Invalid(e)) => panic!("sample {}: {e}", samples.len()),
+            Err(Progress::Invalid(e)) => panic!(
+                "sample {}: {e}; retained samples={samples:?}",
+                samples.len()
+            ),
             Err(Progress::Need(request)) => {
+                let request = Request {
+                    approach: recorded_coordinates(request.approach),
+                    target: recorded_coordinates(request.target),
+                    ..*request
+                };
                 assert!(
                     samples.len() < 10000,
                     "offline fixture exceeded its execution budget"
@@ -95,6 +144,16 @@ fn replay(polygon: &[P], policy: OutlinePolicy) -> outline::Outline {
                     assert!(request.phase.is_outline());
                 }
                 tracing |= request.phase.is_outline();
+                if matches!(request.phase, Phase::OutlineAdvance | Phase::OutlineBackoff) {
+                    let prior = samples.last().unwrap().returned.unwrap();
+                    assert!(
+                        s.endpoint_matches(
+                            prior,
+                            [request.approach[0], request.approach[1], request.target[2]]
+                        ),
+                        "local request must start at the last released endpoint"
+                    );
+                }
                 let target = [request.target[0], request.target[1]];
                 let point = if request.phase.is_outline() {
                     assert_eq!(request.target[2], plane);
@@ -139,10 +198,17 @@ fn replay(polygon: &[P], policy: OutlinePolicy) -> outline::Outline {
                 } else {
                     [target[0], target[1], s.origin[2]]
                 };
+                if request.phase.is_outline()
+                    && matches!(policy.local_search, LocalSearch::GrowingRefinement)
+                {
+                    assert!(!contains([returned[0],returned[1]],polygon),
+                        "a numerical full-backoff endpoint inside the fixture cannot be reported released");
+                }
                 samples.push(Sample {
+                    sequence: samples.len(),
                     request,
                     trigger,
-                    returned: Some(returned),
+                    returned: Some(recorded_coordinates(returned)),
                 });
             }
         }
@@ -163,7 +229,9 @@ fn traces_rotated_and_concave_outlines_without_opposite_search_or_grid() {
     for policy in [
         "DMC2_OUTLINE_POLICY_V1\nhandoff_mm=25.4\n",
         "DMC2_OUTLINE_POLICY_V2\nhandoff_mm=25.4\n",
+        "DMC2_OUTLINE_POLICY_V3\nhandoff_mm=25.4\ninitial_edge_offset_mm=1\n",
         CURRENT_POLICY,
+        GROWING_POLICY,
     ] {
         replay(&rectangle, OutlinePolicy::read(policy).unwrap());
     }
@@ -177,17 +245,25 @@ fn traces_rotated_and_concave_outlines_without_opposite_search_or_grid() {
         [-3.0, 7.0],
         [-11.0, 7.0],
     ];
-    let result = replay(&notch, OutlinePolicy::read(CURRENT_POLICY).unwrap());
-    let work: Vec<P> = result
-        .points
-        .iter()
-        .map(|p| [p[0] - 20.0, p[1] - 30.0])
-        .collect();
-    assert!(
-        work.iter()
-            .any(|p| p[0].abs() < 2.0 && (p[1] - 2.0).abs() < 1e-9),
-        "trace must visit the recessed face instead of fitting a rectangle"
-    );
+    for policy in [CURRENT_POLICY, GROWING_POLICY] {
+        let result = replay(&notch, OutlinePolicy::read(policy).unwrap());
+        let work: Vec<P> = result
+            .points
+            .iter()
+            .map(|p| [p[0] - 20.0, p[1] - 30.0])
+            .collect();
+        assert!(
+            work.iter()
+                .any(|p| p[0].abs() < 2.0 && (p[1] - 2.0).abs() < 1e-9),
+            "trace must visit the recessed face instead of fitting a rectangle"
+        );
+        if policy == GROWING_POLICY {
+            assert!(result
+                .refinements
+                .iter()
+                .any(|d| !d.resolved && d.midpoint_sequence.is_some()));
+        }
+    }
 }
 
 /// Mathematical top samples only. No NML, HAL, controller or machine action.
@@ -198,7 +274,7 @@ fn top_prefix(
     let mut samples = Vec::new();
     let mut requests = Vec::new();
     loop {
-        let request = match outline::run(s, &samples) {
+        let request = match outline::run(s, &samples).result {
             Err(Progress::Need(request)) if request.phase == Phase::OutlineEnter => {
                 return (requests, Ok(request));
             }
@@ -215,6 +291,7 @@ fn top_prefix(
         assert!(request.target[0] <= s.origin[0]);
         requests.push(request);
         samples.push(Sample {
+            sequence: samples.len(),
             request,
             trigger: has_top(request.target[0]).then_some([
                 request.target[0] + s.offset[0],

@@ -338,7 +338,7 @@ acceptance are separate milestones. Recording a task does not authorize a
 machine run.
 
 - [ ] **Exponential edge bracketing, then binary refinement.** Source and
-  standard capture binary now use versioned policy V3 for new runs: **1 mm,
+  standard capture binary now use versioned policy V4 for new runs: **1 mm,
   2 mm, 4 mm, …** offsets from the initial top sample, in physical RIGHT /
   LinuxCNC -X, bounded by the retained plate/travel intersection. The last
   contact and first miss define the bracket; binary refinement stays inside
@@ -347,15 +347,24 @@ machine run.
   their original plate-first path. Numerical checks reported no failures for
   refinement, plate termination and historical replay. Physical behavior under
   this new policy has not been observed; that acceptance milestone remains open.
-- [ ] **Growing local edge search with internal refinement.** Apply the same
-  coarse-growth/local-refinement principle to edge detection and rim following
-  instead of always advancing by fixed 1 mm increments. Retain the local contact
-  and tracing plane, grow the coarse search until it brackets the next boundary,
-  then refine within that interval. Continue following the outline from the last
-  contact. Keep coarse search scale separate from final refinement resolution;
-  preserve exact trigger capture, full probe-diameter backoff, plate bounds and
-  the approved speed/depth policy. X labels remain physical RIGHT / LinuxCNC -X
-  and physical LEFT / LinuxCNC +X.
+- [ ] **Growing local edge search with internal refinement.** V4 source and
+  installed standard binaries now share replay in `probe_data/mapper_trace`.
+  Coarse local radii double; half-radius contacts measure chord disagreement.
+  Failed intervals halve using the already measured midpoint. Refinement
+  retraces retained clear segments, preserves full backoff and original fine
+  triggers, and exports selected contour order separately from all trial data.
+  Initial / minimum trace interval is the sampling floor; Outline resolution
+  is the midpoint error criterion. Reaching the floor retains an unresolved
+  decision rather than claiming tolerance. Existing speed/depth policy and
+  plate bounds remain in force. X labels remain physical RIGHT / LinuxCNC -X
+  and physical LEFT / LinuxCNC +X. Seven mapper numerical checks reported passes.
+  A synthetic concave-ledger round trip through installed export/import/
+  prepare-stock retained all 67 fine contacts: 41 fit, one seam check and 25
+  observations, with 42 selected records in contour order and 45 refinement
+  decisions. FreeCAD exchange retained the source ledger and companions byte
+  for byte. Readback: `/home/kit/cnc-backups/mapper-adaptive-v9ynzhbh/round-trip-readback.json`.
+  These are numerical/file results. Physical tracing, reconstruction quality
+  and the running UI's new label remain unobserved; this item stays open.
 - [ ] **Reserve a bounded fine re-touch allowance.** The run ending at
   16:56:48 EDT stopped at sample 77 with no fine trigger. Its original target
   allowed only 0.009887915 mm beyond the coarse trigger, while an earlier paired
@@ -383,7 +392,7 @@ machine run.
   `/home/kit/cnc-backups/mapper-finish-pt50q0l_/capture-diagnosis/readback.json`.
   This file result does not establish physical recovery or a corrected fine
   approach. Those outcomes remain open with the fine-allowance work above. Source:
-  `object_map/capture.rs`, `probe_capture/mapper/state.rs`, and
+  `object_map/capture.rs`, `probe_data/mapper_trace/state.rs`, and
   `live/nc_files/mapper-move.ngc`.
 - [ ] **Reconstruct oversized, irregular measured stock.** The owner clarified
   that the wood will exceed the required cutting geometry and has no guaranteed
@@ -424,8 +433,11 @@ machine run.
   context instead of consulting live configuration. Readback artifacts are in
   `/home/kit/cnc-backups/mapper-context-gbmdc3ng`. Both binaries are built and
   installed. Twenty-four object-map and seven mapper numerical checks reported
-  passes; these do not establish machine behavior. Adaptive next-contact planning,
-  multi-height acquisition and material containment remain outstanding.
+  passes; these do not establish machine behavior. V4 now refines the local
+  next-contact interval from measured midpoint disagreement and carries those
+  decisions through the shared capture context into stock/FreeCAD data. Broader
+  stock-analysis-driven observation selection, multi-height acquisition and
+  material containment remain outstanding.
 - [ ] **Optimize machining placement inside measured stock.** Fit the unchanged
   required geometry into the stock estimate using the allowed translations and
   rotations. Account for material shortage and unknown coverage separately;

@@ -1,6 +1,6 @@
 //! Validate released endpoints against the retained contact and diameter.
-use super::super::ledger::{number, Fields};
-use super::model::{close, xyz, Phase, Request, Settings};
+use crate::probe_data::ledger::{number, Fields};
+use crate::probe_data::mapper_settings::{close, xyz, Phase, Request, Settings};
 
 pub fn target(
     s: &Settings,

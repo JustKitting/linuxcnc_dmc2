@@ -1,10 +1,10 @@
 //! Validate capture/release/clearance transitions before planning another move.
-use super::super::{
+use crate::probe_data::mapper_schema::CaptureFailure;
+use crate::probe_data::mapper_settings::{close, xyz, Mode, Phase, Request, Sample, Settings};
+use crate::probe_data::{
     ledger::{number, Fields},
     schema::Workflow,
 };
-use super::model::{close, xyz, Mode, Phase, Request, Sample, Settings};
-use dmc2ctl::probe_data::mapper_schema::CaptureFailure;
 
 enum Cycle<'a> {
     Ready,
@@ -140,6 +140,9 @@ pub fn samples(
                 let target = xyz(r, "target_", "")?;
                 s.bounds(target)?;
                 samples.push(Sample {
+                    sequence: r["sequence"]
+                        .parse()
+                        .map_err(|_| "The original contact record identity is invalid. Preserve this ledger and import an intact capture; for an active run use Abort then Pendant Mode.")?,
                     returned: None,
                     request: Request {
                         phase,

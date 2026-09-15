@@ -8,6 +8,16 @@ pub enum Mode {
     Rim,
     Outline,
 }
+impl Mode {
+    pub fn read(value: f64) -> Result<Self, String> {
+        match value {
+            0.0 => Ok(Self::Surface),
+            1.0 => Ok(Self::Rim),
+            2.0 => Ok(Self::Outline),
+            _ => Err("The retained mapper mode is unsupported. Preserve the capture and select a supported script before a new Run; Abort and Pendant Mode remain available.".into()),
+        }
+    }
+}
 pub use super::mapper_schema::Phase;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -24,10 +34,16 @@ pub enum BoundarySearch {
     },
 }
 #[derive(Clone, Copy, Debug)]
+pub enum LocalSearch {
+    FixedRadius,
+    GrowingRefinement,
+}
+#[derive(Clone, Copy, Debug)]
 pub struct OutlinePolicy {
     pub revision: OutlineRevision,
     pub handoff_mm: f64,
     pub boundary_search: BoundarySearch,
+    pub local_search: LocalSearch,
 }
 impl OutlinePolicy {
     pub fn read(text: &str) -> Result<Self, String> {
@@ -35,6 +51,7 @@ impl OutlinePolicy {
             Some("DMC2_OUTLINE_POLICY_V1") => ("DMC2_OUTLINE_POLICY_V1", OutlineRevision::ContactPlane, &["handoff_mm"][..]),
             Some("DMC2_OUTLINE_POLICY_V2") => ("DMC2_OUTLINE_POLICY_V2", OutlineRevision::BelowContact, &["handoff_mm"][..]),
             Some("DMC2_OUTLINE_POLICY_V3") => ("DMC2_OUTLINE_POLICY_V3", OutlineRevision::BelowContact, &["handoff_mm", "initial_edge_offset_mm"][..]),
+            Some("DMC2_OUTLINE_POLICY_V4") => ("DMC2_OUTLINE_POLICY_V4", OutlineRevision::BelowContact, &["handoff_mm", "initial_edge_offset_mm"][..]),
             _ => return Err("Unsupported outline policy. Correct config/mapper-outline.txt then start a new Run; Pendant Mode remains available.".into()),
         };
         let fields = data(text, header, fields)?;
@@ -59,6 +76,11 @@ impl OutlinePolicy {
             revision,
             handoff_mm,
             boundary_search,
+            local_search: if header == "DMC2_OUTLINE_POLICY_V4" {
+                LocalSearch::GrowingRefinement
+            } else {
+                LocalSearch::FixedRadius
+            },
         })
     }
 }
@@ -160,12 +182,7 @@ impl Settings {
             return Err("The descent budget plus reserve exceeds the mounted usable probe reach. Correct these Scripts fields before Run.".into());
         }
         let result = Self {
-            mode: match n("mode")? {
-                0.0 => Mode::Surface,
-                1.0 => Mode::Rim,
-                2.0 => Mode::Outline,
-                _ => return Err("Unknown automatic mapper mode.".into()),
-            },
+            mode: Mode::read(n("mode")?)?,
             origin,
             offset,
             min,
@@ -351,6 +368,7 @@ impl Request {
 
 #[derive(Clone, Debug)]
 pub struct Sample {
+    pub sequence: usize, // original fine-contact or coarse-miss record identity
     pub request: Request,
     pub trigger: Option<[f64; 3]>,
     pub returned: Option<[f64; 3]>, // reported release/endpoint, never a trigger substitute

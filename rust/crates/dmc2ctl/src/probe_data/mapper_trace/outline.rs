@@ -1,7 +1,7 @@
 //! Local tactile contour following. Plans data only; LinuxCNC owns each move.
-use super::{
-    model::{close, BoundarySearch, Phase, Request, Sample, Settings},
-    search::Progress,
+use super::Progress;
+use crate::probe_data::mapper_settings::{
+    close, BoundarySearch, LocalSearch, Phase, Request, Sample, Settings,
 };
 use std::{
     collections::BTreeSet,
@@ -12,7 +12,7 @@ use std::{
 type Point = [f64; 2];
 
 #[derive(Debug)]
-enum TraceError {
+pub(super) enum TraceError {
     NoTop,
     PlateContact,
     MissingContact,
@@ -37,8 +37,8 @@ impl fmt::Display for TraceError {
             Self::MissingReturn => "The last local search has no retained released endpoint.",
             Self::ChangedPlan(i) => return write!(f, "OUTLINE_PLAN_MISMATCH: retained sample {i} differs from its planned local path. Use Abort then Pendant Mode; begin a new Run."),
             Self::WrongPlane => "A local edge contact or released endpoint differs from the retained tracing Z plane.",
-            Self::BlockedBackoff => "The radial withdrawal encountered another surface before reaching the local search circle.",
-            Self::EmptySweep => "The entire local search circle was traversed without another edge contact. Adjust Trace step in Scripts before another Run.",
+            Self::BlockedBackoff => "The withdrawal or return along a retained clear path encountered another surface before reaching its endpoint.",
+            Self::EmptySweep => "The entire local search circle was traversed without another edge contact. Review Initial / minimum trace interval in Scripts before another Run.",
             Self::RepeatedRegion => "The trace revisited the same local contact and direction before confirming the starting seam.",
             Self::ClosureMismatch => "The closing touch did not match the original edge contact within Outline resolution.",
         };
@@ -52,16 +52,49 @@ impl From<TraceError> for Progress {
 }
 
 pub struct Outline {
-    pub points: Vec<[f64; 3]>, // original fine machine-coordinate triggers, ordered
-    pub plane: f64,            // retained top Z minus the selected trace depth
+    pub points: Vec<[f64; 3]>, // selected original fine machine triggers, in contour order
+    pub sequences: Vec<usize>, // original fine record identities, not sampling order
+    pub plane: Option<f64>,
+    pub refinements: Vec<Refinement>,
+    pub result: Result<(), Progress>,
+}
+pub struct Refinement {
+    pub from_sequence: usize,
+    pub coarse_sequence: usize,
+    pub midpoint_sequence: Option<usize>,
+    pub radius_mm: f64,
+    pub error_mm: Option<f64>,
+    pub resolved: bool,
+}
+impl Refinement {
+    pub fn json(&self) -> String {
+        format!("{{\"from_sequence\":{},\"coarse_sequence\":{},\"midpoint_sequence\":{},\"radius_mm\":{},\"midpoint_chord_error_mm\":{},\"minimum_spacing_reached\":{},\"resolved\":{}}}",self.from_sequence,self.coarse_sequence,self.midpoint_sequence.map(|v|v.to_string()).unwrap_or_else(||"null".into()),self.radius_mm,self.error_mm.map(|v|v.to_string()).unwrap_or_else(||"null".into()),self.midpoint_sequence.is_none(),self.resolved)
+    }
 }
 
-struct Reader<'a> {
-    s: &'a Settings,
+pub(super) struct Reader<'a> {
+    pub(super) s: &'a Settings,
     samples: &'a [Sample],
     cursor: usize,
+    pub(super) points: Vec<[f64; 3]>,
+    pub(super) sequences: Vec<usize>,
+    plane: Option<f64>,
+    pub(super) refinements: Vec<Refinement>,
 }
 impl<'a> Reader<'a> {
+    pub(super) fn select(&mut self, sample: &Sample) -> Result<(), Progress> {
+        self.points
+            .push(sample.trigger.ok_or(TraceError::MissingContact)?);
+        self.sequences.push(sample.sequence);
+        Ok(())
+    }
+    pub(super) fn finished(&self) -> Result<(), Progress> {
+        if self.cursor == self.samples.len() {
+            Ok(())
+        } else {
+            Err(TraceError::ChangedPlan(self.cursor).into())
+        }
+    }
     fn take(&mut self, request: Request) -> Result<&'a Sample, Progress> {
         self.s.bounds(request.target)?;
         self.s
@@ -82,7 +115,7 @@ impl<'a> Reader<'a> {
     fn top(&mut self, xy: Point, phase: Phase) -> Result<&'a Sample, Progress> {
         self.take(Request::top(self.s, phase, xy))
     }
-    fn local(
+    pub(super) fn local(
         &mut self,
         phase: Phase,
         from: Point,
@@ -107,56 +140,71 @@ impl<'a> Reader<'a> {
         Ok(sample)
     }
 }
-fn xy(p: [f64; 3]) -> Point {
+pub(super) fn xy(p: [f64; 3]) -> Point {
     [p[0], p[1]]
 }
-fn add(a: Point, b: Point) -> Point {
+pub(super) fn add(a: Point, b: Point) -> Point {
     [a[0] + b[0], a[1] + b[1]]
 }
-fn sub(a: Point, b: Point) -> Point {
+pub(super) fn sub(a: Point, b: Point) -> Point {
     [a[0] - b[0], a[1] - b[1]]
 }
-fn scale(p: Point, k: f64) -> Point {
+pub(super) fn scale(p: Point, k: f64) -> Point {
     [p[0] * k, p[1] * k]
 }
-fn length(p: Point) -> f64 {
+pub(super) fn length(p: Point) -> f64 {
     p[0].hypot(p[1])
 }
-fn dot(a: Point, b: Point) -> f64 {
+pub(super) fn dot(a: Point, b: Point) -> f64 {
     a[0] * b[0] + a[1] * b[1]
 }
-fn unit(p: Point) -> Result<Point, Progress> {
+pub(super) fn unit(p: Point) -> Result<Point, Progress> {
     let d = length(p);
     if !d.is_finite() || d == 0.0 {
         return Err(TraceError::RepeatedRegion.into());
     }
     Ok(scale(p, 1.0 / d))
 }
-fn rotate(p: Point, angle: f64) -> Point {
+pub(super) fn rotate(p: Point, angle: f64) -> Point {
     [
         p[0] * angle.cos() - p[1] * angle.sin(),
         p[0] * angle.sin() + p[1] * angle.cos(),
     ]
 }
-fn point(sample: &Sample, s: &Settings) -> Result<[f64; 3], Progress> {
+pub(super) fn point(sample: &Sample, s: &Settings) -> Result<[f64; 3], Progress> {
     let p = sample.trigger.ok_or(TraceError::MissingContact)?;
     Ok([0, 1, 2].map(|i| p[i] - s.offset[i]))
 }
-fn endpoint(sample: &Sample) -> Result<Point, Progress> {
+pub(super) fn endpoint(sample: &Sample) -> Result<Point, Progress> {
     Ok(xy(sample.returned.ok_or(TraceError::MissingReturn)?))
 }
 
-pub fn run(s: &Settings, samples: &[Sample]) -> Result<Outline, Progress> {
+pub fn run(s: &Settings, samples: &[Sample]) -> Outline {
+    let mut r = Reader {
+        s,
+        samples,
+        cursor: 0,
+        points: Vec::new(),
+        sequences: Vec::new(),
+        plane: None,
+        refinements: Vec::new(),
+    };
+    let result = walk(&mut r);
+    Outline {
+        points: r.points,
+        sequences: r.sequences,
+        plane: r.plane,
+        refinements: r.refinements,
+        result,
+    }
+}
+fn walk(r: &mut Reader<'_>) -> Result<(), Progress> {
+    let s = r.s;
     let policy = s.outline.ok_or_else(|| {
         Progress::Invalid(
             "The outline policy snapshot is missing. Reopen the script and start a new Run.".into(),
         )
     })?;
-    let mut r = Reader {
-        s,
-        samples,
-        cursor: 0,
-    };
     let seed = xy(s.origin);
     let reference = r.top(seed, Phase::Reference)?;
     if reference.trigger.is_none() {
@@ -232,13 +280,17 @@ pub fn run(s: &Settings, samples: &[Sample]) -> Result<Outline, Progress> {
         }
     }
     let plane = s.trace_z(top[2]);
+    r.plane = Some(plane);
     let first = r.local(Phase::OutlineEnter, outside, inside, plane)?;
+    r.select(first)?;
+    if matches!(policy.local_search, LocalSearch::GrowingRefinement) {
+        return super::adaptive::walk(r, first, outside, inside, plane);
+    }
     let mut contact = xy(point(first, s)?);
     let start = contact;
     let first_outward = unit(sub(outside, inside))?;
     let mut outward = first_outward;
     let mut current = endpoint(first)?;
-    let mut points = vec![first.trigger.ok_or(TraceError::MissingContact)?];
     let mut distance = 0.0;
     // Chord sagitta <= selected resolution. A sector never spans more than a
     // quadrant, so a candidate chord cannot run through its contact pivot.
@@ -299,7 +351,7 @@ pub fn run(s: &Settings, samples: &[Sample]) -> Result<Outline, Progress> {
         outward = unit(sub(from, to))?;
         contact = next;
         current = endpoint(sample)?;
-        points.push(sample.trigger.ok_or(TraceError::MissingContact)?);
+        r.select(sample)?;
         // A local revisit cannot close the contour. Require travel beyond a
         // complete search-circle circumference, a compatible approach, then an
         // independent fine re-touch of the original seam.
@@ -314,11 +366,8 @@ pub fn run(s: &Settings, samples: &[Sample]) -> Result<Outline, Progress> {
             if length(sub(xy(measured), start)) > s.resolution {
                 return Err(TraceError::ClosureMismatch.into());
             }
-            points.push(closing.trigger.ok_or(TraceError::MissingContact)?);
-            if r.cursor != samples.len() {
-                return Err(TraceError::ChangedPlan(r.cursor).into());
-            }
-            return Ok(Outline { points, plane });
+            r.select(closing)?;
+            return r.finished();
         }
     }
 }

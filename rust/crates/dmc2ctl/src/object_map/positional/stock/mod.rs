@@ -13,7 +13,13 @@ use super::{
     },
     folder,
 };
-use crate::probe_data::{ledger::number, mapper_schema::Phase, schema::Workflow};
+use crate::probe_data::{
+    ledger::number,
+    mapper_schema::Phase,
+    mapper_settings::Mode,
+    mapper_trace::{outline, state, Progress},
+    schema::Workflow,
+};
 pub(in crate::object_map) use request::{KEYS, SCHEMA};
 use std::{collections::BTreeSet, path::Path};
 
@@ -27,20 +33,42 @@ pub fn prepare(store: &Store, object: &Id, setup: &Id, capture: &Id) -> Result<S
         return Err(Error::Data("The selected capture is quarantined. Preserve its diagnosis and recapture required geometry after operator recovery.".into()));
     }
     let mut rows = String::from("capture,sequence,use\n");
-    for p in c.capture.contacts.iter().filter(|p| p.stage == Stage::Fine) {
-        let usage = if c.capture.workflow == Workflow::Mapper {
+    let mut selected = BTreeSet::new();
+    if c.capture.workflow == Workflow::Mapper
+        && Mode::read(number(&c.capture.records[0], "mode").map_err(Error::Data)?)
+            .map_err(Error::Data)?
+            == Mode::Outline
+    {
+        // Replay this run's retained policy, never today's configuration. A
+        // coarse trial can precede its midpoint in time but follow it in space.
+        let settings = c.context.settings(&c.capture).map_err(Error::Data)?;
+        let samples = state::samples(&c.capture.records, &settings, false).map_err(Error::Data)?;
+        let traced = outline::run(&settings, &samples);
+        if let Err(Progress::Invalid(error)) = traced.result {
+            return Err(Error::Data(error));
+        }
+        for sequence in traced.sequences {
             let phase =
-                Phase::read(number(&c.capture.records[p.sequence], "phase").map_err(Error::Data)?)
+                Phase::read(number(&c.capture.records[sequence], "phase").map_err(Error::Data)?)
                     .map_err(Error::Data)?;
-            match phase {
-                Phase::OutlineEnter | Phase::OutlineAdvance => "fit",
-                Phase::OutlineClose => "check",
-                _ => "observe",
-            }
-        } else {
-            "observe"
-        };
-        rows.push_str(&format!("{},{},{}\n", c.id.as_str(), p.sequence, usage));
+            let usage = if phase == Phase::OutlineClose {
+                "check"
+            } else {
+                "fit"
+            };
+            rows.push_str(&format!("{},{sequence},{usage}\n", c.id.as_str()));
+            selected.insert(sequence);
+        }
+    }
+    // Retain every other original fine contact as an observation. Trial points
+    // and top samples are not silently deleted or assigned an invented order.
+    for p in c
+        .capture
+        .contacts
+        .iter()
+        .filter(|p| p.stage == Stage::Fine && !selected.contains(&p.sequence))
+    {
+        rows.push_str(&format!("{},{},observe\n", c.id.as_str(), p.sequence));
     }
     let fields = KEYS
         .iter()

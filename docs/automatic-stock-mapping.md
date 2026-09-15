@@ -8,7 +8,7 @@ LEFT / LinuxCNC +X at the Z of the most recent successful top contact minus the 
 depth. That depth defaults to the operator-requested 12.7 mm.
 
 `config/mapper-outline.txt` owns the 25.4 mm initial bracket handoff requested by
-the operator and the initial 1 mm edge-search offset. New runs use policy V3:
+the operator and the initial 1 mm edge-search offset. New runs use policy V4:
 probe at offsets 1, 2, 4, 8, ... mm from the starting top sample in physical
 RIGHT / LinuxCNC -X. These are distances from the initial sample, not cumulative
 travel legs. Growth ends at the first retained miss or at the retained plate
@@ -17,20 +17,36 @@ invented outside point. Binary refinement stays inside the last contact/miss
 bracket until it meets the handoff distance, then the existing side approach
 finds the edge at tracing depth. The newest successful top trigger establishes
 that depth. Each run retains its own policy snapshot; V1 and V2 recordings
-retain their original plate-first search during replay. Trace step uses the
-existing editable spacing value as its local search radius. Outline resolution
-controls the polygonal search circle's maximum chord sagitta and the final
-seam-contact tolerance; sector count follows from those two values, with sectors
-no larger than a quadrant. There is no fixed retry-count fault threshold.
+retain their original plate-first search during replay. V3 retains its fixed
+local radius; V4 adds growing intervals and measured midpoint refinement.
+
+Initial / minimum trace interval uses the existing editable spacing value as
+both the starting radius and the minimum radius. From the last selected fine
+contact, sample a coarse local circle, return along the retained clear segments,
+then sample the half-radius circle. If that midpoint projects between the two
+end contacts and its perpendicular chord error meets Outline resolution, select
+midpoint then coarse contact in contour order and double the next radius.
+Otherwise reuse the already measured midpoint as the smaller coarse trial and
+halve again. Farther trials remain observations in the original ledger.
+
+Refinement stops before halving below the minimum interval. The selected nearest
+contact then carries an unresolved-spacing decision; it does not claim to meet
+the error tolerance. The next search grows again. Radius growth is bounded by
+the nearest retained plate/travel edge minus the full backoff, and by the closing
+seam when approaching it. Search-circle chord sagitta also uses Outline
+resolution, with sectors no larger than a quadrant. No fixed retry-count fault
+threshold is added. These sampling decisions do not establish an unsampled solid.
 
 After every coarse and fine edge contact, withdraw by the retained probe ball
 diameter (currently 2.0 mm) along the reverse approach. Each release and recontact
 is retained; only arrival at the full endpoint with input released allows the
-next approach. A release transition alone is not a completed backoff. Probe successive candidate chords around
-that contact at the same Z. Misses advance the local search; a collision sets
-the next contour point and its observed approach direction. This walks around
-convex and concave corners without first assuming a rectangle or visiting the
-opposite side. No Z lift is inserted between local outline stations.
+next approach. A release transition alone is not a completed backoff. Successive
+candidate chords stay at the same Z; misses advance the local search and hits
+retain the original fine contact and observed approach direction. Refinement
+reverses the same previously traversed clear segments and restores the selected
+coarse release by those segments when necessary. It does not insert a shortcut
+through unobserved space. This local construction assumes no rectangle or
+opposite-side correspondence. No Z lift is inserted between local stations.
 
 A nearby return with compatible approach direction is only a closure candidate.
 After traversing more than the local circle's circumference, independently
@@ -46,9 +62,14 @@ produces a readable partial-result error with Abort and Pendant Mode recovery.
 Clear Fault retains its independent priority path.
 
 CSV retains all captures and movement records. JSON uses
-`dmc2.tactile-outline.v1` and contains ordered original fine machine-coordinate
-XYZ contacts, the fixed work-coordinate Z plane, closure status and any partial
-result reason. It applies no rectangle fit or nominal ball-radius correction.
+`dmc2.tactile-outline.v2` and contains selected original fine machine-coordinate
+XYZ contacts and record identities in contour order, all fine trial contacts,
+midpoint decisions, the fixed work-coordinate Z plane, closure status and any
+partial result reason. Contour order can differ from acquisition order because
+a midpoint is measured after the farther coarse trial. Invalid adaptive capture
+cycles do not receive a guessed contour order. Failed legacy captures retain
+explicitly labelled chronological diagnostic contacts. This export applies no
+rectangle fit or nominal ball-radius correction.
 Earlier ledgers keep their original mode, policy and interpretation for offline
 replay. New runs use the below-contact policy and require full backoff evidence.
 
@@ -75,13 +96,19 @@ trigger coordinates from reported withdrawal endpoints; it retains feeds and
 paths for both. The completion record is `withdrawal-complete`. New outline
 cycles require it before the slow re-touch and before another local candidate.
 
-The standard binary/configuration must be reopened after installing the matching
-plan fields. Software checks are not evidence that a physical trace has completed.
-The V3 first-edge change uses the existing plan fields and executor; it does not
-require new HAL pins. The installed capture binary reads the new policy when a
-new run begins. The running UI may retain its earlier description until reopened.
+The acquisition planner, capture export and stock preparation share retained-data
+replay in `rust/crates/dmc2ctl/src/probe_data/mapper_trace`. `prepare-stock` selects
+the replay's contour order, withholds the seam as a check and keeps every other
+fine contact as an observation. Policy snapshots and refinement decisions follow
+the capture into stock analysis and FreeCAD exchange; neither consumer substitutes
+current configuration for missing historical context.
 
-The growing local rim search and an explicit fine re-touch allowance remain
-pending; see `docs/positional-mapper.md` for the continuing implementation list.
-This first-edge change does not correct the fine-endpoint failure retained in
-the earlier rim run.
+V4 uses the existing plan fields and executor and requires no new HAL pins. The
+installed capture binary reads the policy when a new run begins. The running UI
+may retain its earlier description until reopened. Numerical rotated/concave
+fixtures and a file round trip exercised this source; neither is evidence of a
+physical trace. No machine run or restart was performed for this change.
+
+An explicit fine re-touch allowance remains pending; see
+`docs/positional-mapper.md` for the continuing implementation list. Growing local
+search does not correct the fine-endpoint failure retained in the earlier run.
