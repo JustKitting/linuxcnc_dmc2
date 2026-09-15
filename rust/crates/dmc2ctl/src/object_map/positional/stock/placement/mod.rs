@@ -1,12 +1,12 @@
 //! Connect a retained measured outline to unchanged machining geometry.
-mod cover;
+use super::super::cover;
 mod polygon;
 mod report;
 pub(in crate::object_map) mod request;
 mod search;
 #[cfg(test)]
 mod tests;
-use super::super::{mesh::Mesh, request::Use};
+use super::super::{mesh::Mesh, request::Use, retained::Bundle};
 use super::{
     fit,
     request::{Closure, Surface},
@@ -17,37 +17,25 @@ use crate::object_map::{
     store::{read, save, Store},
     Error,
 };
-use std::{collections::BTreeSet, ffi::OsString, fs, path::Path};
+use std::path::Path;
 struct Source {
     polygon: polygon::Polygon,
     report: String,
-    files: Vec<(OsString, Vec<u8>)>,
+    files: Bundle,
 }
 fn source(store: &Store, object: &Id, setup: &Id, id: &Id) -> Result<Source, Error> {
     let path = super::super::folder(store, object, setup, id)?;
-    read(&path.join("manifest.json"))?;
-    let req = super::request::Request::read(&read(&path.join("request.txt"))?)?;
+    let files = Bundle::read(&path)?;
+    let req = super::request::Request::read(files.get("request.txt")?)?;
     if req.closure != Closure::Closed || req.surface != Surface::VerticalSides {
         return Err(Error::Input("Footprint placement needs a closed source outline with explicit vertical-sides ball correction. Select or prepare that analysis; this assumption still does not establish a stock volume.".into()));
     }
     let captures = store.captures(object, setup)?;
     let samples = req.probe.samples(&captures, &req.selected)?;
-    let used = samples
-        .iter()
-        .map(|s| s.capture.as_str())
-        .collect::<BTreeSet<_>>();
-    for c in &captures {
-        if used.contains(c.id.as_str())
-            && read(&path.join(format!("capture-{}.txt", c.id.as_str())))? != c.raw
-        {
-            return Err(Error::Data(format!("Capture {} differs from the outline analysis's retained source. Preserve both and resolve the revision before placement.",c.id.as_str())));
-        }
-    }
+    files.check_captures(&captures, &samples)?;
     let contour = fit::run(&samples, &req)?;
     let report = super::report::build(&samples, &contour, &req)?.json;
-    if report.as_bytes() != read(&path.join("stock-outline.machine-mm.json"))? {
-        return Err(Error::Data("The current outline calculation differs from its retained analysis. Calculate a new stock analysis and inspect it before placement; the original remains preserved.".into()));
-    }
+    files.require_equal("stock-outline.machine-mm.json", report.as_bytes())?;
     let stations = &contour.stations;
     for (i, a) in stations.iter().enumerate() {
         let b = &stations[(i + 1) % stations.len()];
@@ -91,21 +79,6 @@ fn source(store: &Store, object: &Id, setup: &Id, id: &Id) -> Result<Source, Err
         }
     }
     let polygon = polygon::Polygon::new(stations.iter().map(|p| p.surface.unwrap()).collect())?;
-    let mut files = Vec::new();
-    for entry in fs::read_dir(&path)
-        .map_err(|e| Error::Storage(format!("Reading retained outline {}: {e}.", path.display())))?
-    {
-        let entry =
-            entry.map_err(|e| Error::Storage(format!("Reading retained outline entry: {e}.")))?;
-        if !entry
-            .file_type()
-            .map_err(|e| Error::Storage(format!("Reading retained outline file type: {e}.")))?
-            .is_file()
-        {
-            return Err(Error::Data("The source outline bundle contains a non-file entry; inspect its retained files before placement.".into()));
-        }
-        files.push((entry.file_name(), read(&entry.path())?));
-    }
     Ok(Source {
         polygon,
         report,
@@ -159,7 +132,12 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
     let design=designs.iter().find(|d|d.id==r.design && d.format==DesignFormat::Stl).ok_or_else(||Error::Input("The required operation STL is not attached to this object. Attach that revision and correct the request.".into()))?;
     let mesh = Mesh::read(&design.raw, r.units)?;
     mesh.fitting_geometry()?;
-    let samples = cover::build(mesh.triangles(), r.radius, r.samples)?;
+    let samples = cover::build(
+        mesh.triangles(),
+        r.radius,
+        r.samples,
+        cover::Metric::Horizontal,
+    )?;
     let fitted = search::run(&source.polygon, &samples, &r)?;
     let result = report::build(&source.polygon, &samples, &fitted, &r)?;
     let pose = search::pose(fitted.at, r.z).validate()?;
@@ -168,10 +146,7 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
     // alongside every candidate, including unsuccessful numerical searches.
     save(&output.join("request.txt"), &raw)?;
     save(&output.join("source.stl"), &design.raw)?;
-    for (name, bytes) in &source.files {
-        let name=name.to_str().ok_or_else(||Error::Data("The source analysis contains a non-UTF-8 filename; preserve and inspect its files.".into()))?;
-        save(&output.join(format!("stock-source-{name}")), bytes)?;
-    }
+    source.files.copy_to(&output, "stock-source-")?;
     save(
         &output.join("model-candidate.machine-mm.stl"),
         transformed.as_bytes(),

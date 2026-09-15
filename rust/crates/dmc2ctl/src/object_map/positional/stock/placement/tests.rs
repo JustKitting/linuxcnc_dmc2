@@ -54,7 +54,7 @@ fn triangle_interior_can_fail_when_all_vertices_are_inside() {
     let r = settings();
     let t = triangle([[1., 8., 0.], [8., 1., 0.], [1., 1., 0.]]);
     assert!(t.v.iter().all(|v| p.distance(*v).unwrap().0 < 0.));
-    let s = cover::build(&[t], r.radius, r.samples).unwrap();
+    let s = cover::build(&[t], r.radius, r.samples, cover::Metric::Horizontal).unwrap();
     assert!(s.iter().any(|s| p.distance(s.center).unwrap().0 > 0.));
     assert!(search::score([0.; 3], r.z, &p, &s).unwrap() < 0.);
     assert!(s.iter().all(|s| s.radius <= r.radius && s.triangle == 0));
@@ -65,7 +65,13 @@ fn translation_search_keeps_the_notch_and_improves_worst_clearance() {
     let mut r = settings();
     r.lo = [5., 1., 0.];
     r.hi = [8., 8., 0.];
-    let s = cover::build(&bar(0.5, 0.5), r.radius, r.samples).unwrap();
+    let s = cover::build(
+        &bar(0.5, 0.5),
+        r.radius,
+        r.samples,
+        cover::Metric::Horizontal,
+    )
+    .unwrap();
     let f = search::run(&p, &s, &r).unwrap();
     assert!(f.history[0].2 < 0.);
     assert_eq!(f.stop, search::Stop::Clearance);
@@ -83,7 +89,7 @@ fn yaw_search_preserves_bar_dimensions() {
     let mut r = settings();
     r.hi[2] = std::f64::consts::FRAC_PI_2;
     let triangles = bar(3., 0.5);
-    let s = cover::build(&triangles, r.radius, r.samples).unwrap();
+    let s = cover::build(&triangles, r.radius, r.samples, cover::Metric::Horizontal).unwrap();
     let f = search::run(&p, &s, &r).unwrap();
     assert_eq!(f.stop, search::Stop::Clearance);
     assert!(f.clearance >= r.margin);
@@ -106,7 +112,13 @@ fn exhausted_budget_retains_a_candidate_and_remaining_bound() {
     r.lo = [5., 1., 0.];
     r.hi = [8., 8., 0.];
     r.evaluations = 1;
-    let s = cover::build(&bar(0.5, 0.5), r.radius, r.samples).unwrap();
+    let s = cover::build(
+        &bar(0.5, 0.5),
+        r.radius,
+        r.samples,
+        cover::Metric::Horizontal,
+    )
+    .unwrap();
     let f = search::run(&p, &s, &r).unwrap();
     assert_eq!(f.stop, search::Stop::Budget);
     assert_eq!(f.evaluations, 1);
@@ -120,5 +132,5 @@ fn invalid_outline_and_insufficient_cover_do_not_drop_geometry() {
     );
     let r = settings();
     let t = bar(3., 0.5);
-    assert!(cover::build(&t, r.radius, t.len()).is_err());
+    assert!(cover::build(&t, r.radius, t.len(), cover::Metric::Horizontal).is_err());
 }

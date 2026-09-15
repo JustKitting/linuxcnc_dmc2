@@ -1,11 +1,29 @@
 //! Triangle coverage retains the original mesh and triangle identity.
-use super::super::super::{geometry::*, mesh::Triangle, Error};
+use super::{geometry::*, mesh::Triangle, Error};
 pub struct Sample {
     pub triangle: usize,
     pub center: V,
     pub radius: f64,
 }
-pub fn build(triangles: &[Triangle], radius: f64, budget: usize) -> Result<Vec<Sample>, Error> {
+#[derive(Clone, Copy)]
+pub enum Metric {
+    Horizontal,
+    Spatial,
+}
+impl Metric {
+    fn distance(self, a: V, b: V) -> f64 {
+        match self {
+            Self::Horizontal => (a[0] - b[0]).hypot(a[1] - b[1]),
+            Self::Spatial => norm(sub(a, b)),
+        }
+    }
+}
+pub fn build(
+    triangles: &[Triangle],
+    radius: f64,
+    budget: usize,
+    metric: Metric,
+) -> Result<Vec<Sample>, Error> {
     let mut result = Vec::new();
     for (triangle, t) in triangles.iter().enumerate() {
         let mut pending = vec![t.v];
@@ -19,11 +37,11 @@ pub fn build(triangles: &[Triangle], radius: f64, budget: usize) -> Result<Vec<S
             );
             let extent = v
                 .iter()
-                .map(|p| (p[0] - center[0]).hypot(p[1] - center[1]))
+                .map(|p| metric.distance(*p, center))
                 .fold(0_f64, f64::max);
             if !finite(center) || !extent.is_finite() {
                 return Err(Error::Data(
-                    "Projected triangle coverage overflowed; inspect STL units.".into(),
+                    "Triangle coverage overflowed; inspect STL units.".into(),
                 ));
             }
             if extent <= radius {
@@ -35,9 +53,7 @@ pub fn build(triangles: &[Triangle], radius: f64, budget: usize) -> Result<Vec<S
             } else {
                 let i = (0..3)
                     .max_by(|a, b| {
-                        let length = |i: usize| {
-                            (v[i][0] - v[(i + 1) % 3][0]).hypot(v[i][1] - v[(i + 1) % 3][1])
-                        };
+                        let length = |i: usize| metric.distance(v[i], v[(i + 1) % 3]);
                         length(*a).total_cmp(&length(*b))
                     })
                     .unwrap();

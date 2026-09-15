@@ -1,10 +1,12 @@
 //! Offline positional mapper, reached through the standard dmc2ctl object-map path.
+mod cover;
 mod fit;
 mod geometry;
 mod mesh;
 mod probe;
 mod report;
 pub(super) mod request;
+mod retained;
 pub(super) mod stock;
 #[cfg(test)]
 mod tests;

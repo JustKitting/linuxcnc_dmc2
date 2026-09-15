@@ -1,0 +1,70 @@
+//! Immutable analysis inputs shared by dependent offline calculations.
+use super::super::{
+    store::{read, save, CaptureSnapshot},
+    Error,
+};
+use super::probe::Sample;
+use std::{collections::BTreeMap, fs, path::Path};
+pub struct Bundle {
+    files: BTreeMap<String, Vec<u8>>,
+}
+impl Bundle {
+    pub fn read(path: &Path) -> Result<Self, Error> {
+        let mut files = BTreeMap::new();
+        for entry in fs::read_dir(path).map_err(|e| {
+            Error::Storage(format!(
+                "Reading analysis {}: {e}. Select a published analysis.",
+                path.display()
+            ))
+        })? {
+            let entry = entry.map_err(|e| {
+                Error::Storage(format!(
+                    "Reading analysis entry: {e}. Inspect its retained files."
+                ))
+            })?;
+            if !entry
+                .file_type()
+                .map_err(|e| {
+                    Error::Storage(format!(
+                        "Reading analysis file type: {e}. Inspect its retained files."
+                    ))
+                })?
+                .is_file()
+            {
+                return Err(Error::Data("An analysis bundle contains a non-file entry. Preserve and inspect the bundle before reuse.".into()));
+            }
+            let name = entry.file_name().into_string().map_err(|_| Error::Data("An analysis bundle filename is not UTF-8. Preserve and inspect it before reuse.".into()))?;
+            files.insert(name, read(&entry.path())?);
+        }
+        let result = Self { files };
+        result.get("manifest.json")?;
+        Ok(result)
+    }
+    pub fn get(&self, name: &str) -> Result<&[u8], Error> {
+        self.files.get(name).map(Vec::as_slice).ok_or_else(|| Error::Data(format!("The source analysis is missing {name}. Select the intended published analysis; do not reconstruct missing source data.")))
+    }
+    pub fn require_equal(&self, name: &str, bytes: &[u8]) -> Result<(), Error> {
+        if self.get(name)? != bytes {
+            return Err(Error::Data(format!("{name} differs from the source analysis's retained bytes or calculation. Preserve the original and calculate a new source analysis before reuse.")));
+        }
+        Ok(())
+    }
+    pub fn check_captures(
+        &self,
+        captures: &[CaptureSnapshot],
+        samples: &[Sample],
+    ) -> Result<(), Error> {
+        for c in captures {
+            if samples.iter().any(|s| s.capture == c.id) {
+                self.require_equal(&format!("capture-{}.txt", c.id.as_str()), &c.raw)?;
+            }
+        }
+        Ok(())
+    }
+    pub fn copy_to(&self, output: &Path, prefix: &str) -> Result<(), Error> {
+        for (name, bytes) in &self.files {
+            save(&output.join(format!("{prefix}{name}")), bytes)?;
+        }
+        Ok(())
+    }
+}

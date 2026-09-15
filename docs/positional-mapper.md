@@ -6,8 +6,9 @@ does not require the wood to match an STL or rectangle. A separate registration
 path fits genuinely corresponding model features and transforms named design
 points using a candidate placement. All these commands operate on files before
 opening any machine connection. Horizontal footprint placement now searches
-inside the estimated outline. Stock-volume reconstruction and full 3D placement
-remain on the TODO list below.
+inside the estimated outline. Material checking connects that candidate to
+supported 3D surface patches and produces geometry-specific measurement needs.
+Stock-volume reconstruction and full 3D placement remain on the TODO list below.
 
 The research, physical requirements and continuation design are in
 [Probe-based positioning and manufacturing continuation](probe-based-continuation.md).
@@ -406,6 +407,107 @@ yaw/translation searches and exhausted-budget retention. These are numerical
 and file results only. Artifacts:
 `/home/kit/cnc-backups/mapper-footprint-6q6bno42/round-trip-readback.json`.
 
+## Check candidate material against the measured surfaces
+
+**Prepare material check** and **Check candidate material** connect a retained
+machining-footprint candidate to the retained 3D surface estimate in the same
+setup. This identifies local material/clearance shortages and observation gaps
+for the required operation geometry. It does not fit raw wood onto the design,
+change the design's dimensions, or promote local inwardness to a closed solid.
+
+```sh
+native/bin/dmc2ctl object-map prepare-material-check part first footprint-a > /tmp/material-request.txt
+native/bin/dmc2ctl object-map check-material part first material-a /tmp/material-request.txt
+native/bin/dmc2ctl object-map show-fit part first material-a
+native/bin/dmc2ctl object-map export-fit part first material-a /tmp/material-a
+```
+
+The `DMC2_MATERIAL_CHECK_REQUEST_V1` fields are:
+
+| Field | Meaning |
+|---|---|
+| `candidate_analysis` | Footprint candidate retaining complete operation material, original STL and rigid pose |
+| `surface_analysis` | Retained local 3D stock-surface analysis |
+| `required_clearance_mm` | Nonnegative clearance requested from each eligible local surface |
+| `surface_allowance_mm` | Explicit nonnegative bound used in the local surface comparison; it is not inferred calibration accuracy |
+| `normal_band_mm` | Positive distance from the estimated plane over which the local interpretation is allowed |
+| `cover_radius_mm` | Maximum **3D** radius covering each required subtriangle |
+| `max_cover_samples` | Computational budget retaining coverage of every original triangle |
+| `max_patch_comparisons` | Computational budget covering all selected patches, checks and required-geometry regions |
+
+The draft fills only the selected candidate identity. Supply other values from
+the intended analysis and evidence. The source outline and surface requests
+must declare the same `frame_reference`; differing references produce a readable
+error before output publication, with no implicit alignment. Matching text is
+a declared relationship, not proof of physical registration. The source STL is
+transformed again and compared byte for byte with the retained candidate STL.
+Original capture bytes and the reproduced surface report must match the source
+analysis. Missing or changed sources require resolving the source revision.
+
+The shared triangle-cover routine now distinguishes horizontal projection from
+full 3D coverage. Material checking uses the latter, retaining source triangle
+IDs even on vertical geometry. For each region, its entire projected covering
+disk must fit inside a local patch's measured-neighbour hull and a neighbour's
+support-gap disk. The complete cover must also lie within the explicit normal
+band. An unsupported patch is not extended across unseen space. Eligible fits
+must converge and retain local residuals within the source request's bound.
+
+Independent checks remain separate from fitting. Each local comparison names
+its supporting check contacts, and any relevant disagreeing check makes that
+region a check-conflict state. A patch without a check stays labelled as such.
+All eligible local comparisons remain visible, including conflicting or
+unchecked comparisons alongside checked ones.
+
+Let `p` be the covered subtriangle's candidate centroid, `s` a fitted surface
+point, `n` its measured outward normal, `r` the cover radius and `a` the explicit
+surface allowance. With `d = (p-s) dot n`, bounds on minimum local clearance are
+`[-d-r-a, -d+a]`. The lower bound covers the whole subtriangle; its centroid lies
+on the original geometry and supplies the upper bound. Requested-clearance
+deficit bounds are retained for every comparison. No averaged penalty hides a
+local shortage. These are conditional, floating-point model bounds, not a
+measurement uncertainty certificate or proof of physical material.
+
+The region states distinguish unsupported coverage, missing independent checks,
+check disagreement, local shortage, an unresolved clearance interval, and local
+inwardness. `measurement-needs.json` ties unresolved regions to their original
+triangle, machine-frame region centre and covering radius. The required facet's
+normal describes the design region; it is never substituted for a measured
+stock normal. These data are not probe endpoints or approved approaches. The
+remaining acquisition planner must use actual bounds and supported access before
+turning them into an operator-reviewed probing operation.
+
+The bundle retains the entire candidate under `candidate-source-` and the entire
+surface analysis under `surface-source-`, including original triggers and
+companions. Shared Inspect/Export analysis display the report and all residual
+rows. Existing outputs remain immutable and another calculation uses a new ID.
+`solid_stock` stays null, unmeasured volume stays unknown, and `cam_ready` remains
+false. Top/side/base closure, cavities, fixtures and full material containment
+are still outstanding, even when every local region lies inward of a plane.
+
+Oriented local planes and undefined distance outside sampling support are
+described in Hoppe et al., *Surface Reconstruction from Unorganized Points*,
+section 3.4, pp. 3–4 of the [author's paper](https://hhoppe.com/recon.pdf).
+Its projection formula has an [author-published correction](https://hhoppe.com/thesis.errata.html).
+DMC2's bounded full-triangle comparisons, retained approach orientation,
+independent checks and explicit unknown-volume state are the implementation
+here; this does not implement the paper's complete reconstruction algorithm.
+
+The installed binary's synthetic file exercise combined the retained lobed
+outline with an unchanged 6 × 2 × 2 mm required solid at candidate Z=45 mm and a
+partial 4 × 4 mm top grid at Z=45 mm. All 26 original fine contacts and 12 source
+triangles survived export, with 1,920 full 3D regions: 534 local-clearance
+shortages, 66 unresolved clearance bounds, 392 locally inward regions and 928
+unsupported regions. Every region needing local resolution has a corresponding
+measurement requirement. Retained files matched byte for byte and the request
+reopened unchanged. The maximum local deficit interval was [1.15, 1.60] mm under
+the synthetic request's allowances. A deliberately differing frame reference
+was rejected before an output directory was published. Earlier surface and
+footprint calculations reproduced their retained numerical/geometry files
+byte for byte after the shared-code extraction. Forty-one object-map numerical
+checks reported passes. These are numerical and file observations only.
+Artifacts: `/home/kit/cnc-backups/mapper-material-prtkle5x/round-trip-readback.json`,
+`compatibility-readback.json`, and `frame-mismatch.stderr` in the same directory.
+
 ## Fit, inspect and repeat without editing control code
 
 ```sh
@@ -633,7 +735,13 @@ machine run.
   next-contact interval from measured midpoint disagreement and carries those
   decisions through the shared capture context into stock/FreeCAD data. Broader
   stock-analysis-driven observation selection, multi-height acquisition and
-  material containment remain outstanding.
+  material containment remain outstanding. `check-material` now consumes a
+  machining-footprint candidate and retained 3D surfaces to produce source-
+  triangle-specific regions needing measurements. Full 3D covers distinguish
+  local shortages, missing spatial support and independent-check issues; the
+  source analyses and original triggers survive together. These regions still
+  need conversion into bounded, supported acquisition plans; they are not probe
+  targets or authorized hardware actions.
 - [ ] **Fit measured 3D stock surfaces and retain their support.** The standard
   binary and Object Mapper catalog now provide `prepare-stock-surface` and
   `fit-stock-surface`, with the existing editor/inspection/export path. Focused
@@ -670,6 +778,18 @@ machine run.
   with supported volume, actual setup constraints and physical acceptance remain
   open; neither the horizontal result nor these checks establishes them. See
   the footprint runbook and the retained file readback above.
+- [ ] **Use 3D material comparisons to drive placement and observation.**
+  `prepare-material-check` / `check-material` are in the standard catalog and
+  installed binary. They connect unchanged operation geometry to local measured
+  surfaces, preserve every eligible local comparison and produce measurement
+  regions tied to original triangles. The synthetic normal-CLI exercise retained
+  1,920 full 3D regions, 26 original fine contacts and all source bundle bytes;
+  534 regions showed local clearance shortages and 928 lacked support. Forty-one
+  object-map numerical checks reported passes. See the material-check runbook
+  and `/home/kit/cnc-backups/mapper-material-prtkle5x/round-trip-readback.json`.
+  These are source/build/file milestones. Feeding those constraints into the
+  placement optimizer, supported-volume construction, acquisition planning and
+  physical observation remain outstanding. Local inwardness is not containment.
 - [ ] **Validate placement and compare setups.** Retain named calibration
   evidence and reference-frame relationships, calculate independent feature
   prediction errors, and provide a reviewed placement state with an explicit

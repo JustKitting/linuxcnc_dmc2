@@ -1,7 +1,8 @@
-mod fit;
+pub(super) mod fit;
 mod plane;
-mod report;
+pub(super) mod report;
 pub(in crate::object_map) mod request;
+pub(super) mod support;
 #[cfg(test)]
 mod tests;
 use super::super::{geometry, probe::Sample, Error};

@@ -71,6 +71,8 @@ pub enum Operation {
     FitSurface,
     PrepareFootprint,
     FitFootprint,
+    PrepareMaterial,
+    CheckMaterial,
     Fit,
     ShowFit,
     ExportFit,
@@ -104,6 +106,8 @@ pub const OPERATIONS: &[Spec] = &[
     Spec { operation: Op::FitSurface, name: "fit-stock-surface", label: "Estimate 3D stock surfaces", description: "Estimate local surfaces and slope from retained 3D contacts without a nominal stock shape. Inspect residuals, unresolved regions and independent checks through Inspect analysis. Local patches leave unmeasured volume unknown.", fields: &[Object, Setup, NewAnalysis, Request] },
     Spec { operation: Op::PrepareFootprint, name: "prepare-footprint", label: "Prepare machining footprint", description: "Select a retained stock-outline analysis and the complete material this operation must preserve. Set allowed placement bounds and clearance in the request; stock need not be rectangular.", fields: &[Object, Setup, Analysis, Design] },
     Spec { operation: Op::FitFootprint, name: "fit-footprint", label: "Place machining footprint", description: "Search translation and yaw for the unchanged machining projection inside the measured outline. Inspect local material deficits and the search bound. Height and 3D material coverage remain separate requirements.", fields: &[Object, Setup, NewAnalysis, Request] },
+    Spec { operation: Op::PrepareMaterial, name: "prepare-material-check", label: "Prepare material check", description: "Select a machining-footprint candidate, then choose its retained 3D surface analysis and explicit local comparison bounds in the request.", fields: &[Object, Setup, Analysis] },
+    Spec { operation: Op::CheckMaterial, name: "check-material", label: "Check candidate material", description: "Compare the unchanged required geometry to supported measured surface patches. Retain local shortages, unknown regions and candidate-directed measurement needs. This does not certify a stock volume or issue probing commands.", fields: &[Object, Setup, NewAnalysis, Request] },
     Spec { operation: Op::LoadRequest, name: "load-request", label: "Open analysis request", description: "Open a request draft for editing. Save edits to a new file to preserve the original.", fields: &[Request] },
     Spec { operation: Op::SaveRequest, name: "save-request", label: "Save request as", description: "Save the current request editor to a new file. Existing files are never overwritten. CLI input is read from standard input.", fields: &[NewFile] },
     Spec { operation: Op::Fit, name: "fit", label: "Calculate placement", description: "Fit the selected contacts and retain residuals, independent checks and named stock-face dimensions. Numerical convergence remains an unreviewed placement proposal.", fields: &[Object, Setup, NewAnalysis, Request] },
@@ -119,6 +123,7 @@ impl Spec {
             | Op::PrepareStock
             | Op::PrepareSurface
             | Op::PrepareFootprint
+            | Op::PrepareMaterial
             | Op::LoadRequest => "request",
             _ => "json",
         }
