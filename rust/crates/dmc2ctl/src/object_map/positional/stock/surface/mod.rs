@@ -7,7 +7,7 @@ pub(in crate::object_map) mod request;
 pub(super) mod support;
 #[cfg(test)]
 mod tests;
-use super::super::{geometry, probe::Sample, Error};
+use super::super::{Error, geometry, probe::Sample};
 use super::fit::Stop;
 use geometry::V;
 pub struct Patch {
@@ -39,11 +39,26 @@ pub enum Reason {
 impl Reason {
     fn description(self) -> (&'static str, &'static str) {
         match self {
-            Self::FewContacts=>("insufficient-local-contacts","This neighborhood has fewer than three fitting contacts. Select additional retained contacts or acquire a supported local surface."),
-            Self::UnobservedNormal=>("surface-normal-unobserved","These contacts do not distinguish a surface normal. A single line cannot determine wall slope; add independent spatial support without inventing a normal."),
-            Self::Approach=>("surface-approach-conflict","The fitted plane cannot face all recorded approaches in this neighborhood. Resolve the local grouping or acquire the separate surfaces; every original contact is retained."),
-            Self::EigenBudget=>("plane-solve-budget","The local covariance solve exhausted its computational budget. Inspect the request budget and neighborhood before reusing this patch."),
-            Self::Arithmetic=>("surface-arithmetic-unrepresentable","This neighborhood cannot be evaluated with finite arithmetic. Inspect coordinate units and fit scales; no patch was substituted."),
+            Self::FewContacts => (
+                "insufficient-local-contacts",
+                "This neighborhood has fewer than three fitting contacts. Select additional retained contacts or acquire a supported local surface.",
+            ),
+            Self::UnobservedNormal => (
+                "surface-normal-unobserved",
+                "These contacts do not distinguish a surface normal. A single line cannot determine wall slope; add independent spatial support without inventing a normal.",
+            ),
+            Self::Approach => (
+                "surface-approach-conflict",
+                "The fitted plane cannot face all recorded approaches in this neighborhood. Resolve the local grouping or acquire the separate surfaces; every original contact is retained.",
+            ),
+            Self::EigenBudget => (
+                "plane-solve-budget",
+                "The local covariance solve exhausted its computational budget. Inspect the request budget and neighborhood before reusing this patch.",
+            ),
+            Self::Arithmetic => (
+                "surface-arithmetic-unrepresentable",
+                "This neighborhood cannot be evaluated with finite arithmetic. Inspect coordinate units and fit scales; no patch was substituted.",
+            ),
         }
     }
 }
@@ -73,17 +88,26 @@ pub fn load(
     let captures = store.captures(object, setup)?;
     let contacts = request.probe.samples(&captures, &request.selected)?;
     source.check_captures(&captures, &contacts)?;
+    let misses = no_contact::read(&captures, &contacts, &request)?;
     if matches!(
         request.no_contact,
         request::NoContactModel::ErodedProbeSweep { .. }
     ) {
         for c in &captures {
-            if contacts.iter().any(|s| s.capture == c.id) {
-                source.check_context(c)?;
+            if contacts.iter().any(|s| s.capture == c.id)
+                || misses.iter().any(|m| m.capture == c.id)
+            {
+                if matches!(
+                    &request.no_contact_sources,
+                    request::NoContactSources::Explicit(_)
+                ) {
+                    source.check_capture(c, "")?;
+                } else {
+                    source.check_context(c)?;
+                }
             }
         }
     }
-    let misses = no_contact::read(&captures, &contacts, &request)?;
     let stations = fit::run(&contacts, &request, &misses);
     let report = report::build(&contacts, &stations, &request)?;
     source.require_equal("stock-surface.machine-mm.json", report.json.as_bytes())?;

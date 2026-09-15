@@ -184,6 +184,7 @@ fn source() -> (Vec<Sample>, surface::request::Request) {
         max_residual: 0.1,
         selected: vec![],
         no_contact: surface::request::NoContactModel::Legacy,
+        no_contact_sources: surface::request::NoContactSources::ContributingContacts,
     };
     (samples, request)
 }

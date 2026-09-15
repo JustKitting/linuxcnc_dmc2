@@ -93,14 +93,7 @@ pub fn build(
     let prefix = if let History::Explicit(entries) = &r.history {
         let decisions = entries
             .iter()
-            .map(|e| {
-                format!(
-                    "{{\"capture\":{},\"use\":{},\"request_annotation\":{}}}",
-                    quote(e.capture.as_str()),
-                    quote(e.usage.name()),
-                    quote(&e.reason)
-                )
-            })
+            .map(|e| e.json())
             .collect::<Vec<_>>()
             .join(",");
         let counts = source

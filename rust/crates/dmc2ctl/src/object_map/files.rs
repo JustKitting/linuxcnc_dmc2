@@ -51,6 +51,10 @@ fn draft(raw: &[u8]) -> Result<&str, Error> {
             super::positional::stock::surface::request::legacy_keys(),
         ),
         (
+            super::positional::stock::surface::request::CONTRIBUTING_SCHEMA,
+            super::positional::stock::surface::request::keys(),
+        ),
+        (
             super::positional::stock::placement::request::SCHEMA,
             super::positional::stock::placement::request::KEYS.to_vec(),
         ),

@@ -1,31 +1,12 @@
+pub use crate::object_map::capture_selection::{Entry, Use, encode as history_text};
 use crate::object_map::{Error, model::Id, positional::request::scalar, record};
-use std::collections::BTreeSet;
 
 pub const SCHEMA: &str = "DMC2_SPATIAL_OBSERVATION_REQUEST_V1";
 pub const HISTORY_SCHEMA: &str = "DMC2_SPATIAL_OBSERVATION_REQUEST_V2";
-const HISTORY_HEADER: &str = "capture\tuse\treason";
 pub fn recognizes(raw: &[u8]) -> bool {
     [SCHEMA, HISTORY_SCHEMA]
         .iter()
         .any(|s| raw.starts_with(format!("{s}\n").as_bytes()))
-}
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum Use {
-    Include,
-    Exclude,
-}
-impl Use {
-    pub fn name(self) -> &'static str {
-        match self {
-            Self::Include => "include",
-            Self::Exclude => "exclude",
-        }
-    }
-}
-pub struct Entry {
-    pub capture: Id,
-    pub usage: Use,
-    pub reason: String,
 }
 pub enum History {
     LegacySingleSource,
@@ -33,36 +14,7 @@ pub enum History {
 }
 impl History {
     fn read(payload: &[u8], primary: &Id) -> Result<Self, Error> {
-        let text = std::str::from_utf8(payload).map_err(|e| Error::Input(format!("Acquisition history is not UTF-8: {e}. Prepare a new request with its original history list.")))?;
-        let mut lines = text.lines();
-        if lines.next() != Some(HISTORY_HEADER) {
-            return Err(Error::Input("Acquisition history needs the tab-separated capture/use/reason header. Prepare a new request; do not substitute current captures for a saved history.".into()));
-        }
-        let mut seen = BTreeSet::new();
-        let mut entries = Vec::new();
-        for line in lines {
-            let row = line.split('\t').collect::<Vec<_>>();
-            if row.len() != 3 || row[2].trim().is_empty() || row[2].chars().any(char::is_control) {
-                return Err(Error::Input("Each acquisition-history row needs a capture ID, include/exclude and a nonempty reason separated by tabs. Correct the request and retry.".into()));
-            }
-            let capture = Id::parse(row[0])?;
-            if !seen.insert(capture.as_str().to_owned()) {
-                return Err(Error::Input(format!(
-                    "Capture {} occurs more than once in the history. Keep one explicit decision per capture and retry.",
-                    capture.as_str()
-                )));
-            }
-            let usage = match row[1] {
-                "include" => Use::Include,
-                "exclude" => Use::Exclude,
-                _ => return Err(Error::Input("Acquisition history use must be include or exclude. Correct the decision and retry.".into())),
-            };
-            entries.push(Entry {
-                capture,
-                usage,
-                reason: row[2].into(),
-            });
-        }
+        let entries = crate::object_map::capture_selection::read(payload)?;
         if !entries
             .iter()
             .any(|e| e.capture == *primary && e.usage == Use::Include)
@@ -71,23 +23,6 @@ impl History {
         }
         Ok(Self::Explicit(entries))
     }
-}
-pub fn history_text(entries: &[Entry]) -> String {
-    let mut text = format!("{HISTORY_HEADER}\n");
-    for e in entries {
-        // Diagnostics are retained as readable single-line annotations.
-        let reason = e
-            .reason
-            .chars()
-            .map(|c| if c.is_control() { ' ' } else { c })
-            .collect::<String>();
-        text.push_str(&format!(
-            "{}\t{}\t{reason}\n",
-            e.capture.as_str(),
-            e.usage.name()
-        ));
-    }
-    text
 }
 pub const KEYS: &[&str] = &[
     "material_analysis",

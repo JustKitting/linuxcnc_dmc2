@@ -58,7 +58,8 @@ fn template(model: Model, rows: &str) -> Result<String, Error> {
 }
 pub fn prepare_surface(store: &Store, object: &Id, setup: &Id) -> Result<String, Error> {
     let mut rows = String::from("capture,sequence,use\n");
-    for c in store.captures(object, setup)? {
+    let captures = store.captures(object, setup)?;
+    for c in &captures {
         if c.capture.state == CaptureState::Quarantined {
             continue;
         }
@@ -84,6 +85,8 @@ pub fn prepare_surface(store: &Store, object: &Id, setup: &Id) -> Result<String,
             ));
         }
     }
+    rows.push('\n');
+    rows.push_str(&crate::object_map::capture_selection::encode(&surface::no_contact::prepare(&captures)));
     template(Model::Surface, &rows)
 }
 
@@ -153,25 +156,26 @@ pub fn run(
     }
     let raw = read(path)?;
     let captures = store.captures(object, setup)?;
-    let (samples, report) = match model {
+    let (samples, report, miss_captures) = match model {
         Model::Outline => {
             let req = request::Request::read(&raw)?;
             let samples = req.probe.samples(&captures, &req.selected)?;
             let contour = fit::run(&samples, &req)?;
             let report = report::build(&samples, &contour, &req)?;
-            (samples, report)
+            (samples, report, Vec::new())
         }
         Model::Surface => {
             let req = surface::request::Request::read(&raw)?;
             let samples = req.probe.samples(&captures, &req.selected)?;
             let misses = surface::no_contact::read(&captures, &samples, &req)?;
             let report = surface::build(&samples, &req, &misses)?;
-            (samples, report)
+            (samples, report, misses.into_iter().map(|m| m.capture).collect::<Vec<_>>())
         }
     };
     let used = samples
         .iter()
         .map(|s| s.capture.as_str())
+        .chain(miss_captures.iter().map(Id::as_str))
         .collect::<BTreeSet<_>>();
     // Keep exact inputs and publish the manifest last, as for STL registration.
     save(&output.join("request.txt"), &raw)?;

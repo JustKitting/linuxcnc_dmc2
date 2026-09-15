@@ -24,6 +24,7 @@ pub(super) fn settings() -> request::Request {
         max_residual: 0.1,
         selected: Vec::new(),
         no_contact: request::NoContactModel::Legacy,
+        no_contact_sources: request::NoContactSources::ContributingContacts,
     }
 }
 fn sample(i: usize, p: V, approach: V, usage: Use) -> Sample {

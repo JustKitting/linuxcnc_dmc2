@@ -239,7 +239,7 @@ must apply to every selected row. Withhold independent contacts as `check`;
 `observe` reports residuals without changing the fitted surface. All selected
 original rows and source ledgers remain retained.
 
-The new `DMC2_STOCK_SURFACE_REQUEST_V2` uses the same calibration fields and
+The new `DMC2_STOCK_SURFACE_REQUEST_V3` uses the same calibration fields and
 trigger-to-ball correction as the other analyses. Additional required settings:
 
 | Field | Meaning |
@@ -254,9 +254,11 @@ trigger-to-ball correction as the other analyses. Additional required settings:
 | `no_contact_model` | `eroded-probe-sweep`; explicitly accepts the conditional no-contact interpretation below |
 | `no_contact_allowance_mm` | Additional nonnegative bound on undetected contact/path-position error; together with declared pretravel it must be smaller than the ball radius |
 
-Historical V1 requests retain their original contact-only interpretation and
-report bytes. The normal request editor accepts both versions. Preparing a new
-request produces V2 and leaves its physical allowance unset.
+Historical V1 requests retain their original contact-only interpretation; V2
+keeps its miss sources tied to selected fine contacts. The normal request editor
+accepts all three versions. Preparing a new request produces V3 and leaves its
+physical allowance unset. V3 adds a separate capture include/exclude table after
+the contact CSV; see [independent no-contact sources](#independent-no-contact-sources).
 
 The local least-squares plane uses covariance eigenvectors. The need to choose
 neighborhood scale and resolve normal orientation is described in the
@@ -310,7 +312,8 @@ none of these results establishes physical stock, control recovery or machining.
 ### Retained no-contact support
 
 V2 consumes every original coarse `miss` in captures referenced by selected
-fine contacts. Each miss must belong to a complete capture/return cycle, with
+fine contacts; V3 uses its explicit capture decisions independently of those
+fine rows. Each miss must belong to a complete capture/return cycle, with
 its original acquisition companions, matching reported endpoint and coarse
 feed. Interrupted, quarantined or unsupported capture contexts produce a
 readable error before publishing the analysis. Fine misses, coarse contacts,
@@ -1178,6 +1181,60 @@ their source bytes. Readback:
 These are numerical/file outcomes, not physical acquisition or recovery proof.
 Read-only UI inspection found both recovery controls enabled and no modal grab.
 
+## Independent no-contact sources
+
+**Prepare 3D stock surfaces** now retains two selections in the standard request
+editor. The first is the existing `capture,sequence,use` CSV for fine-contact
+`fit`, `check` and `observe` rows. A blank line separates it from the
+tab-separated `capture`, `use`, `reason` table for no-contact evidence. The same
+typed decision reader and formatter serve acquisition history and surface
+support. Preparation lists every setup capture: complete coarse-miss cycles
+with original context receive `include`; unavailable, quarantined or unsupported
+sources receive `exclude` with their specific diagnosis. Review both selections
+against the declared shared physical frame and probe/error model.
+
+A capture can supply misses without supplying any fine contact. Excluding its
+misses does not remove separately selected fine rows, and deleting fine rows
+does not exclude its misses. An empty no-contact decision table is permitted.
+Reasons remain request annotations. Matching coordinates, inclusion or exclusion
+does not establish physical setup identity or material presence. V1 and V2
+requests retain their prior interpretation and report bytes.
+
+Each included miss must replay as a complete coarse search and return, with
+the original reported endpoint and feed matching that request. Its ledger,
+present acquisition companions and context JSON are retained alongside all
+selected fine-contact sources before publication of the analysis manifest.
+Later material, reconstruction and scene calculations compare those exact
+sources, including absent companions. New imports cannot silently join a saved
+analysis. Duplicate decisions, missing included captures, quarantined contexts
+and altered retained sources produce readable errors with a correction path.
+
+The finite eroded probe sweeps feed the existing shared support calculation.
+They can withdraw interpolated surface, material or mesh support without
+changing the contact-driven fit or inventing a trigger at a missed endpoint.
+Conflicting contact and miss evidence remains retained. Sweeps do not certify
+empty volume; top/side/base coverage and the physical error model remain open.
+
+The standard command binary is built and installed. In the numerical file
+exercise, adding a separate miss-only source left the fine-contact CSV identical
+and changed the retained reconstruction from 108 facets to 91. Its material
+region classifications were unchanged because those regions were already
+unresolved. A separate numerical miss through a previously supported region
+changed that region from `locally-inward-only` to `unobserved-local-coverage`;
+the original contacts remained identical. These are numerical outcomes, not
+physical stock or acquisition evidence.
+
+Legacy V1/V2 material reports reproduced byte for byte; all 58 historical
+follow-up export files matched their previous revisions. All 60 saved scene
+files remained identical after another capture import. Miss-only ledgers and
+companions survived the surface, material and scene exports byte for byte.
+Invalid selections published no analysis, and removal of a retained plate
+snapshot prevented scene export with its actual source-mismatch diagnosis.
+Readback:
+`/home/kit/cnc-backups/mapper-miss-selection-4ax9_yto/round-trip-readback.json`.
+Read-only UI inspection reported Clear Fault and Pendant Mode `normal`, with
+no modal grab. No machine action or restart was issued.
+
 ## Recorded TODOs — 2026-09-14
 
 This is the continuing implementation list for the positional mapper and
@@ -1194,12 +1251,13 @@ machine run.
   no unsupported requests are silently narrowed to top points. Further spatial
   selection now pools explicit compatible acquisition histories, including
   miss-only complete cycles, with immutable source retention and legacy replay;
-  see the history runbook above. Still needed: carry independently selected
-  miss-only evidence into surface-support analysis (history exclusion alone
-  does not resolve material coverage), and handle separately registered frames
-  without assuming that matching numerical settings establish physical identity. Independent
-  follow-up check acquisition, multiheight sides and unseen volume remain parts
-  of the whole stock-to-CAM workflow.
+  see the history runbook above. Independently selected miss-only evidence now
+  feeds surface support, material assessment and reconstruction, with exact
+  source retention and historical replay; see the V3 surface runbook above.
+  Still needed: handle separately registered frames without assuming that
+  matching numerical settings establish physical identity. Independent follow-up
+  check acquisition, multiheight sides and unseen volume remain parts of the
+  whole stock-to-CAM workflow.
 - [ ] **Acquire automatic top coverage for irregular stock.** The production
   Rust planner and Scripts catalog now provide Automatic top map, sharing the
   existing mapper executor, original trigger capture, feeds and recovery. It

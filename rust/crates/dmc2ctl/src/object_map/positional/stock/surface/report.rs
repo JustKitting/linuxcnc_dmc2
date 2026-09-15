@@ -105,6 +105,10 @@ pub fn build(samples: &[Sample], stations: &[Station], r: &Request) -> Result<Re
     let (schema, no_contact) = match r.no_contact {
         super::request::NoContactModel::Legacy => ("dmc2.stock-surface.v1", String::new()),
         super::request::NoContactModel::ErodedProbeSweep { allowance } => {
+            let (schema, selection) = match &r.no_contact_sources {
+                super::request::NoContactSources::ContributingContacts => ("dmc2.stock-surface.v2", String::new()),
+                super::request::NoContactSources::Explicit(entries) => ("dmc2.stock-surface.v3", format!(",\"capture_decisions\":[{}],\"source_policy\":\"Explicit no-contact captures are independent of fine-contact fit/check selections. Reasons are request annotations; review the shared physical frame and calibration. Excluded sources do not establish material presence.\"",entries.iter().map(|e| e.json()).collect::<Vec<_>>().join(","))),
+            };
             let misses = stations
                 .first()
                 .map(|s| s.no_contact.as_ref())
@@ -114,7 +118,7 @@ pub fn build(samples: &[Sample], stations: &[Station], r: &Request) -> Result<Re
                 .map(|m| m.json())
                 .collect::<Vec<_>>()
                 .join(",");
-            ("dmc2.stock-surface.v2", format!(",\"no_contact_model\":{{\"kind\":\"eroded-probe-sweep\",\"ball_radius_mm\":{},\"pretravel_mm\":{},\"additional_allowance_mm\":{allowance},\"sweeps\":[{observations}],\"interpretation\":\"Use every original coarse miss in the selected captures with its matching reported endpoint and retained settings. Centre path = reported machine path + mounting vector. Eroded radius = ball radius - declared pretravel - additional allowance. This assumes their sum bounds undetected contact and path-position error; it is not certified empty space. Unmeasured volume remains unknown.\"}}",r.probe.radius,r.probe.pretravel))
+            (schema, format!(",\"no_contact_model\":{{\"kind\":\"eroded-probe-sweep\",\"ball_radius_mm\":{},\"pretravel_mm\":{},\"additional_allowance_mm\":{allowance},\"sweeps\":[{observations}]{selection},\"interpretation\":\"Use every original coarse miss in the selected captures with its matching reported endpoint and retained settings. Centre path = reported machine path + mounting vector. Eroded radius = ball radius - declared pretravel - additional allowance. This assumes their sum bounds undetected contact and path-position error; it is not certified empty space. Unmeasured volume remains unknown.\"}}",r.probe.radius,r.probe.pretravel))
         }
     };
     let json=format!("{{\"schema\":\"{schema}\",\"state\":\"unreviewed-stock-surface\",\"frame\":\"LinuxCNC machine-mm\",\"calibration_state\":{},\"patches\":[{}],\"independent_checks\":[{}],\"measurement_needs\":{},\"solid_stock\":null,\"unmeasured_volume\":\"unknown\",\"cam_ready\":false,\"correction_formula\":\"center = original_trigger + trigger_to_ball - pretravel * approach; local surface = fitted_center - ball_radius * fitted_outward_normal\",\"interpretation\":\"Local iterative Huber orthogonal plane fits of retained 3D ball-centre observations. Neighbourhood radius and approach grouping are explicit fit assumptions. Approach determines normal sign, not wall slope. All fit/check/observe rows remain retained; independent checks never drive fitting. Local planes approximate the offset surface and do not recover inaccessible concavities or prove material coverage. No nominal CAD, box dimensions, work offsets or machine commands are supplied by this analysis.\"{no_contact}}}\n",quote(r.probe.calibration.name()),patches.join(","),checks.join(","),refinements);

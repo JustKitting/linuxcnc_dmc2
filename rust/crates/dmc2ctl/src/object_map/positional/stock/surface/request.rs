@@ -1,11 +1,15 @@
 use super::super::super::{
-    probe::Probe,
-    request::{read_selections, scalar, Selection, Use},
     Error,
+    probe::Probe,
+    request::{Selection, Use, read_selections, scalar},
 };
-use crate::object_map::record;
+use crate::object_map::{
+    capture_selection::{self, Entry},
+    record,
+};
 pub const LEGACY_SCHEMA: &str = "DMC2_STOCK_SURFACE_REQUEST_V1";
-pub const SCHEMA: &str = "DMC2_STOCK_SURFACE_REQUEST_V2";
+pub const CONTRIBUTING_SCHEMA: &str = "DMC2_STOCK_SURFACE_REQUEST_V2";
+pub const SCHEMA: &str = "DMC2_STOCK_SURFACE_REQUEST_V3";
 pub fn legacy_keys() -> Vec<&'static str> {
     super::super::super::probe::keys(&[
         "neighborhood_mm",
@@ -26,6 +30,8 @@ pub fn keys() -> Vec<&'static str> {
 pub fn decode(raw: &[u8]) -> Result<(std::collections::BTreeMap<String, String>, &[u8]), Error> {
     if raw.starts_with(format!("{LEGACY_SCHEMA}\n").as_bytes()) {
         record::decode(raw, LEGACY_SCHEMA, &legacy_keys())
+    } else if raw.starts_with(format!("{CONTRIBUTING_SCHEMA}\n").as_bytes()) {
+        record::decode(raw, CONTRIBUTING_SCHEMA, &keys())
     } else {
         record::decode(raw, SCHEMA, &keys())
     }
@@ -34,6 +40,10 @@ pub fn decode(raw: &[u8]) -> Result<(std::collections::BTreeMap<String, String>,
 pub enum NoContactModel {
     Legacy,
     ErodedProbeSweep { allowance: f64 },
+}
+pub enum NoContactSources {
+    ContributingContacts,
+    Explicit(Vec<Entry>),
 }
 pub struct Request {
     pub probe: Probe,
@@ -46,6 +56,7 @@ pub struct Request {
     pub max_residual: f64,
     pub selected: Vec<Selection>,
     pub no_contact: NoContactModel,
+    pub no_contact_sources: NoContactSources,
 }
 impl Request {
     pub fn read(raw: &[u8]) -> Result<Self, Error> {
@@ -79,7 +90,16 @@ impl Request {
         }
         let iterations = f["max_iterations"].parse::<usize>().ok().filter(|n|*n>0)
             .ok_or_else(|| Error::Input("max_iterations needs a positive integer computational budget; edit the request.".into()))?;
-        let selected = read_selections(body)?;
+        let (contacts, no_contact_sources) = if raw.starts_with(format!("{SCHEMA}\n").as_bytes()) {
+            let boundary = body.windows(2).position(|v| v == b"\n\n").ok_or_else(|| Error::Input("Surface V3 needs the contact CSV followed by a blank line and the tab-separated no-contact capture decisions. Prepare a new surface request and retain both tables.".into()))?;
+            (
+                &body[..boundary + 1],
+                NoContactSources::Explicit(capture_selection::read(&body[boundary + 2..])?),
+            )
+        } else {
+            (body, NoContactSources::ContributingContacts)
+        };
+        let selected = read_selections(contacts)?;
         if selected.iter().any(|s| matches!(s.usage, Use::Face(..))) {
             return Err(Error::Input("3D stock surface rows use fit, check or observe. Named box faces do not define this surface model.".into()));
         }
@@ -89,6 +109,7 @@ impl Request {
         Ok(Self {
             probe,
             no_contact,
+            no_contact_sources,
             neighborhood: positive("neighborhood_mm")?,
             approach_cos: angle.to_radians().cos(),
             huber: positive("huber_mm")?,
