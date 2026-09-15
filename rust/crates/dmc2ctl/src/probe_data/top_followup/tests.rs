@@ -33,7 +33,7 @@ fn plan() -> Plan {
         start: fields.into_iter().map(|(k,v)|(k.into(),v.to_string())).collect(),
         plate: "DMC2_PLATE_ENVELOPE_V1\nx_min=23\nx_max=27\ny_min=26\ny_max=30\nball_diameter=2\n".into(),
         feeds: "DMC2_MAPPER_FEEDS_V2\ncoarse_feed=800\ndownward_feed=400\nfine_feed=50\ntravel_feed=1500\n".into(),
-        points: vec![[24.5,28.5]],
+        rows: Rows::Columns(vec![[24.5,28.5]]),
     }
 }
 fn start(p: &Plan) -> Fields {
@@ -80,7 +80,10 @@ fn program_binds_plan_bytes_and_motion_body() {
     let raw = p.encode().unwrap();
     let text = p.program().unwrap();
     assert_eq!(Plan::read(&raw).unwrap().encode().unwrap(), raw);
-    assert_eq!(Plan::from_program(&text).unwrap().points, p.points);
+    assert_eq!(
+        Plan::from_program(&text).unwrap().rows.encode(),
+        p.rows.encode()
+    );
     assert!(Plan::from_program(&text.replace("M2\n%", "G0 Z0\nM2\n%")).is_err());
     assert!(Plan::from_program(&text.replace("[4]", "[3]")).is_err());
     assert!(Plan::read(&raw.replace("24.5,28.5", "NaN,28.5")).is_err());

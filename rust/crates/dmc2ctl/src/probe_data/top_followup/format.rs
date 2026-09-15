@@ -1,6 +1,7 @@
-use super::{data, number, Plan, Role, START_FIELDS};
+use super::{data, number, rows::identifier, Plan, Role, Rows, START_FIELDS};
 const MAGIC: &str = "DMC2_TOP_FOLLOWUP_V1";
 const ROLE_MAGIC: &str = "DMC2_TOP_FOLLOWUP_V2";
+const REPEAT_MAGIC: &str = "DMC2_TOP_FOLLOWUP_V3";
 const START: &str = "DMC2_TOP_FOLLOWUP_START_V1";
 const IDS: [&str; 4] = ["object", "setup", "analysis", "capture"];
 
@@ -9,20 +10,16 @@ impl Plan {
         self.settings()?;
         let mut out = format!(
             "{}\n",
-            if self.role.is_some() {
+            if self.rows.repeated() {
+                REPEAT_MAGIC
+            } else if self.role.is_some() {
                 ROLE_MAGIC
             } else {
                 MAGIC
             }
         );
         for (name, value) in IDS.into_iter().zip(&self.source) {
-            if value.is_empty()
-                || !value
-                    .bytes()
-                    .all(|c| c.is_ascii_alphanumeric() || b"-_.".contains(&c))
-            {
-                return Err(format!("Follow-up {name} is not a retained ID. Export the program from its original Object Mapper analysis."));
-            }
+            identifier(name, value)?;
             out.push_str(&format!("{name}={value}\n"));
         }
         if let Some(role) = self.role {
@@ -38,10 +35,8 @@ impl Plan {
             out.push_str(section.trim_end_matches('\n'));
             out.push('\n');
         }
-        out.push_str("\nx_work_mm,y_work_mm\n");
-        for xy in &self.points {
-            out.push_str(&format!("{},{}\n", xy[0], xy[1]));
-        }
+        out.push('\n');
+        out.push_str(&self.rows.encode());
         Ok(out)
     }
 
@@ -55,7 +50,7 @@ impl Plan {
         };
         let mut identity = identity.lines();
         let version = identity.next().ok_or_else(error)?;
-        if !matches!(version, MAGIC | ROLE_MAGIC) {
+        if !matches!(version, MAGIC | ROLE_MAGIC | REPEAT_MAGIC) {
             return Err(error());
         }
         let mut source: [String; 4] = Default::default();
@@ -66,7 +61,7 @@ impl Plan {
                 .ok_or_else(error)?
                 .into();
         }
-        let role = if version == ROLE_MAGIC {
+        let role = if version != MAGIC {
             Some(Role::read(
                 identity
                     .next()
@@ -79,25 +74,14 @@ impl Plan {
         if identity.next().is_some() {
             return Err(error());
         }
-        let mut rows = rows.lines();
-        if rows.next() != Some("x_work_mm,y_work_mm") {
-            return Err(error());
-        }
-        let mut points = Vec::new();
-        for row in rows {
-            let (x, y) = row.split_once(',').ok_or_else(error)?;
-            points.push([
-                x.parse::<f64>().map_err(|_| error())?,
-                y.parse::<f64>().map_err(|_| error())?,
-            ]);
-        }
+        let rows = Rows::read(rows, version == REPEAT_MAGIC)?;
         let plan = Self {
             role,
             source,
             start: data(start, START, START_FIELDS)?,
             plate: format!("{plate}\n"),
             feeds: format!("{feeds}\n"),
-            points,
+            rows,
         };
         if plan.encode()? != raw {
             return Err(error());

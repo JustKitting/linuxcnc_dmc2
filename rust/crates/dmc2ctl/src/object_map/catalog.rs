@@ -146,7 +146,7 @@ pub const OPERATIONS: &[Spec] = &[
         operation: Op::ExportTopObservations,
         name: "export-top-observations",
         label: "Export top follow-up program",
-        description: "Reproduce a new-top-sample analysis and export its ordered columns through the shared probing executor. Review the source frame, entry and transfers before File Open/Run. Export alone issues no machine command.",
+        description: "Export selected new top columns or original top repeats through the shared probing executor. Repeats retain their original phases and become fresh withheld checks. All selected requests must share compatible original settings; side entries remain explicit requirements. Review the source frame, entry and transfers before File Open/Run.",
         fields: &[Object, Setup, Analysis, NewDirectory],
     },
     Spec { operation: Op::PrepareStockMesh, name: "prepare-stock-mesh", label: "Prepare stock reconstruction", description: "Select a retained 3D surface analysis. Set explicit calculation bounds, lattice spacing and interpolation support in the request; no nominal stock box is assumed.", fields: &[Object, Setup, Analysis] },

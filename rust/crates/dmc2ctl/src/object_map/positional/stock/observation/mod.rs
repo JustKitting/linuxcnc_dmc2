@@ -1,4 +1,7 @@
 //! Material-directed observation selection with original acquisition bounds.
+mod acquisition;
+pub(in crate::object_map) mod program;
+mod repeat;
 mod report;
 pub(in crate::object_map) mod request;
 mod select;
@@ -8,10 +11,10 @@ mod tests;
 use super::super::retained::Bundle;
 use super::{material, surface};
 use crate::object_map::{
-    Error,
     model::Id,
     record,
-    store::{Store, read, save},
+    store::{read, save, Store},
+    Error,
 };
 use std::path::Path;
 
@@ -47,14 +50,7 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
     let captures = store.captures(object, setup)?;
     let selection = select::run(&a, &captures, &r)?;
     let report = report::build(&a, &selection)?;
-    let manifest = format!(
-        "{{\"schema\":\"dmc2.observation-plan-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"material_analysis\":{},\"result\":{},\"cam_ready\":false,\"machine_action_authorized\":false}}\n",
-        record::quote(object.as_str()),
-        record::quote(setup.as_str()),
-        record::quote(id.as_str()),
-        record::quote(r.material.as_str()),
-        report.json
-    );
+    let manifest = manifest(object, setup, id, &r, &report.json);
     retain(&output, &raw, &source, &report, &manifest)?;
     Ok(format!(
         "{{\"analysis_directory\":{},\"state\":\"unreviewed-observation-proposals\",\"selected_observations\":{},\"unplanned_patch_requirements\":{},\"message\":\"Inspect the selected original approaches, entry prerequisites and retained unresolved regions. Fresh captures and an approved entry/execution path are still required; no old contact was promoted to a new independent check.\",\"cam_ready\":false,\"machine_action_authorized\":false}}",
@@ -62,6 +58,16 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, input: &Path) -> Res
         selection.chosen.len(),
         selection.pending.len()
     ))
+}
+fn manifest(object: &Id, setup: &Id, id: &Id, r: &request::Request, report: &str) -> String {
+    format!(
+        "{{\"schema\":\"dmc2.observation-plan-bundle.v1\",\"object\":{},\"setup\":{},\"analysis\":{},\"material_analysis\":{},\"result\":{},\"cam_ready\":false,\"machine_action_authorized\":false}}\n",
+        record::quote(object.as_str()),
+        record::quote(setup.as_str()),
+        record::quote(id.as_str()),
+        record::quote(r.material.as_str()),
+        report
+    )
 }
 
 fn retain(

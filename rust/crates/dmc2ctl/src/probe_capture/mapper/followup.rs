@@ -1,6 +1,9 @@
 //! Follow-up data comes from the actual loaded program, never a global plan ID.
 use super::{ledger, plan_bank, storage, Workflow, BANK};
-use dmc2ctl::probe_data::{mapper_settings::Request, top_followup::Plan};
+use dmc2ctl::probe_data::{
+    mapper_settings::Request,
+    top_followup::{Plan, Rows},
+};
 use std::{
     env,
     ffi::{c_char, CString},
@@ -71,10 +74,20 @@ pub(super) fn export(
     let plan = read(path)?;
     let samples = plan.samples(records, require_result)?;
     let ended = records.last().is_some_and(|r| r["kind"] == "result");
-    let rows = samples.iter().enumerate().map(|(i,s)|format!("{{\"row\":{i},\"source_sequence\":{},\"original_trigger_machine_mm\":{},\"miss\":{}}}",s.sequence,s.trigger.map(|p|format!("{p:?}")).unwrap_or_else(||"null".into()),s.trigger.is_none())).collect::<Vec<_>>().join(",");
+    let rows = samples.iter().enumerate().map(|(i,s)| {
+        let reference = match &plan.rows {
+            Rows::Repeats(rows) => { let r = &rows[i]; format!(",\"repeated_source\":{{\"proposal\":{},\"capture\":\"{}\",\"sequence\":{},\"phase\":{}}}",r.proposal,r.capture,r.sequence,r.request.phase as u8) },
+            Rows::Columns(_) => String::new(),
+        };
+        format!("{{\"row\":{i},\"source_sequence\":{},\"original_trigger_machine_mm\":{},\"miss\":{}{reference}}}",s.sequence,s.trigger.map(|p|format!("{p:?}")).unwrap_or_else(||"null".into()),s.trigger.is_none())
+    }).collect::<Vec<_>>().join(",");
     let (schema, role) = if let Some(role) = plan.role {
         (
-            "dmc2.top-followup-capture.v2",
+            if plan.rows.repeated() {
+                "dmc2.top-followup-capture.v3"
+            } else {
+                "dmc2.top-followup-capture.v2"
+            },
             format!(
                 ",\"contact_role\":\"{}\",\"contact_role_interpretation\":\"{}\"",
                 role.name(),
@@ -84,7 +97,7 @@ pub(super) fn export(
     } else {
         ("dmc2.top-followup-capture.v1", String::new())
     };
-    let json = format!("{{\"schema\":\"{schema}\"{role},\"program_result_present\":{ended},\"requested_rows\":{},\"retained_rows\":[{rows}],\"interpretation\":\"Fresh top samples with the original acquisition frame and explicit plan order. Misses have no surface height. Import this ledger with its companions into the original object/setup, then prepare a new stock surface and material assessment. Coverage and cutting remain unresolved.\",\"cam_ready\":false}}\n",plan.points.len());
+    let json = format!("{{\"schema\":\"{schema}\"{role},\"program_result_present\":{ended},\"requested_rows\":{},\"retained_rows\":[{rows}],\"interpretation\":\"Fresh top samples with the original acquisition frame and explicit plan order. Misses have no surface height. Import this ledger with its companions into the original object/setup, then prepare a new stock surface and material assessment. Coverage and cutting remain unresolved.\",\"cam_ready\":false}}\n",plan.rows.len());
     let stem = if require_result {
         String::new()
     } else {

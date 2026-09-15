@@ -1306,6 +1306,61 @@ These are numerical/file outcomes. Physical entry, acquisition and recovery
 observation remain outstanding. Read-only UI inspection reported both recovery
 controls `normal` and no modal grab. No machine action or restart was issued.
 
+## Repeating original top observations
+
+The existing **Export top follow-up program** operation now accepts saved
+`DMC2_OBSERVATION_REQUEST_V1` repeat selections as well as spatial selections.
+It reproduces the saved material assessment and selection before exporting.
+Every selected request must be an original vertical top column at its retained
+floor, with compatible original start, plate and feed snapshots. Selection order
+is preserved. A side/outline request or incompatible source makes the export
+return a named diagnostic before writing a program; it is not silently removed
+or converted into a top point. Numerical reference compatibility does not
+establish that the physical stock or probe remained in place.
+
+Repeats use `DMC2_TOP_FOLLOWUP_V3`. Each row retains the selected proposal,
+source capture and fine-record sequence, original phase, approach and target.
+Reference, boundary, grid and verification top phases retain their original
+identity. The same shared mapper executor performs the existing clearance,
+coarse/fine and withdrawal sequence. Original endpoints and feeds are retained;
+no predicted trigger, new entry move or altered withdrawal distance is supplied.
+The actual loaded program contains the plan bytes. Each fresh ledger receives
+its own exact plan, plate and feed companions through the existing capture path.
+
+Repeat plans require `contact_role=check`. Native reports use
+`dmc2.top-followup-capture.v3`: `source_sequence` identifies the fresh fine record,
+`original_trigger_machine_mm` is its retained machine-frame trigger, and
+`repeated_source` identifies the earlier proposal/capture/sequence/phase.
+Normal surface preparation assigns these fresh contacts to withheld check rows.
+A new agreeing repeat does not remove an earlier failed check, modify an old
+analysis, or pull fitted stock toward required machining geometry. Original
+ledgers and context remain available to investigate disagreement.
+
+Both standard binaries are built and installed. The numerical file exercise
+exported missing-check, disagreement and shortage selections, then imported
+fresh reference-phase and grid-phase repeats. Both left all nine fitted patches
+unchanged. The agreeing missing-check repeat supplied a zero residual; adding an
+agreeing repeat alongside the earlier four disagreeing checks retained those
+checks and all 258 disagreement regions. Original ledgers and companions were
+read back exactly from the new surface analyses. These are file/numerical
+results, not physical stock, acquisition or recovery evidence.
+
+The historical spatial exports reproduced all 40, 58 and 57 files respectively;
+the prior native check report and CSV also retained their bytes. Saved repeat
+exports reproduced all 40 and 45 files after the new imports. Missing roles,
+fit-role repeats and duplicate source rows produced specific errors with no
+native report; an empty selection produced no program directory. Readbacks:
+`/home/kit/cnc-backups/mapper-top-repeat-f8z6zltq/installation-readback.json`,
+`surface-material-readback.json`, `legacy-readback.json` and
+`export-readback.json`. The library run reported 74 passes; this is not proof of
+machine behavior. Read-only UI inspection reported Clear Fault and Pendant Mode
+as `normal`, with no modal grab. No machine command or restart was issued.
+
+Side entry/recovery, mixed acquisition settings, physical frame registration,
+multiheight access, unseen volume and physical acceptance remain open. This
+extension connects existing repeat selection to acquisition and retained stock
+analysis; it does not establish CAM readiness or close the whole workflow.
+
 ## Recorded TODOs — 2026-09-14
 
 This is the continuing implementation list for the positional mapper and
@@ -1318,7 +1373,9 @@ machine run.
   program export, shared executor, fresh-plan capture binding, import and
   surface/material continuation are implemented and installed; see the runbook
   above. Physical entry, acquisition and recovery observation remain open.
-  Repeat/side plans still need explicit entry/recovery geometry and execution;
+  Original top repeats now share that export/capture path; see
+  [Repeating original top observations](#repeating-original-top-observations).
+  Side plans still need explicit entry/recovery geometry and execution;
   no unsupported requests are silently narrowed to top points. Further spatial
   selection now pools explicit compatible acquisition histories, including
   miss-only complete cycles, with immutable source retention and legacy replay;
@@ -1329,8 +1386,8 @@ machine run.
   matching numerical settings establish physical identity. Fresh follow-up check
   selection, exported role retention and automatic withheld-row preparation are
   implemented and installed; see [Fresh withheld checks](#fresh-withheld-checks).
-  Their physical acquisition, disagreement/repeat execution, multiheight sides
-  and unseen volume remain parts of the whole stock-to-CAM workflow.
+  Physical top/check/repeat acquisition, mixed-setting entry plans, multiheight
+  sides and unseen volume remain parts of the whole stock-to-CAM workflow.
 - [ ] **Acquire automatic top coverage for irregular stock.** The production
   Rust planner and Scripts catalog now provide Automatic top map, sharing the
   existing mapper executor, original trigger capture, feeds and recovery. It

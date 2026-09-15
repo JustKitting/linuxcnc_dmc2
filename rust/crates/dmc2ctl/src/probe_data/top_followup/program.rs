@@ -1,4 +1,4 @@
-use super::{number, Mode, Plan};
+use super::{number, Mode, Plan, Rows};
 const BLOB: &str = "(FOLLOWUP-BYTES ";
 const EXECUTOR: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
@@ -27,11 +27,19 @@ impl Plan {
             [s.downward_feed, s.feeds[1], s.feeds[2]],
             s.outline_backoff()
         ));
-        for (i, p) in self.points.iter().enumerate() {
+        for (i, q) in self.requests()?.iter().enumerate() {
+            let p = q.approach;
             out.push_str(&format!(
                 "(Row {i}: work XY mm {:?}; clear Z {}; floor Z {})\n",
                 p, s.origin[2], s.floor
             ));
+            if let Rows::Repeats(rows) = &self.rows {
+                let source = &rows[i];
+                out.push_str(&format!(
+                    "(Repeat proposal {}: original capture {} record {}; phase {} retained.)\n",
+                    source.proposal, source.capture, source.sequence, q.phase as u8
+                ));
+            }
         }
         // Hex comments bind all plan bytes into the standard loader's program
         // revision. 48 source bytes keep each line below LinuxCNC LINELEN.

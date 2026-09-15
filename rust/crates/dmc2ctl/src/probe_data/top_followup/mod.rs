@@ -4,6 +4,8 @@ mod format;
 mod program;
 mod role;
 pub use role::Role;
+mod rows;
+pub use rows::{Repeat, Rows};
 #[cfg(test)]
 mod tests;
 use super::{
@@ -20,7 +22,7 @@ pub struct Plan {
     pub plate: String,
     pub feeds: String,
     /// Explicit execution order; each leg returns to original clearance.
-    pub points: Vec<[f64; 2]>,
+    pub rows: Rows,
     /// None retains the historical V1 plan bytes and implicit fitting role.
     pub role: Option<Role>,
 }
@@ -32,21 +34,16 @@ impl Plan {
             &policy(&self.feeds)?,
             None,
         )?;
-        if self.points.is_empty() {
-            return Err("The follow-up plan contains no selected top columns. Select an analysis with new points; no empty program was supplied.".into());
+        if self.rows.repeated() && self.role != Some(Role::Check) {
+            return Err("Original top repeats must retain contact_role=check. Re-export their observation analysis; original contacts and failed checks cannot be replaced by new fitting rows.".into());
         }
-        for &xy in &self.points {
-            TopColumn::new(&s, xy)?;
-        }
+        self.rows.requests(&s)?;
         Ok(s)
     }
 
     pub fn requests(&self) -> Result<Vec<Request>, String> {
         let s = self.settings()?;
-        self.points
-            .iter()
-            .map(|&xy| TopColumn::new(&s, xy).map(|c| c.request))
-            .collect()
+        self.rows.requests(&s)
     }
 
     /// Validate both runtime next-target state and imported measurement context.

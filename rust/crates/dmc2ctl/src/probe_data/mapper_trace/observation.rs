@@ -17,11 +17,33 @@ pub struct TopColumn {
 }
 impl TopColumn {
     pub fn new(s: &Settings, xy: [f64; 2]) -> Result<Self, String> {
-        if !matches!(s.mode, Mode::Surface | Mode::FreeSurface | Mode::TopFollowup) {
+        if !matches!(
+            s.mode,
+            Mode::Surface | Mode::FreeSurface | Mode::TopFollowup
+        ) {
             return Err("New top columns need a retained Surface or Automatic top map run. Select that capture; a side-trace approach cannot supply a top entry path.".into());
         }
         let request = Request::top(s, Phase::Grid, xy);
-        for p in [s.origin, [xy[0], xy[1], s.origin[2]], request.target] {
+        Self::from_request(s, request)
+    }
+    /// Preserve a retained top request's phase and endpoints exactly. A side
+    /// request needs its own entry path and cannot be converted into a column.
+    pub fn from_request(s: &Settings, request: Request) -> Result<Self, String> {
+        if !matches!(
+            request.phase,
+            Phase::Reference | Phase::Boundary | Phase::Grid | Phase::Verify
+        ) || request.edge != -1
+            || !super::super::mapper_settings::close(request.target[0], request.approach[0])
+            || !super::super::mapper_settings::close(request.target[1], request.approach[1])
+            || !super::super::mapper_settings::close(request.target[2], s.floor)
+        {
+            return Err("This original request is not a vertical top column at its retained floor. Preserve the proposal and review its side/outline entry path; it cannot be exported as a top repeat.".into());
+        }
+        for p in [
+            s.origin,
+            [request.approach[0], request.approach[1], s.origin[2]],
+            request.target,
+        ] {
             s.bounds(p)?;
         }
         Ok(Self {

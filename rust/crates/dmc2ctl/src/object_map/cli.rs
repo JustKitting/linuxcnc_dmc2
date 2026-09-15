@@ -1,10 +1,10 @@
 use super::{
-    Error,
     catalog::{self, Operation},
     exchange, files,
     model::Id,
     positional,
     store::Store,
+    Error,
 };
 use std::{
     ffi::OsString,
@@ -133,9 +133,9 @@ pub fn run(args: &[OsString], default_store: &Path) -> Result<String, Error> {
         PlanObservations => {
             positional::stock::observation::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3))
         }
-        ExportTopObservations => positional::stock::observation::spatial::export::run(
-            &store, &id(0)?, &id(1)?, &id(2)?, path(3),
-        ),
+        ExportTopObservations => {
+            positional::stock::observation::program::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3))
+        }
         PrepareStockMesh => {
             positional::stock::reconstruction::prepare(&store, &id(0)?, &id(1)?, &id(2)?)
         }
