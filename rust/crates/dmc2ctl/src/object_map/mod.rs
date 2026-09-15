@@ -1,5 +1,6 @@
 //! Offline object records and FreeCAD exchange. No NML/HAL or machine commands.
 mod capture;
+mod capture_bundle;
 mod catalog;
 pub mod cli;
 mod exchange;

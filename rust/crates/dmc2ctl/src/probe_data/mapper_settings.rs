@@ -1,5 +1,5 @@
 //! Retained-data model for current rim traces and historical mapper ledgers.
-use super::super::ledger::{number, Fields};
+use super::ledger::{number, Fields};
 use std::collections::BTreeMap;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
@@ -8,7 +8,7 @@ pub enum Mode {
     Rim,
     Outline,
 }
-pub use dmc2ctl::probe_data::mapper_schema::Phase;
+pub use super::mapper_schema::Phase;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum OutlineRevision {
@@ -368,4 +368,18 @@ pub fn close(a: f64, b: f64) -> bool {
     // Decimal G-code serialization plus floating-point arithmetic, not an
     // invented tolerance for mechanical motion or probe repeatability.
     (a - b).abs() <= 1e-9 + 8.0 * f64::EPSILON * a.abs().max(b.abs()).max(1.0)
+}
+
+pub const PLATE_FIELDS: &[&str] = &["x_min", "x_max", "y_min", "y_max", "ball_diameter"];
+pub fn policy(text: &str) -> Result<Fields, String> {
+    match text.lines().next() {
+        Some("DMC2_MAPPER_FEEDS_V1") => {
+            let mut fields = data(text, "DMC2_MAPPER_FEEDS_V1", &["coarse_feed", "fine_feed", "travel_feed"])?;
+            // Older recorded runs used the same coarse feed in Z and XY.
+            fields.insert("downward_feed".into(), fields["coarse_feed"].clone());
+            Ok(fields)
+        }
+        Some("DMC2_MAPPER_FEEDS_V2") => data(text, "DMC2_MAPPER_FEEDS_V2", &["coarse_feed", "downward_feed", "fine_feed", "travel_feed"]),
+        _ => Err("Mapper feed settings need a supported versioned header; correct config/mapper-feeds.txt before Run.".into()),
+    }
 }

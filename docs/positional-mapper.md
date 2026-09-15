@@ -71,6 +71,22 @@ original sequence numbers. Misses, coarse contacts, release events and stopped
 positions cannot substitute for a selected fine trigger. Obstructed captures
 are quarantined; partial captures remain explicitly partial.
 
+Mapper imports also retain the original `.plate.txt`, `.feeds.txt` and
+`.outline.txt` companions found beside the source ledger. The ledger and present
+companions are published together in one `DMC2_OBJECT_CAPTURE_V2` record. Missing
+files are explicit; empty or malformed files are retained for diagnosis. The
+source files are not required after import. Existing V1 records still read, with
+companion settings marked missing; they are never populated from current config
+or from a source path that may have changed. To retain companions for a previous
+V1 capture, import the original run under a new capture ID.
+
+Show object displays the acquisition context and any settings-reader error.
+Analysis and FreeCAD exchange exports include the exact companion bytes and a
+`.context.json` description. Both acquisition and analysis use the shared
+`probe_data/mapper_settings.rs` parser for recorded bounds, feeds, resolution and
+policy versions. These are historical settings, not proof of current machine
+state, probe calibration or motion authorization.
+
 `object-map --store /some/directory ...` selects a portable independent store.
 The default is `var/objects` beneath the project. Snapshot conflicts require a
 new ID. Reusing an existing different source never overwrites the retained one.
@@ -137,10 +153,8 @@ Replace roles and add captures as appropriate. Valid roles are:
   stock faces assumed parallel to the corresponding model axes.
 
 A record may appear once only. A single observation cannot both fit a placement
-and independently check it. For unfinished stock, use known datum surfaces for
-fitting and the stock-face roles for allowance measurements. If the whole object
-is raw stock, supply a suitable reference-stock model or first establish its
-reference features; do not fit all oversized faces to a finished-part mesh.
+and independently check it. The STL registration path needs known corresponding
+geometry. Use the stock-outline path below when raw stock has no such geometry.
 
 ## Estimate an irregular stock outline without a reference STL
 
@@ -400,6 +414,18 @@ machine run.
   selection and tracing must serve stock reconstruction and containment; they
   are not separate end goals. No analysis requirement currently issues a probe
   command. Keep the pending fine endpoint allowance separate from this work.
+  Capture import now retains the original acquisition companions and exports
+  them with the ledger, so later planning can use that run's bounds and policy.
+  The common settings parser is used by both standard binaries. A file-only
+  import/export of the failed run remained readable after its copied source
+  directory was moved; all exported original files matched byte for byte.
+  The standard acquisition reader replayed that export and retained the original
+  missing-fine-trigger diagnosis at record 409. Old V1 snapshots reported missing
+  context instead of consulting live configuration. Readback artifacts are in
+  `/home/kit/cnc-backups/mapper-context-gbmdc3ng`. Both binaries are built and
+  installed. Twenty-four object-map and seven mapper numerical checks reported
+  passes; these do not establish machine behavior. Adaptive next-contact planning,
+  multi-height acquisition and material containment remain outstanding.
 - [ ] **Optimize machining placement inside measured stock.** Fit the unchanged
   required geometry into the stock estimate using the allowed translations and
   rotations. Account for material shortage and unknown coverage separately;

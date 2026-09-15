@@ -1,6 +1,6 @@
 //! Automatic stock geometry. M190 publishes data; LinuxCNC owns motion.
 mod dimensions;
-mod model;
+use dmc2ctl::probe_data::mapper_settings as model;
 mod outline;
 mod outline_report;
 #[cfg(test)]
@@ -13,23 +13,10 @@ mod tests;
 mod withdrawal;
 
 use super::{ledger, plan_bank, schema::Workflow, storage};
-use model::{data, Mode, OutlinePolicy, Phase, Request, Settings};
+use model::{data, policy, Mode, OutlinePolicy, Phase, Request, Settings, PLATE_FIELDS};
 pub(super) use report::export;
 use std::{fs, path::Path};
 
-const PLATE_FIELDS: &[&str] = &["x_min", "x_max", "y_min", "y_max", "ball_diameter"];
-fn policy(text: &str) -> Result<ledger::Fields, String> {
-    match text.lines().next() {
-        Some("DMC2_MAPPER_FEEDS_V1") => {
-            let mut fields = data(text, "DMC2_MAPPER_FEEDS_V1", &["coarse_feed", "fine_feed", "travel_feed"])?;
-            // Older recorded runs used the same coarse feed in Z and XY.
-            fields.insert("downward_feed".into(), fields["coarse_feed"].clone());
-            Ok(fields)
-        }
-        Some("DMC2_MAPPER_FEEDS_V2") => data(text, "DMC2_MAPPER_FEEDS_V2", &["coarse_feed", "downward_feed", "fine_feed", "travel_feed"]),
-        _ => Err("Mapper feed settings need a supported versioned header; correct config/mapper-feeds.txt before Run.".into()),
-    }
-}
 const PLAN_FIELDS: &str = include_str!(concat!(
     env!("CARGO_MANIFEST_DIR"),
     "/../../../config/mapper-plan-fields.txt"

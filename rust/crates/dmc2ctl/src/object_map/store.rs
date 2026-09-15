@@ -1,5 +1,6 @@
 use super::{
     capture::Capture,
+    capture_bundle::{self, Context},
     model::{named_json, DesignFormat, Id, Registration},
     record::{self, quote},
     Error,
@@ -12,7 +13,6 @@ use std::{
 
 const OBJECT: &str = "DMC2_OBJECT_V1";
 const SETUP: &str = "DMC2_OBJECT_SETUP_V1";
-const CAPTURE: &str = "DMC2_OBJECT_CAPTURE_V1";
 const DESIGN: &str = "DMC2_OBJECT_DESIGN_V1";
 
 pub struct Store {
@@ -127,6 +127,14 @@ pub struct CaptureSnapshot {
     pub source_path: String,
     pub raw: Vec<u8>,
     pub capture: Capture,
+    pub context: Context,
+}
+
+impl CaptureSnapshot {
+    pub fn export(&self, path: &Path) -> Result<(), Error> {
+        save(path, &self.raw)?;
+        self.context.export(path, &self.capture)
+    }
 }
 
 pub struct DesignSnapshot {
@@ -176,21 +184,18 @@ impl Store {
     pub fn import(&self, object: &Id, setup: &Id, id: &Id, source: &Path) -> Result<(), Error> {
         self.setup_label(object, setup)?;
         let raw = read(source)?;
-        Capture::read(
+        let capture = Capture::read(
             std::str::from_utf8(&raw)
                 .map_err(|e| Error::Data(format!("Capture is not UTF-8: {e}.")))?,
         )?;
         let source = source
             .canonicalize()
             .map_err(|e| Error::Storage(format!("Resolving {}: {e}.", source.display())))?;
+        let context = Context::source(&source, capture.workflow)?;
         let source = source
             .to_str()
             .ok_or_else(|| Error::Input("Capture path must be UTF-8.".into()))?;
-        let bytes = record::encode(
-            CAPTURE,
-            &[("id", id.as_str()), ("source_path", source)],
-            &raw,
-        )?;
+        let bytes = capture_bundle::encode(id, source, &raw, &context)?;
         save(
             &self
                 .setup_path(object, setup)
@@ -240,20 +245,16 @@ impl Store {
             .into_iter()
             .map(|id| {
                 let bytes = read(&path.join(format!("{}.dmc2", id.as_str())))?;
-                let (fields, raw) = record::decode(&bytes, CAPTURE, &["id", "source_path"])?;
-                if fields["id"] != id.as_str() {
-                    return Err(Error::Data(
-                        "Capture snapshot ID disagrees with its filename.".into(),
-                    ));
-                }
+                let retained = capture_bundle::decode(&bytes, &id)?;
                 let capture =
-                    Capture::read(std::str::from_utf8(raw).map_err(|e| {
+                    Capture::read(std::str::from_utf8(&retained.raw).map_err(|e| {
                         Error::Data(format!("Retained capture is not UTF-8: {e}."))
                     })?)?;
                 Ok(CaptureSnapshot {
                     id,
-                    source_path: fields["source_path"].clone(),
-                    raw: raw.into(),
+                    source_path: retained.source,
+                    raw: retained.raw,
+                    context: retained.context,
                     capture,
                 })
             })
@@ -306,9 +307,10 @@ impl Store {
                 .into_iter()
                 .map(|c| {
                     format!(
-                        "{{\"id\":{},\"source_path\":{},{}}}",
+                        "{{\"id\":{},\"source_path\":{},\"acquisition_context\":{},{}}}",
                         quote(c.id.as_str()),
                         quote(&c.source_path),
+                        c.context.json(&c.capture),
                         c.capture.summary()
                     )
                 })

@@ -28,7 +28,7 @@ pub fn export(store: &Store, object: &Id, setup: &Id, output: &Path) -> Result<S
     for snapshot in &captures {
         let id = snapshot.id.as_str();
         let capture = &snapshot.capture;
-        save(&output.join(format!("{id}.ledger.txt")), &snapshot.raw)?;
+        snapshot.export(&output.join(format!("{id}.ledger.txt")))?;
         let mut csv = String::from("sequence,stage,capture_state,source,machine_x_mm,machine_y_mm,machine_z_mm,commanded_direction_x,commanded_direction_y,commanded_direction_z,commanded_feed_mm_min\n");
         let mut points = String::new();
         let mut point_sequences = Vec::new();

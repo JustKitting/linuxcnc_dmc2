@@ -71,10 +71,7 @@ pub fn run(store: &Store, object: &Id, setup: &Id, id: &Id, path: &Path) -> Resu
     save(&output.join("request.txt"), &raw)?;
     for c in &captures {
         if used.contains(c.id.as_str()) {
-            save(
-                &output.join(format!("capture-{}.txt", c.id.as_str())),
-                &c.raw,
-            )?;
+            c.export(&output.join(format!("capture-{}.txt", c.id.as_str())))?;
         }
     }
     save(&output.join("residuals.csv"), report.csv.as_bytes())?;

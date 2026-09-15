@@ -2,4 +2,5 @@
 pub mod block_schema;
 pub mod ledger;
 pub mod mapper_schema;
+pub mod mapper_settings;
 pub mod schema;
