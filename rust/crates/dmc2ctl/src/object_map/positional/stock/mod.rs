@@ -1,5 +1,6 @@
 //! Acquisition-led stock estimation, reached through the standard offline binary.
 mod fit;
+pub(in crate::object_map) mod placement;
 mod report;
 mod request;
 mod surface;

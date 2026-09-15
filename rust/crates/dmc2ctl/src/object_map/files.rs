@@ -46,9 +46,13 @@ fn draft(raw: &[u8]) -> Result<&str, Error> {
         ),
         super::positional::stock::Model::Outline.request_schema(),
         super::positional::stock::Model::Surface.request_schema(),
+        (
+            super::positional::stock::placement::request::SCHEMA,
+            super::positional::stock::placement::request::KEYS.to_vec(),
+        ),
     ];
     let (schema, keys) = schemas.iter().find(|(schema, _)| raw.starts_with(format!("{schema}\n").as_bytes()))
-        .ok_or_else(|| Error::Input("Unsupported analysis draft. Prepare a placement, stock-outline or stock-surface request through Object Mapper.".into()))?;
+        .ok_or_else(|| Error::Input("Unsupported analysis draft. Prepare a registration, stock outline, stock surface or machining footprint request through Object Mapper.".into()))?;
     record::decode(raw, schema, keys)?;
     std::str::from_utf8(raw).map_err(|e| Error::Input(format!("Request text is not UTF-8: {e}.")))
 }

@@ -47,7 +47,7 @@ fn reference(s: &Sample) -> String {
 fn point(p: Option<V>) -> String {
     p.map(json).unwrap_or_else(|| "null".into())
 }
-fn projection(p: V, a: V, b: V) -> (V, f64) {
+pub(super) fn projection(p: V, a: V, b: V) -> (V, f64) {
     let d = sub(b, a);
     let l = d[0].hypot(d[1]);
     if l == 0. {

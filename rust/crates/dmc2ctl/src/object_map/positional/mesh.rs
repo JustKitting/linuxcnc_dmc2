@@ -261,6 +261,9 @@ impl Mesh {
     pub fn nearest(&self, p: V) -> Result<Nearest, Error> {
         self.spatial.nearest(&self.triangles, p)
     }
+    pub fn triangles(&self) -> &[Triangle] {
+        &self.triangles
+    }
     pub fn json(&self) -> String {
         format!("{{\"triangles\":{},\"min_mm\":{},\"max_mm\":{},\"span_mm\":{},\"boundary_edges\":{},\"inconsistent_edges\":{},\"signed_volume_mm3\":{},\"self_intersections_checked\":false}}",self.triangles.len(),json(self.min),json(self.max),json(sub(self.max,self.min)),self.boundary_edges,self.inconsistent_edges,self.signed_volume)
     }

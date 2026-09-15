@@ -110,6 +110,12 @@ pub fn run(args: &[OsString], default_store: &Path) -> Result<String, Error> {
             path(3),
             positional::stock::Model::Surface,
         ),
+        PrepareFootprint => {
+            positional::stock::placement::prepare(&store, &id(0)?, &id(1)?, &id(2)?, &id(3)?)
+        }
+        FitFootprint => {
+            positional::stock::placement::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3))
+        }
         Fit => positional::run(&store, &id(0)?, &id(1)?, &id(2)?, path(3)),
         ShowFit => positional::show(&store, &id(0)?, &id(1)?, &id(2)?),
         ExportFit => positional::export(&store, &id(0)?, &id(1)?, &id(2)?, path(3)),

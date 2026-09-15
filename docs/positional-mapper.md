@@ -5,8 +5,9 @@ outlines and local 3D surfaces from retained probe contacts. This raw-stock path
 does not require the wood to match an STL or rectangle. A separate registration
 path fits genuinely corresponding model features and transforms named design
 points using a candidate placement. All these commands operate on files before
-opening any machine connection. Stock-volume reconstruction and placement of
-unchanged machining geometry inside that volume remain on the TODO list below.
+opening any machine connection. Horizontal footprint placement now searches
+inside the estimated outline. Stock-volume reconstruction and full 3D placement
+remain on the TODO list below.
 
 The research, physical requirements and continuation design are in
 [Probe-based positioning and manufacturing continuation](probe-based-continuation.md).
@@ -298,6 +299,113 @@ The corrected surface request, existing outline draft and positional request
 all reopened byte for byte. Numerical checks reported 29 object-map passes;
 none of these results establishes physical stock, control recovery or machining.
 
+## Place a machining footprint inside the estimated outline
+
+**Prepare machining footprint** and **Place machining footprint** connect the
+retained outline to an unchanged required-operation STL. They search translation
+and yaw within explicit bounds. The stock boundary can be concave and have any
+number of edges; no rectangle, convex hull, matched nominal planes or stock-to-
+design registration objective is substituted.
+
+```sh
+native/bin/dmc2ctl object-map prepare-footprint part first stock-a required > /tmp/footprint-request.txt
+native/bin/dmc2ctl object-map fit-footprint part first footprint-a /tmp/footprint-request.txt
+native/bin/dmc2ctl object-map show-fit part first footprint-a
+native/bin/dmc2ctl object-map export-fit part first footprint-a /tmp/footprint-a
+```
+
+Select the complete material that the operation must preserve. For dice OP1 this
+is `stage1_after`, including backing and envelopes; finished blanks alone omit
+required material. The source STL is retained exactly. A candidate applies only
+a proper rigid transform after the declared unit conversion.
+
+The `DMC2_FOOTPRINT_REQUEST_V1` contains:
+
+| Field | Meaning |
+|---|---|
+| `outline_analysis` | Retained stock-outline analysis in this same setup |
+| `design` | Attached STL revision containing required operation material |
+| `required_geometry_role` | Explicit `operation-retained-material` declaration |
+| `stl_mm_per_unit` | Known conversion from the source file's units |
+| `model_origin_z_mm` | Fixed candidate model-origin Z; horizontal fitting does not establish its physical correctness |
+| `model_origin_x_bounds_mm`, `model_origin_y_bounds_mm` | Allowed model-origin placement ranges as `lower,upper`; equal endpoints keep that coordinate fixed |
+| `yaw_bounds_deg` | Allowed yaw interval, spanning at most a full turn |
+| `required_clearance_mm` | Nonnegative horizontal clearance requested from the estimated polygon |
+| `cover_radius_mm` | Maximum radius covering a subdivided projected triangle; smaller values reduce conservative coverage error |
+| `max_cover_samples` | Computational budget to cover every original triangle |
+| `placement_resolution_mm` | Requested gap between the best objective value and the remaining search bound |
+| `max_evaluations` | Computational budget for placement evaluations |
+
+Preparation fills only the selected analysis/design identities. Other values
+remain `REQUIRED`; they are analysis data, not new motion limits, offsets or
+automatic machine actions. Save and reopen the request through the normal
+editor. A failed calculation leaves the request editable and existing outputs
+preserved; use a new result ID for another published calculation.
+
+The source must be a closed outline with explicit `vertical-sides` probe
+correction. That is a retained interpretation of the XY slice, not evidence
+that the entire stock has vertical walls. The operation checks local fit/gap/
+height support and independent contacts. It compares the original capture bytes
+and reproduced outline report to the source analysis. Changed data or a changed
+estimator requires a new source analysis. Intersecting, coincident or reversing
+outline segments remain readable errors; their shape is never replaced with a
+convex approximation.
+
+Every source triangle is projected onto XY and subdivided along its longest
+projected edge until a centroid-centred disk of the requested maximum radius
+covers that subtriangle. Original triangle IDs remain attached. A triangle whose
+vertices lie inside a concave outline can still cross a missing corner; coverage
+therefore includes its interior, not just vertices. An insufficient sample
+budget reports an error instead of dropping triangles or silently coarsening.
+
+For each cover sample, let `d` be the polygon's signed outside distance at the
+candidate centre, and `r` its covering radius. Its local clearance lies between
+`-d-r` and `-d` under the polygon model. The objective is the minimum of the
+lower bounds over all covered triangles. Excess stock produces clearance;
+it is not a mismatch to the required design. All local clearance deficits remain
+in the report, even when an aggregate summary would appear small.
+
+The bounded search evaluates cell centres and subdivides the cell with the
+largest possible improvement. Its bound uses the translation half-diagonal
+plus the maximum yaw chord displacement of the cover centres. It stops when
+the requested clearance is reached, the remaining objective gap meets the
+requested resolution, the computational budget ends, or floating-point cells
+can no longer subdivide. The latter outcomes retain their best candidate and
+remaining bound; they do not assert that all possible physical placements fail.
+Bounds describe numerical calculations for this polygon and cover, not physical
+accuracy or a globally closed material volume.
+
+The bundle retains the request, source STL, every source-outline bundle file
+under `stock-source-`, the transformed candidate STL, `search-history.csv` and
+`residuals.csv`. Each residual row names its source triangle, model/machine
+centre, cover radius, signed distance, local clearance/deficit bounds and nearest
+source-outline segment. Inspect/Export analysis use the shared UI path. A
+`pose-candidate.txt` is published only when the requested horizontal clearance
+is reached; the existing named-location operation can transform design points
+through this unreviewed candidate. The pose does not establish Z registration.
+
+**Height, bottom support, taper, cavities and fixture/tool clearance remain
+unresolved.** This is horizontal placement inside the estimated outline. A
+successful horizontal calculation must not be used as evidence of full stock
+containment. The manifest retains `three_dimensional_containment: unresolved`,
+unknown unmeasured volume and `cam_ready: false`. The 3D surface and acquisition
+work must supply the remaining material constraints before a cutting job.
+
+The installed binary's synthetic file exercise imported a three-lobed contour,
+retained all 97 fine contacts and fitted 96 boundary stations plus a withheld
+check. Its initial neighborhood smoothed a peak past the residual bound; the
+footprint operation rejected that source. A new outline using immediate
+neighbors retained the same contacts and residual bound, with check disagreement
+0.042693 mm. The placement search then improved its conservative clearance from
+-2.199750 mm to +0.597026 mm for an unchanged synthetic 6 × 2 × 2 mm solid.
+The export retained all 12 source triangle identities, 1,228 cover samples and
+every original source file. The matrix reproduced exported vertices exactly in
+the file readback. Thirty-five object-map numerical checks reported passes,
+including a triangle crossing a concavity despite having all vertices inside,
+yaw/translation searches and exhausted-budget retention. These are numerical
+and file results only. Artifacts:
+`/home/kit/cnc-backups/mapper-footprint-6q6bno42/round-trip-readback.json`.
+
 ## Fit, inspect and repeat without editing control code
 
 ```sh
@@ -549,8 +657,19 @@ machine run.
   Report local deficits even if an aggregate penalty is small. Select any
   clearance/allowance objectives from actual setup context. For dice OP1, preserve
   `stage1_after`, including backing and envelopes; checking only finished blanks
-  would omit required intermediate material. The current Huber STL registration
-  objective and descriptive `model_role` do not implement this placement problem.
+  would omit required intermediate material. The Huber STL registration
+  objective remains separate. `prepare-footprint` / `fit-footprint` now connect
+  a retained outline to an unchanged required-operation STL, search allowed XY
+  translations and yaw, and retain worst local clearance/deficit bounds across
+  complete projected triangles. Original captures, source analysis, STL and
+  triangle identities are preserved through inspection/export; named locations
+  can use the unreviewed horizontal candidate. The standard binary is built and
+  installed. A synthetic file run improved its conservative horizontal clearance
+  from -2.199750 mm to +0.597026 mm and retained every source file. Thirty-five
+  object-map numerical checks report passes. Full 3D containment, integration
+  with supported volume, actual setup constraints and physical acceptance remain
+  open; neither the horizontal result nor these checks establishes them. See
+  the footprint runbook and the retained file readback above.
 - [ ] **Validate placement and compare setups.** Retain named calibration
   evidence and reference-frame relationships, calculate independent feature
   prediction errors, and provide a reviewed placement state with an explicit
