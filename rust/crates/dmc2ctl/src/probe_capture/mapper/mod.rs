@@ -1,5 +1,9 @@
 //! Automatic stock geometry. M190 publishes data; LinuxCNC owns motion.
 mod dimensions;
+mod free_report;
+mod free_surface;
+#[cfg(test)]
+mod free_tests;
 use dmc2ctl::probe_data::mapper_settings as model;
 use dmc2ctl::probe_data::mapper_trace::{outline, state};
 mod outline_report;
@@ -84,6 +88,8 @@ pub(super) fn publish_next(output: &Path, sequence: u64) -> Result<(), String> {
         let samples = state::samples(&records, &settings, false)?;
         let progress = if settings.mode == Mode::Outline {
             outline::run(&settings, &samples).result
+        } else if settings.mode == Mode::FreeSurface {
+            search::Survey::new(&settings, &samples).free_surface()
         } else {
             search::Survey::new(&settings, &samples).run().map(|_| ())
         };

@@ -63,17 +63,23 @@ pub fn prepare_surface(store: &Store, object: &Id, setup: &Id) -> Result<String,
             continue;
         }
         for p in c.capture.contacts.iter().filter(|p| p.stage == Stage::Fine) {
-            let seam = c.capture.workflow == Workflow::Mapper
-                && Phase::read(
+            let independent = if c.capture.workflow == Workflow::Mapper {
+                let phase = Phase::read(
                     number(&c.capture.records[p.sequence], "phase").map_err(Error::Data)?,
-                )
-                .map_err(Error::Data)?
-                    == Phase::OutlineClose;
+                ).map_err(Error::Data)?;
+                phase == Phase::OutlineClose
+                    || (phase == Phase::Verify
+                        && Mode::read(
+                            number(&c.capture.records[0], "mode").map_err(Error::Data)?,
+                        ).map_err(Error::Data)? == Mode::FreeSurface)
+            } else {
+                false
+            };
             rows.push_str(&format!(
                 "{},{},{}\n",
                 c.id.as_str(),
                 p.sequence,
-                if seam { "check" } else { "fit" }
+                if independent { "check" } else { "fit" }
             ));
         }
     }

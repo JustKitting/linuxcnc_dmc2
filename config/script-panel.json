@@ -54,6 +54,19 @@
       ]
     },
     {
+      "key": "stock-surface",
+      "operation": "program.stock-surface",
+      "requires_beginning": true,
+      "description": "Start clear above the stock. Growing contact/miss brackets guide a connected top grid without assuming a rectangle. Cell-centre checks sample between grid contacts; detected gaps are refined. Each dip returns to starting Z; descent stays inside the entered budget. Plate-censored and unsampled areas remain unknown. Uses the shared mapper feed settings and nominal editable probe reach. X: physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.",
+      "parameters": [
+        {"pin": "stock-surface-drop-mm", "label": "Maximum descent from starting Z", "kind": "positive-mm", "default": "0", "increment": "1"},
+        {"pin": "stock-surface-grid-mm", "label": "Top grid spacing", "kind": "positive-mm", "default": "0", "increment": "1"},
+        {"pin": "stock-surface-resolution-mm", "label": "Contact/miss bracket resolution", "kind": "positive-mm", "default": "0", "increment": "0.1"},
+        {"pin": "stock-surface-usable-reach-mm", "label": "Mounted usable probe reach", "kind": "positive-mm", "default": {"reference": "xyz-probe-reach-mm"}, "increment": "1"},
+        {"pin": "stock-surface-reach-reserve-mm", "label": "Probe reach reserve", "kind": "positive-mm", "default": "0", "increment": "1"}
+      ]
+    },
+    {
       "key": "rim",
       "operation": "program.rim",
       "requires_beginning": true,

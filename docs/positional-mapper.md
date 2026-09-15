@@ -928,6 +928,27 @@ supported. Source implementation, installation, numerical results and physical
 acceptance are separate milestones. Recording a task does not authorize a
 machine run.
 
+- [ ] **Acquire automatic top coverage for irregular stock.** The production
+  Rust planner and Scripts catalog now provide Automatic top map, sharing the
+  existing mapper executor, original trigger capture, feeds and recovery. It
+  grows cardinal searches from the entered grid spacing, refines measured
+  contact/miss brackets, discovers the connected top grid and acquires fresh
+  cell-centre checks. No rectangle fit is required. Plate-boundary contacts and
+  out-of-envelope grid neighbours remain censored. Fine centre contacts become
+  withheld `check` rows in normal 3D stock-surface preparation. Both standard
+  binaries are built and installed. Twelve mapper and 61 library numerical
+  checks reported passes. The installed file workflow retained 13 synthetic
+  fine contacts (nine fit, four check), original triggers and source snapshots
+  through fitting and both exports. An interrupted capture retained its
+  diagnosis with no inferred coverage. Readbacks:
+  `/home/kit/cnc-backups/mapper-autotop-f_vl8pdz/round-trip-readback.json` and
+  `interrupted-readback.json`. See [the acquisition runbook](automatic-stock-mapping.md#automatic-top-map).
+  UI activation and physical observation remain open; no restart or motion was
+  issued. Also outstanding: consume measured misses/brackets to constrain
+  interpolation and prevent support across detected gaps, distinguish supported
+  empty regions from unknown volume, and select additional spatial samples
+  from material requirements. The current top map retains these observations
+  but the local plane fitter does not yet use misses as exclusion constraints.
 - [ ] **Exponential edge bracketing, then binary refinement.** Source and
   standard capture binary now use versioned policy V4 for new runs: **1 mm,
   2 mm, 4 mm, …** offsets from the initial top sample, in physical RIGHT /
@@ -1043,10 +1064,12 @@ machine run.
   required: selecting new spatial samples for unsupported geometry, planning
   entry/recovery paths, multi-height acquisition, and connecting reviewed
   proposals to the standard script executor with fresh exact capture/readback.
-  The existing Surface/Rim `Survey` still ends in a cuboid fit; do not use that
-  completion condition for irregular raw stock. The separate outline path
-  retains its free shape. Gauge-block cuboid measurements retain their intended
-  role.
+  Historical Surface/Rim modes retain their cuboid fit for replay. The new
+  `FreeSurface` mode provides automatic connected top coverage without that
+  completion condition, and the outline path retains its free shape.
+  Gauge-block cuboid measurements retain their intended role. New spatial
+  sampling driven by material requirements and reviewed follow-up execution
+  still need to connect those acquisition paths to the estimator.
 - [ ] **Fit measured 3D stock surfaces and retain their support.** The standard
   binary and Object Mapper catalog now provide `prepare-stock-surface` and
   `fit-stock-surface`, with the existing editor/inspection/export path. Focused

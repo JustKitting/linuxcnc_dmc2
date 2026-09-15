@@ -146,6 +146,7 @@ impl Context {
                         Mode::Outline => "outline",
                         Mode::Rim => "rim",
                         Mode::Surface => "surface",
+                        Mode::FreeSurface => "free-surface",
                     };
                     (format!("{{\"mode\":{},\"frame\":\"retained work coordinates in mm\",\"work_to_machine_translation_mm\":{:?},\"bounded_min_mm\":{:?},\"bounded_max_mm\":{:?},\"local_spacing_mm\":{},\"resolution_mm\":{},\"nominal_ball_radius_mm\":{},\"horizontal_fine_travel_feeds_mm_min\":{:?},\"downward_feed_mm_min\":{}}}",record::quote(mode),s.offset,s.min,s.max,s.grid,s.resolution,s.radius,s.feeds,s.downward_feed),String::from("null"))
                 }

@@ -6,10 +6,13 @@ use std::collections::{BTreeMap, BTreeSet};
 pub use dmc2ctl::probe_data::mapper_trace::Progress;
 
 pub struct Survey<'a> {
-    s: &'a Settings,
-    samples: &'a [Sample],
-    cursor: usize,
-    cache: BTreeMap<(u64, u64), bool>,
+    pub(super) s: &'a Settings,
+    pub(super) samples: &'a [Sample],
+    pub(super) cursor: usize,
+    cache: BTreeMap<(u64, u64), (bool, usize)>,
+    pub(super) brackets: Vec<super::free_surface::Bracket>,
+    pub(super) boundary_contacts: Vec<super::free_surface::BoundaryContact>,
+    pub(super) censored_grid: BTreeSet<(i32, i32)>,
     pub hits: Vec<Point>,
     pub misses: Vec<Point>,
 }
@@ -21,11 +24,17 @@ impl<'a> Survey<'a> {
             samples,
             cursor: 0,
             cache: BTreeMap::new(),
+            brackets: Vec::new(),
+            boundary_contacts: Vec::new(),
+            censored_grid: BTreeSet::new(),
             hits: Vec::new(),
             misses: Vec::new(),
         }
     }
     fn measure(&mut self, request: Request) -> Result<bool, Progress> {
+        if self.cursor >= i32::MAX as usize {
+            return Err(Progress::Invalid("The retained mapper sample index is full. Preserve this run and use a larger grid spacing for a new Run; Abort and Pendant Mode remain available.".into()));
+        }
         self.s.bounds(request.target)?;
         self.s
             .bounds([request.approach[0], request.approach[1], self.s.origin[2]])?;
@@ -42,15 +51,16 @@ impl<'a> Survey<'a> {
         self.cursor += 1;
         Ok(sample.trigger.is_some())
     }
-    fn top(&mut self, phase: Phase, xy: Point, fresh: bool) -> Result<bool, Progress> {
+    pub(super) fn top(&mut self, phase: Phase, xy: Point, fresh: bool) -> Result<bool, Progress> {
         let key = (xy[0].to_bits(), xy[1].to_bits());
         if !fresh {
-            if let Some(hit) = self.cache.get(&key) {
+            if let Some((hit, _)) = self.cache.get(&key) {
                 return Ok(*hit);
             }
         }
         let hit = self.measure(Request::top(self.s, phase, xy))?;
-        self.cache.insert(key, hit);
+        self.cache
+            .insert(key, (hit, self.samples[self.cursor - 1].sequence));
         if hit {
             self.hits.push(xy);
         } else {
@@ -58,12 +68,18 @@ impl<'a> Survey<'a> {
         }
         Ok(hit)
     }
-    fn bisect(
+    pub(super) fn bisect(
         &mut self,
         phase: Phase,
         mut hit: Point,
         mut miss: Point,
     ) -> Result<(Point, Point), Progress> {
+        let bracket = if self.s.mode == Mode::FreeSurface {
+            self.brackets.push(self.bracket(hit, miss)?);
+            Some(self.brackets.len() - 1)
+        } else {
+            None
+        };
         while (hit[0] - miss[0]).hypot(hit[1] - miss[1]) > self.s.resolution {
             let mid = [0, 1].map(|i| (hit[i] + miss[i]) / 2.0);
             if mid == hit || mid == miss {
@@ -74,8 +90,89 @@ impl<'a> Survey<'a> {
             } else {
                 miss = mid;
             }
+            if let Some(i) = bracket {
+                self.brackets[i] = self.bracket(hit, miss)?;
+            }
         }
         Ok((hit, miss))
+    }
+
+    pub(super) fn source(&self, p: Point) -> Result<usize, Progress> {
+        self.cache.get(&(p[0].to_bits(), p[1].to_bits())).map(|(_, sequence)| *sequence)
+            .ok_or_else(|| Progress::Invalid("A boundary endpoint has no original observation. Preserve the run; no inferred contact was used.".into()))
+    }
+    pub(super) fn discover_grid(&mut self) -> Result<BTreeMap<(i32, i32), bool>, Progress> {
+        let seed = [self.s.origin[0], self.s.origin[1]];
+        // Eight-connected discovery includes diagonal connectivity for rotated
+        // stock. Neighbours are measured; unvisited space is never labelled air.
+        let mut grid = BTreeMap::new();
+        let mut pending = BTreeSet::from([(0_i32, 0_i32)]);
+        let mut last = (0_i32, 0_i32);
+        while !pending.is_empty() {
+            let cell = *pending
+                .iter()
+                .min_by_key(|&&(x, y)| {
+                    (i128::from(x) - i128::from(last.0)).pow(2)
+                        + (i128::from(y) - i128::from(last.1)).pow(2)
+                })
+                .unwrap();
+            pending.remove(&cell);
+            let xy = [
+                seed[0] + cell.0 as f64 * self.s.grid,
+                seed[1] + cell.1 as f64 * self.s.grid,
+            ];
+            if !self.s.inside_xy(xy) {
+                if self.s.mode == Mode::FreeSurface {
+                    self.censored_grid.insert(cell);
+                    continue;
+                }
+                return Err(Progress::Invalid("The connected top grid reaches the plate envelope without an enclosing measured miss boundary. Partial contacts are retained; the footprint is not declared complete.".into()));
+            }
+            last = cell;
+            let hit = self.top(Phase::Grid, xy, false)?;
+            grid.insert(cell, hit);
+            if hit {
+                for dx in -1..=1 {
+                    for dy in -1..=1 {
+                        let next = (cell.0.checked_add(dx).ok_or_else(|| Progress::Invalid("Grid X index exhausted integer storage; retain this run and choose a larger grid spacing before a new Run.".into()))?,
+                            cell.1.checked_add(dy).ok_or_else(|| Progress::Invalid("Grid Y index exhausted integer storage; retain this run and choose a larger grid spacing before a new Run.".into()))?);
+                        if !grid.contains_key(&next) && !self.censored_grid.contains(&next) {
+                            pending.insert(next);
+                        }
+                    }
+                }
+            }
+        }
+        // Refine each measured hit/miss crossing, including rotated boundaries.
+        for (&(x, y), &hit) in &grid {
+            if !hit {
+                continue;
+            }
+            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
+                if grid.get(&(x + dx, y + dy)) == Some(&false) {
+                    let p = [
+                        seed[0] + x as f64 * self.s.grid,
+                        seed[1] + y as f64 * self.s.grid,
+                    ];
+                    let q = if self.s.mode == Mode::FreeSurface {
+                        // Reuse exactly the lattice location whose source
+                        // record supplies this endpoint. Keep old replay's
+                        // arithmetic unchanged for historical modes.
+                        [
+                            seed[0] + (x + dx) as f64 * self.s.grid,
+                            seed[1] + (y + dy) as f64 * self.s.grid,
+                        ]
+                    } else {
+                        [
+                            p[0] + dx as f64 * self.s.grid,
+                            p[1] + dy as f64 * self.s.grid,
+                        ]
+                    };
+                    self.bisect(Phase::Boundary, p, q)?;
+                }
+            }
+        }
+        Ok(grid)
     }
 
     pub fn run(&mut self) -> Result<Rectangle, Progress> {
@@ -100,60 +197,7 @@ impl<'a> Survey<'a> {
             }
         }
 
-        // Eight-connected discovery includes diagonal connectivity for rotated
-        // stock. Neighbours are measured; unvisited space is never labelled air.
-        let mut grid = BTreeMap::new();
-        let mut pending = BTreeSet::from([(0_i32, 0_i32)]);
-        let mut last = (0_i32, 0_i32);
-        while !pending.is_empty() {
-            let cell = *pending
-                .iter()
-                .min_by_key(|&&(x, y)| {
-                    (i64::from(x) - i64::from(last.0)).pow(2)
-                        + (i64::from(y) - i64::from(last.1)).pow(2)
-                })
-                .unwrap();
-            pending.remove(&cell);
-            last = cell;
-            let xy = [
-                seed[0] + cell.0 as f64 * self.s.grid,
-                seed[1] + cell.1 as f64 * self.s.grid,
-            ];
-            if !self.s.inside_xy(xy) {
-                return Err(Progress::Invalid("The connected top grid reaches the plate envelope without an enclosing measured miss boundary. Partial contacts are retained; the footprint is not declared complete.".into()));
-            }
-            let hit = self.top(Phase::Grid, xy, false)?;
-            grid.insert(cell, hit);
-            if hit {
-                for dx in -1..=1 {
-                    for dy in -1..=1 {
-                        let next = (cell.0 + dx, cell.1 + dy);
-                        if !grid.contains_key(&next) {
-                            pending.insert(next);
-                        }
-                    }
-                }
-            }
-        }
-        // Refine each measured hit/miss crossing, including rotated boundaries.
-        for (&(x, y), &hit) in &grid {
-            if !hit {
-                continue;
-            }
-            for (dx, dy) in [(-1, 0), (1, 0), (0, -1), (0, 1)] {
-                if grid.get(&(x + dx, y + dy)) == Some(&false) {
-                    let p = [
-                        seed[0] + x as f64 * self.s.grid,
-                        seed[1] + y as f64 * self.s.grid,
-                    ];
-                    let q = [
-                        p[0] + dx as f64 * self.s.grid,
-                        p[1] + dy as f64 * self.s.grid,
-                    ];
-                    self.bisect(Phase::Boundary, p, q)?;
-                }
-            }
-        }
+        self.discover_grid()?;
         let rect = Rectangle::fit(&self.hits, &self.misses, self.s.grid)?;
         // Guess-and-check: fresh inside/outside touches at each fitted face's
         // midpoint, followed by an independent binary crossing measurement.

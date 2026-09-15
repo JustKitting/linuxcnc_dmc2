@@ -7,6 +7,7 @@ pub enum Mode {
     Surface,
     Rim,
     Outline,
+    FreeSurface,
 }
 impl Mode {
     pub fn read(value: f64) -> Result<Self, String> {
@@ -14,6 +15,7 @@ impl Mode {
             0.0 => Ok(Self::Surface),
             1.0 => Ok(Self::Rim),
             2.0 => Ok(Self::Outline),
+            3.0 => Ok(Self::FreeSurface),
             _ => Err("The retained mapper mode is unsupported. Preserve the capture and select a supported script before a new Run; Abort and Pendant Mode remain available.".into()),
         }
     }

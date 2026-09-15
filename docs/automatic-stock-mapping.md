@@ -1,4 +1,4 @@
-# Automatic rim trace
+# Automatic stock acquisition
 
 `Automatic rim trace` is the single automatic outline entry in Scripts. The
 duplicate automatic block-map entry and file have been removed. Start above the stock as before.
@@ -121,3 +121,70 @@ physical trace. No machine run or restart was performed for this change.
 An explicit fine re-touch allowance remains pending; see
 `docs/positional-mapper.md` for the continuing implementation list. Growing local
 search does not correct the fine-endpoint failure retained in the earlier run.
+
+## Automatic top map
+
+The Scripts catalog now also contains **Automatic top map**
+(`map-stock-surface.ngc`, retained mapper mode `3` / `FreeSurface`). This acquires
+top coverage for the irregular-stock estimator. The rim entry follows a contour
+at its retained height; the existing Surface Map samples an explicitly entered
+region. The new top entry discovers its sampled region from contact responses.
+
+Enter maximum descent from starting Z, top grid spacing, contact/miss bracket
+resolution and probe reach reserve. These required fields start unset. Mounted
+usable reach uses the same editable nominal probe reference as the other
+scripts. Grid spacing must permit an XY step between a corner and its cell
+centre; boundary resolution must fit the existing step/spacing constraints.
+The original plate/axis intersection and descent/reach bounds apply throughout.
+No stock width, length, rectangle orientation or nominal CAD shape is supplied.
+
+After retaining the reference top, the Rust planner searches each cardinal
+direction at offsets of one grid spacing, twice that spacing, and so on from
+the starting sample. The first measured miss brackets the last contact; binary
+refinement remains inside that bracket. X low is physical RIGHT / LinuxCNC -X;
+X high is physical LEFT / LinuxCNC +X. A contact at the retained plate envelope
+is censored coverage, with its original fine record retained. It is not an
+invented stock edge or outside miss.
+
+An eight-connected grid follows the seed's measured contact component. Measured
+hit/miss neighbour pairs receive bracket refinement. When all four corners of
+a grid cell contact, a fresh centre dip supplies an independent check. A centre
+miss causes refinement towards each contacting corner, exposing that sampled
+interior gap. This finite sampling does not discover every disconnected area,
+thin feature, overhang or gap smaller than the sampling spacing.
+
+The common `mapper-run` executor performs the existing coarse/release/fine
+cycle and returns fully to the original starting Z after every dip. It uses
+the retained mapper feeds: downward search, fine touch/release and clearance
+travel. It does not progressively lower the search floor. No new fine endpoint
+allowance, retry, homing, offset, restart or fault-clear action is introduced.
+The typed script declares its effects, prerequisites and Abort recovery. Clear
+Fault and Pendant Mode retain their independent operator paths.
+
+`--export-mapper` selects `dmc2.automatic-top-map.v1` for this mode. Original
+fine triggers remain in machine millimetres in the ledger and event CSV. JSON
+labels bracket endpoints as **requested work XY**, retains their hit/miss
+record identities and resolution, and lists plate contacts and unmeasured
+censored grid indices. Invalid capture cycles have no inferred coverage.
+Misses receive no invented height; no rectangle or closed stock volume is
+exported. A result record does not establish physical stock completeness.
+
+Import the retained ledger through Object Mapper and choose **Prepare 3D stock
+surfaces**. Fine cell-centre contacts are automatically `check` rows; other fine
+top contacts are `fit` rows. The normal surface request retains explicit probe
+calibration and fit settings. Independent checks do not drive the Huber fit.
+The ledger and original plate/feed companions follow the analysis and FreeCAD
+export. Historical modes retain their earlier interpretation and replay.
+
+Both standard binaries are built and installed. Twelve mapper numerical checks
+and 61 library checks reported passes. A synthetic file exercise retained 13
+fine contacts (nine fit, four check), four plate contacts and 16 censored grid
+neighbours. The fitted output retained nine local patches, original triggers
+and all source bytes in both exports; solid stock remained unknown. An
+interrupted-cycle export retained its diagnostic without inferred coverage.
+Readbacks are under `/home/kit/cnc-backups/mapper-autotop-f_vl8pdz`.
+These are source, build and file results. The CNC was not restarted or run;
+the new UI controls require a later UI relaunch. Physical acquisition and
+recovery remain unobserved. Miss-constrained surface support, multi-height
+coverage and material-directed follow-up execution remain in the continuing
+TODOs; this top acquisition is one part of that workflow.

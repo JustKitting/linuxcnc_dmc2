@@ -1,0 +1,29 @@
+%
+(DMC2 SCRIPT 1)
+(DMC2 EFFECTS axis-motion;digital-output;coordinate-state;external-command)
+(DMC2 REQUIRES running-session;estop-clear;machine-on;interpreter-idle;all-homed)
+(DMC2 RECOVERY abort-task)
+(DMC2 END)
+(Automatic top map: connected coverage, growing brackets and cell-centre checks.)
+(Every dip returns to original starting Z. Plate-censored space remains unknown.)
+(Physical RIGHT / LinuxCNC -X; physical LEFT / LinuxCNC +X.)
+o<stock-surface-preview> if [#<_task> EQ 0]
+    (PREVIEW,stop)
+    M2
+o<stock-surface-preview> endif
+o<stock-surface-valid> if [#<_hal[axisui.stock-surface-parameters-valid]> NE 1]
+    (ABORT,Enter the Automatic top map settings in Scripts before Run. Pendant Mode remains available.)
+o<stock-surface-valid> endif
+#<arg0> = [3]
+#<arg1> = [#<_hal[axisui.stock-surface-drop-mm]>]
+#<arg2> = [#<_hal[axisui.stock-surface-grid-mm]>]
+#<arg3> = [#<_hal[axisui.stock-surface-resolution-mm]>]
+#<arg4> = [#<_hal[axisui.stock-surface-usable-reach-mm]>]
+#<arg5> = [#<_hal[axisui.stock-surface-reach-reserve-mm]>]
+#<arg6> = [0]
+#<arg7> = [0]
+(The legacy side-depth and side-backoff arguments are unused in top mode.)
+(X increasing: physical LEFT / LinuxCNC +X; decreasing: physical RIGHT / LinuxCNC -X.)
+o<mapper-run> call [#<arg0>] [#<arg1>] [#<arg2>] [#<arg3>] [#<arg4>] [#<arg5>] [#<arg6>] [#<arg7>]
+M2
+%

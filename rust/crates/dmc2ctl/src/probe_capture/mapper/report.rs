@@ -33,6 +33,9 @@ pub(crate) fn export(path: &Path, require_result: bool) -> Result<(), String> {
     if settings.mode == Mode::Outline {
         return super::outline_report::export(path, &records, &settings, require_result);
     }
+    if settings.mode == Mode::FreeSurface {
+        return super::free_report::export(path, &records, &settings, require_result);
+    }
     let result = state::samples(&records, &settings, require_result).and_then(|samples| {
         let mut survey = Survey::new(&settings, &samples);
         match survey.run() {
